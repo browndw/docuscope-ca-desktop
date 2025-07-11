@@ -1,0 +1,77 @@
+# NOTE: This workflow should be placed in the TARGET repository (docuscope-ca-desktop)
+# NOT in the template repository (docuscope-ca-online)
+# 
+# The AndreasAugustin/actions-template-sync action works by:
+# 1. Running in the target repository
+# 2. Pulling changes from the source repository 
+# 3. Creating pull requests in the target repository
+#
+# TO USE THIS:
+# 1. Copy this file to: docuscope-ca-desktop/.github/workflows/template-sync.yml
+# 2. Copy .templatesyncignore to: docuscope-ca-desktop/.templatesyncignore
+# 3. Delete both files from docuscope-ca-online
+# 4. Set up TEMPLATE_SYNC_TOKEN secret in docuscope-ca-desktop
+
+name: Template Sync
+
+on:
+  schedule:
+    # Run monthly on the 1st at 00:00 UTC
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no actual changes)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  template-sync:
+    runs-on: ubuntu-latest
+    # This workflow should run in the target repository (docuscope-ca-desktop)
+    # It pulls changes from the source repository (docuscope-ca-online)
+    if: github.repository == 'browndw/docuscope-ca-desktop'
+    
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+    - name: Checkout target repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.TEMPLATE_SYNC_TOKEN }}
+    
+    - name: Template Sync from Online Repository
+      uses: AndreasAugustin/actions-template-sync@v2
+      with:
+        source_gh_token: ${{ secrets.TEMPLATE_SYNC_TOKEN }}
+        source_repo_path: browndw/docuscope-ca-online
+        upstream_branch: main
+        pr_title: "chore: sync with template repository"
+        pr_body: |
+          🤖 **Automated Template Sync**
+          
+          This PR updates the repository with the latest changes from the template repository.
+          
+          ## What's Changed
+          - Synchronized core webapp files
+          - Updated dependencies and documentation
+          - Maintained desktop-specific configurations
+          
+          ## Review Guidelines
+          - ✅ Check that desktop-specific files are not overwritten
+          - ✅ Verify Tauri configurations remain intact
+          - ✅ Test that the desktop app still builds correctly
+          - ✅ Review any conflicts in configuration files
+          
+          ## Template Repository
+          Source: [browndw/docuscope-ca-online](https://github.com/browndw/docuscope-ca-online)
+          Commit: ${TEMPLATE_GIT_HASH}
+          
+          ---
+          *This PR was automatically created by the template sync workflow.*
+        pr_reviewers: browndw
+        is_dry_run: ${{ github.event.inputs.dry_run == 'true' }}
+        template_sync_ignore_file_path: .templatesyncignore
