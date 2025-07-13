@@ -1,12 +1,15 @@
 # Desktop-specific files to ignore during template sync
 tests/**
-src-tauri/**
+tauri/**
+.streamlit/secrets/**
 .github/workflows/**
 package.json
 package-lock.json
 tauri.conf.json
-DESKTOP.md
+README.md
+DESKTOP_*.md
 desktop-specific-config.toml
+webapp/config/options.toml
 
 # Only sync these specific files and directories
 # Note: This action works with ignore patterns, so we list what to ignore
@@ -17,4 +20,3 @@ desktop-specific-config.toml
 # - LICENSE
 # - CHANGELOG.md
 # - CONTRIBUTING.md
-# - .streamlit/secrets.toml.template
