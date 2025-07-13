@@ -1,0 +1,37 @@
+[package]
+name = "docuscope-ca-desktop"
+version = "0.4.0"
+description = "Tauri wrapper for Docuscope CAC"
+authors = ["David Brown"]
+license = "APACHE-2.0"
+repository = ""
+edition = "2021"
+rust-version = "1.82"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.2", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "time"] }
+tauri = { version = "2.0.6", features = [] }
+tauri-plugin-shell = "2.0.2"
+reqwest = { version = "0.12.9", features = ["json"] }
+log = "0.4.22"
+env_logger = "0.10.2"
+sysinfo = "0.33"
+
+[profile.release]
+panic = "abort" # Strip expensive panic clean-up logic
+codegen-units = 1 # Compile crates one after another so the compiler can optimize better
+lto = true # Enables link to optimizations
+opt-level = "s" # Optimize for binary size
+strip = true # Remove debug symbols
+
