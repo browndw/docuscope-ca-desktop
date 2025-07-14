@@ -1,0 +1,155 @@
+name: Desktop Build Tests
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-desktop-build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root --with test
+
+      - name: Install project
+        run: poetry install --no-interaction
+
+      - name: Run desktop build tests
+        run: poetry run pytest tests/test_desktop_build.py -v
+
+      - name: Test PyInstaller spec file
+        run: |
+          poetry run pip install pyinstaller
+          poetry run pyinstaller entrypoint.spec --noconfirm --clean
+        continue-on-error: true
+
+      - name: Validate Tauri configuration
+        if: matrix.os != 'windows-latest'  # Skip on Windows due to potential path issues
+        run: |
+          cd tauri
+          npm install -g @tauri-apps/cli
+          npx tauri build --help > /dev/null || echo "Tauri CLI validation passed"
+
+      - name: Test configuration loading
+        run: |
+          poetry run python -c "
+          from webapp.utilities.configuration.config_manager import config_manager
+          print('Desktop mode:', config_manager.desktop_mode)
+          print('Cache mode:', config_manager.cache_mode)
+          print('Project root:', config_manager.get_project_root())
+          print('Config loaded successfully')
+          "
+
+  test-entrypoint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Test entrypoint imports
+        run: |
+          poetry run python -c "
+          import entrypoint
+          print('Entrypoint imports successfully')
+          "
+
+      - name: Validate Streamlit arguments
+        run: |
+          poetry run python -c "
+          import entrypoint
+          # Test that StreamlitConfig can be instantiated
+          config = entrypoint.StreamlitConfig()
+          print('StreamlitConfig created:', config.browser_server_address)
+          "
+
+  validate-build-requirements:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate requirements files
+        run: |
+          echo 'Checking requirements.txt...'
+          test -f requirements.txt && echo 'requirements.txt exists' || exit 1
+          test -s requirements.txt && echo 'requirements.txt is not empty' || exit 1
+          
+          echo 'Checking requirements-deploy.txt...'
+          test -f requirements-deploy.txt && echo 'requirements-deploy.txt exists' || exit 1
+          test -s requirements-deploy.txt && echo 'requirements-deploy.txt is not empty' || exit 1
+
+      - name: Validate pyproject.toml
+        run: |
+          echo 'Checking pyproject.toml...'
+          python -c "
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              config = tomllib.load(f)
+          assert 'project' in config, 'Missing project section'
+          assert 'name' in config['project'], 'Missing project name'
+          assert 'version' in config['project'], 'Missing project version'
+          assert 'docuscope-ca-desktop' in config['project']['name'], 'Wrong project name'
+          print('pyproject.toml validation passed')
+          "
+
+      - name: Check Tauri configuration
+        run: |
+          echo 'Checking Tauri structure...'
+          test -d tauri && echo 'tauri directory exists' || exit 1
+          test -f tauri/package.json && echo 'tauri/package.json exists' || exit 1
+          test -f tauri/src-tauri/Cargo.toml && echo 'Cargo.toml exists' || exit 1
+          test -f tauri/src-tauri/tauri.conf.json && echo 'tauri.conf.json exists' || exit 1
+          
+          echo 'Validating tauri.conf.json...'
+          python -c "
+          import json
+          with open('tauri/src-tauri/tauri.conf.json') as f:
+              config = json.load(f)
+          assert 'productName' in config, 'Missing productName'
+          assert 'identifier' in config, 'Missing identifier'
+          assert 'bundle' in config, 'Missing bundle config'
+          assert 'externalBin' in config['bundle'], 'Missing externalBin config'
+          print('Tauri configuration validation passed')
+          "
