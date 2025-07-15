@@ -79,6 +79,12 @@ jobs:
         if: runner.os != 'Windows'
         run: poetry run pytest tests/test_desktop_build.py -v --disable-warnings --tb=short -o addopts=""
 
+      - name: Cleanup .venv (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          if (Test-Path ".venv") { Remove-Item ".venv" -Recurse -Force }
+        shell: pwsh
+
       - name: Test PyInstaller spec file
         run: |
           poetry run pip install pyinstaller
