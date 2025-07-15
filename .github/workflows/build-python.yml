@@ -10,6 +10,7 @@ defaults:
 jobs:
   build-python-binary:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         include:
@@ -49,6 +50,16 @@ jobs:
           path: .venv
           key: venv-${{ runner.os }}-3.11.9-${{ hashFiles('**/poetry.lock') }}
 
+      - name: Cache PyInstaller build
+        uses: actions/cache@v3
+        with:
+          path: |
+            build/
+            dist/
+          key: pyinstaller-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('entrypoint.py', 'entrypoint.spec', 'requirements-deploy.txt') }}
+          restore-keys: |
+            pyinstaller-${{ runner.os }}-${{ matrix.target }}-
+
       - name: Install dependencies
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
         run: poetry install --no-interaction --no-root --with build
@@ -62,7 +73,40 @@ jobs:
           poetry run pip install pyinstaller
 
       - name: Create PyInstaller binary
-        run: poetry run pyinstaller entrypoint.spec
+        run: |
+          echo "Starting PyInstaller build..."
+          echo "This may take several minutes, please be patient..."
+          # Run PyInstaller with periodic progress updates
+          poetry run pyinstaller entrypoint.spec --log-level=WARN --noconfirm &
+          PYINSTALLER_PID=$!
+          
+          # Monitor progress
+          while kill -0 $PYINSTALLER_PID 2>/dev/null; do
+            echo "PyInstaller build still running... ($(date))"
+            sleep 30
+          done
+          
+          # Wait for the process to complete
+          wait $PYINSTALLER_PID
+          PYINSTALLER_EXIT_CODE=$?
+          
+          if [ $PYINSTALLER_EXIT_CODE -eq 0 ]; then
+            echo "PyInstaller build completed successfully"
+          else
+            echo "PyInstaller build failed with exit code $PYINSTALLER_EXIT_CODE"
+            exit $PYINSTALLER_EXIT_CODE
+          fi
+
+      - name: Verify binary was created
+        run: |
+          if [ -f "./dist/entrypoint/entrypoint" ]; then
+            echo "Binary created successfully"
+            ls -la ./dist/entrypoint/
+          else
+            echo "Binary not found!"
+            ls -la ./dist/
+            exit 1
+          fi
 
       - name: Import Apple Developer certificate (macOS only)
         if: matrix.os == 'macos-latest'
