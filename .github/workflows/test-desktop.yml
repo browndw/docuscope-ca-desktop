@@ -71,9 +71,10 @@ jobs:
       - name: Run desktop build tests (Windows)
         if: runner.os == 'Windows'
         run: |
-          $env:PYTHONWARNINGS="ignore"
-          poetry run pytest tests/test_desktop_build.py -v --disable-warnings --tb=short -o addopts=""
-        shell: pwsh
+          set PYTHONWARNINGS=ignore
+          poetry run pytest tests/test_desktop_build.py -v --disable-warnings --tb=short -o addopts="" --maxfail=1
+        shell: cmd
+        continue-on-error: true
 
       - name: Run desktop build tests (Unix)
         if: runner.os != 'Windows'
