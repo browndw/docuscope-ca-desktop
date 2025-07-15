@@ -72,6 +72,9 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           set PYTHONWARNINGS=ignore
+          set PYTHONIOENCODING=utf-8
+          set PYTHONUTF8=1
+          chcp 65001
           echo "Starting pytest execution..."
           poetry run pytest tests/test_desktop_build.py -v --disable-warnings --tb=short -o addopts="" --maxfail=1
           echo "Pytest completed with exit code: %ERRORLEVEL%"
@@ -81,14 +84,14 @@ jobs:
       - name: Debug Windows test failure
         if: runner.os == 'Windows'
         run: |
+          $OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          [Console]::InputEncoding = [Text.Encoding]::UTF8
           Write-Host "=== Debugging Windows test failure ==="
           Write-Host "Current directory: $(Get-Location)"
           Write-Host "Python version: $(python --version)"
           Write-Host "Poetry version: $(poetry --version)"
           Write-Host "Virtual environment status:"
           poetry env info
-          Write-Host "Installed packages:"
-          poetry show --tree
           Write-Host "Test file status:"
           if (Test-Path "tests/test_desktop_build.py") {
             Write-Host "Test file exists"
@@ -96,6 +99,7 @@ jobs:
           } else {
             Write-Host "Test file does not exist"
           }
+          Write-Host "Skipping package tree to avoid encoding issues"
         shell: pwsh
         continue-on-error: true
 
