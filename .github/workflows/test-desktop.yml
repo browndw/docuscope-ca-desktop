@@ -40,7 +40,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root --with test
+        run: poetry install --no-interaction --no-root --with dev
 
       - name: Install project
         run: poetry install --no-interaction
@@ -125,6 +125,7 @@ jobs:
           echo 'Checking pyproject.toml...'
           python -c "
           import tomllib
+          
           with open('pyproject.toml', 'rb') as f:
               config = tomllib.load(f)
           assert 'project' in config, 'Missing project section'
