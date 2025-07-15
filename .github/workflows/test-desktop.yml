@@ -84,6 +84,7 @@ jobs:
         run: |
           if (Test-Path ".venv") { Remove-Item ".venv" -Recurse -Force }
         shell: pwsh
+        continue-on-error: true
 
       - name: Test PyInstaller spec file
         run: |
