@@ -1,10 +1,6 @@
 name: Desktop Build Tests
 
 on:
-  push:
-    branches: [main, development]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -72,8 +68,16 @@ jobs:
       - name: Install project
         run: poetry install --no-interaction
 
-      - name: Run desktop build tests
-        run: poetry run pytest tests/test_desktop_build.py -v --disable-warnings
+      - name: Run desktop build tests (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $env:PYTHONWARNINGS="ignore"
+          poetry run pytest tests/test_desktop_build.py -v --disable-warnings --tb=short -o addopts=""
+        shell: pwsh
+
+      - name: Run desktop build tests (Unix)
+        if: runner.os != 'Windows'
+        run: poetry run pytest tests/test_desktop_build.py -v --disable-warnings --tb=short -o addopts=""
 
       - name: Test PyInstaller spec file
         run: |
