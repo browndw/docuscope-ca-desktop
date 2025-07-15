@@ -76,10 +76,25 @@ jobs:
           set PYTHONUTF8=1
           chcp 65001
           echo "Starting pytest execution..."
-          poetry run pytest tests/test_desktop_build.py -v --disable-warnings --tb=short -o addopts="" --maxfail=1
-          echo "Pytest completed with exit code: %ERRORLEVEL%"
+          poetry run python -m pytest tests/test_desktop_build.py -v --disable-warnings --tb=short -o addopts="" --maxfail=1 --junit-xml=test-results.xml
+          set PYTEST_EXIT_CODE=%ERRORLEVEL%
+          echo "Pytest completed with exit code: %PYTEST_EXIT_CODE%"
+          
+          if exist test-results.xml (
+            echo "Test results XML created successfully"
+            findstr /C:"tests=" test-results.xml
+          ) else (
+            echo "Test results XML not created"
+          )
+          
+          if %PYTEST_EXIT_CODE% EQU 0 (
+            echo "Tests passed - exiting with success"
+            exit /b 0
+          ) else (
+            echo "Tests failed - exiting with error code %PYTEST_EXIT_CODE%"
+            exit /b %PYTEST_EXIT_CODE%
+          )
         shell: cmd
-        continue-on-error: true
 
       - name: Debug Windows test failure
         if: runner.os == 'Windows'
