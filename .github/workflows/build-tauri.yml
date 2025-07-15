@@ -1,15 +1,7 @@
 name: Build Tauri App
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*.*.*"]
   workflow_dispatch:
-  # Trigger after python binary build completes
-  workflow_run:
-    workflows: ["Build Python Binary"]
-    types: [completed]
-    branches: [main]
 
 defaults:
   run:
