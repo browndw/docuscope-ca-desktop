@@ -1,0 +1,141 @@
+name: Build Python Binary
+
+on:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-python-binary:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary-name: docuscope-x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary-name: docuscope-x86_64-pc-windows-msvc.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary-name: docuscope-x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary-name: docuscope-aarch64-apple-darwin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11.11"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-3.11-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root --with build
+
+      - name: Build Python package
+        run: poetry build
+
+      - name: Install deployment requirements
+        run: |
+          poetry run pip install -r requirements-deploy.txt
+          poetry run pip install pyinstaller
+
+      - name: Create PyInstaller binary
+        run: poetry run pyinstaller entrypoint.spec
+
+      - name: Import Apple Developer certificate (macOS only)
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # Skip if certificate is not available
+          if [[ -z "$APPLE_CERTIFICATE_P12" ]]; then
+            echo "Apple Developer certificate not available, skipping code signing"
+            exit 0
+          fi
+          
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          
+          # Import certificate
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          
+          # Set partition list to allow codesign to access the key
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          
+          # Clean up
+          rm certificate.p12
+
+      - name: Sign Python binary (macOS only)
+        if: matrix.os == 'macos-latest'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+        run: |
+          # Skip if certificate is not available
+          if [[ -z "$APPLE_CERTIFICATE_P12" ]]; then
+            echo "Apple Developer certificate not available, skipping code signing"
+            exit 0
+          fi
+          
+          # Sign the binary with hardened runtime
+          codesign --force --verify --verbose --sign "$APPLE_SIGNING_IDENTITY" --options runtime ./dist/entrypoint/entrypoint
+          
+          # Verify signature
+          codesign --verify --verbose=2 ./dist/entrypoint/entrypoint
+
+      - name: Rename binary for target platform
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp ./dist/entrypoint/entrypoint.exe ./dist/${{ matrix.binary-name }}
+          else
+            cp ./dist/entrypoint/entrypoint ./dist/${{ matrix.binary-name }}
+          fi
+
+      - name: Upload Python package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-${{ matrix.target }}
+          path: dist/*.tar.gz
+          retention-days: 30
+
+      - name: Upload PyInstaller binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyinstaller-binary-${{ matrix.target }}
+          path: ./dist/${{ matrix.binary-name }}
+          retention-days: 30
+
+      - name: Upload PyInstaller directory (Windows only)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyinstaller-directory-${{ matrix.target }}
+          path: ./dist/entrypoint/
+          retention-days: 30
