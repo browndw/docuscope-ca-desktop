@@ -73,7 +73,7 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Run desktop build tests
-        run: poetry run pytest tests/test_desktop_build.py -v
+        run: poetry run pytest tests/test_desktop_build.py -v --disable-warnings
 
       - name: Test PyInstaller spec file
         run: |
