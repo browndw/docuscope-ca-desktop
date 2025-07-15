@@ -1,9 +1,9 @@
 [project]
 name = "docuscope-ca-desktop"
 version = "0.4.0"
-description = "An online version of the Docuscope CA tool for analyzing text."
+description = "A desktop version of the DocuScope CA tool for analyzing text."
 readme = "README.md"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.11,<3.12"
 keywords = ["nlp", "language"]
 authors = [
     { name = "David Brown", email = "dwb2@andrew.cmu.edu" }
@@ -13,7 +13,6 @@ maintainers = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -47,8 +46,8 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://browndw.github.io/docuscope-ca-online/"
-Homepage = "https://github.com/browndw/docuscope-ca-online"
+Documentation = "https://browndw.github.io/docuscope-docs/"
+Homepage = "https://github.com/browndw/docuscope-ca-desktop"
 
 [build-system]
 requires = ["poetry-core"]
@@ -65,18 +64,18 @@ find = { namespaces = false }
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra -q --strict-markers"
-testpaths = ["tests"]
+testpaths = ["tests/test_desktop_build.py"]
 markers = [
-    "integration: marks tests as integration tests",
-    "streamlit: marks tests as streamlit UI tests",
+    "desktop: marks tests as desktop-specific build tests",
+    "integration: marks tests as integration tests", 
     "slow: marks tests as slow running",
-    "ai: marks tests that require AI/LLM access"
+    "build: marks tests that validate build process"
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest>=7.0.0",
-    "pytest-mock>=3.10.0",
+    "pytest-mock>=3.11.0",
     "pytest-asyncio>=0.21.0",
     "pytest-xdist>=3.0.0",
     "pytest-cov>=4.0.0"
@@ -91,7 +90,7 @@ readme = "README.md"
 packages = [{include = "webapp"}]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.12"
+python = ">=3.11,<3.12"
 Authlib = "1.5.2"
 docuscospacy = "0.3.6"
 google-cloud-firestore = "2.20.2"
