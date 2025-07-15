@@ -3,6 +3,7 @@ tests/**
 tauri/**
 .streamlit/secrets/**
 .github/workflows/**
+pyproject.toml
 package.json
 package-lock.json
 tauri.conf.json
@@ -16,7 +17,6 @@ webapp/config/options.toml
 # The files we want to sync are:
 # - webapp/**
 # - requirements.txt
-# - pyproject.toml
 # - LICENSE
 # - CHANGELOG.md
 # - CONTRIBUTING.md
