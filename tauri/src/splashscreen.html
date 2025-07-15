@@ -10,17 +10,86 @@
     <div class="splash-container">
         <div class="logo-container">
             <div class="logo">
-                <h1>DocuScope CA</h1>
+                <h1>DocuScope Corpus Analysis</h1>
+                <h2>& Concordancer</h2>
                 <div class="subtitle">Desktop Edition</div>
             </div>
         </div>
         <div class="loading-container">
-            <div class="spinner"></div>
-            <div class="loading-text">Initializing Application...</div>
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-text" id="progress-text">0%</div>
+            </div>
+            <div class="loading-stages">
+                <div class="stage-indicator">
+                    <div class="stage-dots">
+                        <span class="dot active" id="dot-1"></span>
+                        <span class="dot" id="dot-2"></span>
+                        <span class="dot" id="dot-3"></span>
+                        <span class="dot" id="dot-4"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="loading-text" id="loading-text">Initializing Application...</div>
+            <div class="loading-details" id="loading-details">Starting DocuScope services</div>
         </div>
         <div class="footer">
             <div class="version">v0.4.0</div>
         </div>
     </div>
+    <script>
+        function updateProgress(progress, stage, message) {
+            const progressFill = document.getElementById('progress-fill');
+            const progressText = document.getElementById('progress-text');
+            const loadingText = document.getElementById('loading-text');
+            const loadingDetails = document.getElementById('loading-details');
+            
+            console.log(`Updating progress: ${progress}% - Stage ${stage} - ${message}`);
+            
+            // Update progress bar
+            progressFill.style.width = `${progress}%`;
+            progressText.textContent = `${progress}%`;
+            
+            // Update stage dots
+            const dots = document.querySelectorAll('.dot');
+            dots.forEach((dot, index) => {
+                dot.classList.toggle('active', index < stage);
+                dot.classList.toggle('completed', index < stage - 1);
+            });
+            
+            // Update text
+            if (message) {
+                loadingText.textContent = message;
+            }
+            
+            // Update details based on stage
+            const stageDetails = [
+                'Preparing application environment',
+                'Starting DocuScope services',
+                'Loading language models',
+                'Finalizing startup sequence'
+            ];
+            
+            if (stage >= 1 && stage <= 4) {
+                loadingDetails.textContent = stageDetails[stage - 1];
+            }
+        }
+
+        // Simulate initial progress
+        let simulatedProgress = 0;
+        const initialInterval = setInterval(() => {
+            simulatedProgress += Math.random() * 2;
+            if (simulatedProgress > 15) {
+                clearInterval(initialInterval);
+                simulatedProgress = 15;
+            }
+            updateProgress(Math.floor(simulatedProgress), 1, 'Initializing Application...');
+        }, 100);
+
+        // Make the function globally available for Tauri to call
+        window.updateProgress = updateProgress;
+    </script>
 </body>
 </html>
