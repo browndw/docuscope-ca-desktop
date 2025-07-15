@@ -88,12 +88,9 @@ jobs:
             
             rem Parse XML to check for actual test results
             findstr /C:"errors=\"0\"" test-results.xml >nul
-            set ERROR_CHECK=%ERRORLEVEL%
-            findstr /C:"failures=\"0\"" test-results.xml >nul
-            set FAILURE_CHECK=%ERRORLEVEL%
-            
-            if %ERROR_CHECK% EQU 0 (
-              if %FAILURE_CHECK% EQU 0 (
+            if %ERRORLEVEL% EQU 0 (
+              findstr /C:"failures=\"0\"" test-results.xml >nul
+              if %ERRORLEVEL% EQU 0 (
                 echo "XML shows no errors or failures - tests actually passed"
                 echo "Ignoring pytest exit code -1 as tests completed successfully"
                 exit /b 0
