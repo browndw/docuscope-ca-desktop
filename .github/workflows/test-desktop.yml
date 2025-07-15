@@ -30,20 +30,19 @@ jobs:
           version: latest
           virtualenvs-create: true
           virtualenvs-in-project: true
-          installer: pip
 
       - name: Configure Poetry PATH and verify (Windows)
         if: runner.os == 'Windows'
         run: |
-          $poetryPath = python -m site --user-base
-          $poetryScripts = "$poetryPath\Scripts"
-          echo "Poetry should be in: $poetryScripts"
+          # Poetry is installed to ~/.local/bin on Windows
+          $poetryPath = "$env:USERPROFILE\.local\bin"
+          echo "Poetry should be in: $poetryPath"
           
           # Add to PATH
-          echo "$poetryScripts" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "$poetryPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           
           # Also add to current session PATH
-          $env:PATH = "$poetryScripts;$env:PATH"
+          $env:PATH = "$poetryPath;$env:PATH"
           
           # Verify Poetry is accessible
           Write-Host "Checking Poetry installation..."
@@ -53,7 +52,7 @@ jobs:
       - name: Configure Poetry PATH (Unix)
         if: runner.os != 'Windows'
         run: |
-          echo "$(python -m site --user-base)/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
         shell: bash
 
       - name: Verify Poetry installation
