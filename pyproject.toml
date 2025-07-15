@@ -1,9 +1,9 @@
 [project]
-name = "docuscope-ca-desktop"
+name = "docuscope-ca-online"
 version = "0.4.0"
-description = "A desktop version of the DocuScope CA tool for analyzing text."
+description = "An online version of the Docuscope CA tool for analyzing text."
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11"
 keywords = ["nlp", "language"]
 authors = [
     { name = "David Brown", email = "dwb2@andrew.cmu.edu" }
@@ -42,16 +42,15 @@ dependencies = [
     "streamlit==1.45.1",
     "Unidecode==1.3.8",
     "XlsxWriter==3.2.2",
-    "pydantic-settings>=2.0.0",
 ]
 
 [project.urls]
-Documentation = "https://browndw.github.io/docuscope-docs/"
-Homepage = "https://github.com/browndw/docuscope-ca-desktop"
+Documentation = "https://browndw.github.io/docuscope-ca-online/"
+Homepage = "https://github.com/browndw/docuscope-ca-online"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=45", "setuptools-scm>=6.2", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 include-package-data = true
@@ -64,67 +63,19 @@ find = { namespaces = false }
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra -q --strict-markers"
-testpaths = ["tests/test_desktop_build.py"]
+testpaths = ["tests"]
 markers = [
-    "desktop: marks tests as desktop-specific build tests",
-    "integration: marks tests as integration tests", 
+    "integration: marks tests as integration tests",
+    "streamlit: marks tests as streamlit UI tests",
     "slow: marks tests as slow running",
-    "build: marks tests that validate build process"
+    "ai: marks tests that require AI/LLM access"
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest>=7.0.0",
-    "pytest-mock>=3.11.0",
+    "pytest-mock>=3.10.0",
     "pytest-asyncio>=0.21.0",
     "pytest-xdist>=3.0.0",
     "pytest-cov>=4.0.0"
 ]
-
-[tool.poetry]
-name = "docuscope-ca-desktop"
-version = "0.4.0"
-description = "A desktop version of the Docuscope CA tool for analyzing text."
-authors = ["David Brown <dwb2@andrew.cmu.edu>"]
-readme = "README.md"
-packages = [{include = "webapp"}]
-
-[tool.poetry.dependencies]
-python = ">=3.11,<3.12"
-Authlib = "1.5.2"
-docuscospacy = "0.3.6"
-google-cloud-firestore = "2.20.2"
-lingua-language-detector = "2.0.2"
-loguru = "0.7.3"
-kaleido = "0.2.1"
-matplotlib = "3.7.5"
-numpy = "1.26.4"
-openai = "1.66.5"
-pandas = "2.2.3"
-pandasai = "3.0.0b18"
-pandasai-openai = "0.1.5"
-plotly = "6.0.1"
-polars = "1.31.0"
-psutil = "7.0.0"
-python-docx = "1.1.2"
-RestrictedPython = "8.0.0"
-scikit-learn = "1.6.1"
-scipy = "1.10.1"
-seaborn = "0.12.2"
-spacy = "3.8.7"
-streamlit = "1.45.1"
-Unidecode = "1.3.8"
-XlsxWriter = "3.2.2"
-pydantic-settings = "^2.0.0"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.0.0"
-pytest-mock = "^3.10.0"
-pytest-asyncio = "^0.21.0"
-pytest-xdist = "^3.0.0"
-pytest-cov = "^4.0.0"
-pyinstaller = "^6.0.0"
-
-[tool.poetry.group.build.dependencies]
-git-cliff = "^2.3.0"
-pyinstaller = "^6.8.0"
