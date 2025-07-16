@@ -99,9 +99,9 @@ jobs:
 
       - name: Verify binary was created
         run: |
-          if [ -f "./dist/entrypoint/entrypoint" ]; then
+          if [ -f "./dist/entrypoint" ]; then
             echo "Binary created successfully"
-            ls -la ./dist/entrypoint/
+            ls -la ./dist/entrypoint
           else
             echo "Binary not found!"
             ls -la ./dist/
@@ -149,17 +149,17 @@ jobs:
           fi
           
           # Sign the binary with hardened runtime
-          codesign --force --verify --verbose --sign "$APPLE_SIGNING_IDENTITY" --options runtime ./dist/entrypoint/entrypoint
+          codesign --force --verify --verbose --sign "$APPLE_SIGNING_IDENTITY" --options runtime ./dist/entrypoint
           
           # Verify signature
-          codesign --verify --verbose=2 ./dist/entrypoint/entrypoint
+          codesign --verify --verbose=2 ./dist/entrypoint
 
       - name: Rename binary for target platform
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp ./dist/entrypoint/entrypoint.exe ./dist/${{ matrix.binary-name }}
+            cp ./dist/entrypoint.exe ./dist/${{ matrix.binary-name }}
           else
-            cp ./dist/entrypoint/entrypoint ./dist/${{ matrix.binary-name }}
+            cp ./dist/entrypoint ./dist/${{ matrix.binary-name }}
           fi
 
       - name: Upload Python package artifact
