@@ -66,16 +66,35 @@ jobs:
 
       - name: Download PyInstaller directory (Windows only)
         if: matrix.os == 'windows-latest'
+        continue-on-error: true
+        id: download-directory
         uses: actions/download-artifact@v4
         with:
           name: pyinstaller-directory-${{ matrix.target }}
           path: ./tauri/src-tauri/binaries/_internal/
 
+      - name: Check if PyInstaller directory was downloaded
+        if: matrix.os == 'windows-latest'
+        run: |
+          if [ -d "./tauri/src-tauri/binaries/_internal/" ] && [ "$(ls -A ./tauri/src-tauri/binaries/_internal/)" ]; then
+            echo "PyInstaller directory found and contains files"
+            echo "HAS_INTERNAL_DIR=true" >> $GITHUB_ENV
+          else
+            echo "PyInstaller directory not found or empty - using single file executable"
+            echo "HAS_INTERNAL_DIR=false" >> $GITHUB_ENV
+          fi
+
       - name: Copy binary to Tauri binaries directory
         run: |
           mkdir -p ./tauri/src-tauri/binaries/
-          cp ./temp-binary/${{ matrix.binary-name }} ./tauri/src-tauri/binaries/
-          chmod +x ./tauri/src-tauri/binaries/${{ matrix.binary-name }}
+          
+          # Copy the platform-specific binary and rename it to what Tauri expects
+          cp ./temp-binary/${{ matrix.binary-name }} ./tauri/src-tauri/binaries/docuscope
+          chmod +x ./tauri/src-tauri/binaries/docuscope
+          
+          # Debug: List the binaries directory
+          echo "Contents of binaries directory:"
+          ls -la ./tauri/src-tauri/binaries/
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
