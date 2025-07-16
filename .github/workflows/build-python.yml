@@ -1,6 +1,8 @@
 name: Build Python Binary
 
 on:
+  push:
+    tags: ["v*.*.*"]
   workflow_dispatch:
 
 defaults:
@@ -109,17 +111,19 @@ jobs:
           fi
 
       - name: Import Apple Developer certificate (macOS only)
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           # Skip if certificate is not available
           if [[ -z "$APPLE_CERTIFICATE_P12" ]]; then
             echo "Apple Developer certificate not available, skipping code signing"
             exit 0
           fi
+          
+          # Generate a temporary keychain password
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
           
           # Create temporary keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -137,7 +141,7 @@ jobs:
           rm certificate.p12
 
       - name: Sign Python binary (macOS only)
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
