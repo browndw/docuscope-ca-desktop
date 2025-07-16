@@ -244,7 +244,7 @@ jobs:
             
             if [[ -n "$SUBMISSION_ID" ]]; then
               echo "=== Monitoring Tauri app notarization progress ==="
-              echo "Checking status every 30 seconds..."
+              echo "Checking status every 60 seconds..."
               
               while true; do
                 STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
@@ -277,12 +277,12 @@ jobs:
                     exit 1
                     ;;
                   "In Progress")
-                    echo "$(date): Still processing... waiting 30 seconds"
-                    sleep 30
+                    echo "$(date): Still processing... waiting 60 seconds"
+                    sleep 60
                     ;;
                   *)
-                    echo "$(date): Unknown status '$STATUS', waiting 30 seconds"
-                    sleep 30
+                    echo "$(date): Unknown status '$STATUS', waiting 60 seconds"
+                    sleep 60
                     ;;
                 esac
               done
