@@ -15,7 +15,7 @@ defaults:
 jobs:
   build-tauri:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       matrix:
         include:
@@ -73,14 +73,21 @@ jobs:
           name: pyinstaller-directory-${{ matrix.target }}
           path: ./tauri/src-tauri/binaries/_internal/
 
-      - name: Check if PyInstaller directory was downloaded
+      - name: Check PyInstaller directory download result (Windows only)
         if: matrix.os == 'windows-latest'
         run: |
-          if [ -d "./tauri/src-tauri/binaries/_internal/" ] && [ "$(ls -A ./tauri/src-tauri/binaries/_internal/)" ]; then
-            echo "PyInstaller directory found and contains files"
-            echo "HAS_INTERNAL_DIR=true" >> $GITHUB_ENV
+          if [ "${{ steps.download-directory.outcome }}" == "success" ]; then
+            echo "PyInstaller directory artifact downloaded successfully"
+            if [ -d "./tauri/src-tauri/binaries/_internal/" ] && [ "$(ls -A ./tauri/src-tauri/binaries/_internal/)" ]; then
+              echo "PyInstaller directory found and contains files"
+              echo "HAS_INTERNAL_DIR=true" >> $GITHUB_ENV
+            else
+              echo "PyInstaller directory artifact exists but is empty"
+              echo "HAS_INTERNAL_DIR=false" >> $GITHUB_ENV
+            fi
           else
-            echo "PyInstaller directory not found or empty - using single file executable"
+            echo "PyInstaller directory artifact not found - this is normal for single-file executables"
+            echo "Using single-file executable mode"
             echo "HAS_INTERNAL_DIR=false" >> $GITHUB_ENV
           fi
 
