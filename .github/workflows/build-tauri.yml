@@ -2,6 +2,11 @@ name: Build Tauri App
 
 on:
   workflow_dispatch:
+  # Trigger after python binary build completes
+  workflow_run:
+    workflows: ["Build Python Binary"]
+    types: [completed]
+    branches: [main]
 
 defaults:
   run:
@@ -10,6 +15,7 @@ defaults:
 jobs:
   build-tauri:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       matrix:
         include:
@@ -88,17 +94,19 @@ jobs:
         run: pnpm install
 
       - name: Import Apple Developer certificate (macOS only)
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           # Skip if certificate is not available
           if [[ -z "$APPLE_CERTIFICATE_P12" ]]; then
             echo "Apple Developer certificate not available, skipping code signing setup"
             exit 0
           fi
+          
+          # Generate a temporary keychain password
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
           
           # Create temporary keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -127,7 +135,7 @@ jobs:
         run: pnpm tauri build --target ${{ matrix.target }}
 
       - name: Notarize macOS app (macOS only)
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -186,7 +194,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Tauri artifacts (macOS)
-        if: matrix.os == 'macos-latest'
+        if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: docuscope-ca-desktop-${{ matrix.target }}
