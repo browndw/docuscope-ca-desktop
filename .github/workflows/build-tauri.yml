@@ -106,7 +106,9 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
-          cache-dependency-path: tauri/pnpm-lock.yaml
+          cache-dependency-path: |
+            tauri/pnpm-lock.yaml
+            tauri/package.json
 
       - name: Install Tauri dependencies
         working-directory: tauri
