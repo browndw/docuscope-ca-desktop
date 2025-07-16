@@ -1,0 +1,98 @@
+name: Update README Download Links
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Get release information
+        id: release
+        run: |
+          # Get the latest release tag
+          LATEST_TAG=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          
+          # Get release assets
+          ASSETS=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.assets[] | .name')
+          echo "assets<<EOF" >> $GITHUB_OUTPUT
+          echo "$ASSETS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Update README download links
+        run: |
+          # Define the base URL for downloads
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.latest_tag }}"
+          
+          # Find the actual asset names from the release
+          ASSETS="${{ steps.release.outputs.assets }}"
+          
+          # Extract actual filenames with more flexible matching
+          WINDOWS_FILE=$(echo "$ASSETS" | grep -E "\.(exe|msi)$" | grep -v "\.app" | head -1)
+          MAC_INTEL_FILE=$(echo "$ASSETS" | grep -E "\.dmg$" | grep -E "(x86_64|intel)" | head -1)
+          MAC_ARM64_FILE=$(echo "$ASSETS" | grep -E "\.dmg$" | grep -E "(aarch64|arm64)" | head -1)
+          LINUX_DEB_FILE=$(echo "$ASSETS" | grep -E "\.deb$" | head -1)
+          LINUX_APPIMAGE_FILE=$(echo "$ASSETS" | grep -E "\.AppImage$" | head -1)
+          
+          # If we couldn't find specific files, try broader matches
+          if [ -z "$WINDOWS_FILE" ]; then
+            WINDOWS_FILE=$(echo "$ASSETS" | grep -E "\.(exe|msi)$" | head -1)
+          fi
+          if [ -z "$MAC_INTEL_FILE" ]; then
+            MAC_INTEL_FILE=$(echo "$ASSETS" | grep -E "\.dmg$" | head -1)
+          fi
+          if [ -z "$MAC_ARM64_FILE" ] && [ -n "$MAC_INTEL_FILE" ]; then
+            MAC_ARM64_FILE=$(echo "$ASSETS" | grep -E "\.dmg$" | tail -1)
+          fi
+          
+          # Update the README with actual download links
+          if [ -n "$WINDOWS_FILE" ]; then
+            sed -i "s|^\[windows\]:.*|[windows]: $BASE_URL/$WINDOWS_FILE|" README.md
+          fi
+          if [ -n "$MAC_INTEL_FILE" ]; then
+            sed -i "s|^\[mac-intel\]:.*|[mac-intel]: $BASE_URL/$MAC_INTEL_FILE|" README.md
+          fi
+          if [ -n "$MAC_ARM64_FILE" ]; then
+            sed -i "s|^\[mac-arm64\]:.*|[mac-arm64]: $BASE_URL/$MAC_ARM64_FILE|" README.md
+          fi
+          if [ -n "$LINUX_DEB_FILE" ]; then
+            sed -i "s|^\[linux-deb\]:.*|[linux-deb]: $BASE_URL/$LINUX_DEB_FILE|" README.md
+          fi
+          if [ -n "$LINUX_APPIMAGE_FILE" ]; then
+            sed -i "s|^\[linux-appimage\]:.*|[linux-appimage]: $BASE_URL/$LINUX_APPIMAGE_FILE|" README.md
+          fi
+          
+          # Debug output
+          echo "Updated README with the following links:"
+          echo "Windows: $BASE_URL/$WINDOWS_FILE"
+          echo "macOS Intel: $BASE_URL/$MAC_INTEL_FILE"
+          echo "macOS ARM64: $BASE_URL/$MAC_ARM64_FILE"
+          echo "Linux DEB: $BASE_URL/$LINUX_DEB_FILE"
+          echo "Linux AppImage: $BASE_URL/$LINUX_APPIMAGE_FILE"
+          
+          # List all available assets for debugging
+          echo "Available assets:"
+          echo "$ASSETS"
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Check if there are changes
+          if git diff --quiet README.md; then
+            echo "No changes to README.md"
+            exit 0
+          fi
+          
+          git add README.md
+          git commit -m "Update download links for release ${{ steps.release.outputs.latest_tag }}"
+          git push origin main
