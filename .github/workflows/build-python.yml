@@ -158,6 +158,105 @@ jobs:
           # Verify signature
           codesign --verify --verbose=2 ./dist/entrypoint
 
+      - name: Notarize Python binary (macOS only)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+        run: |
+          # Skip if certificate is not available
+          if [[ -z "$APPLE_CERTIFICATE_P12" ]]; then
+            echo "Apple Developer certificate not available, skipping notarization"
+            exit 0
+          fi
+          
+          echo "=== Starting Python binary notarization ==="
+          echo "Binary path: ./dist/entrypoint"
+          echo "Target: ${{ matrix.target }}"
+          echo "Timestamp: $(date)"
+          
+          # Create a zip file for notarization
+          echo "Creating zip file for notarization..."
+          ditto -c -k --keepParent ./dist/entrypoint "entrypoint-${{ matrix.target }}.zip"
+          echo "Zip file created: entrypoint-${{ matrix.target }}.zip ($(ls -lh 'entrypoint-${{ matrix.target }}.zip' | awk '{print $5}'))"
+          
+          # Submit for notarization
+          echo "=== Submitting Python binary for notarization ==="
+          echo "This should be faster than full app notarization"
+          echo "Apple ID: $APPLE_ID"
+          echo "Team ID: $APPLE_TEAM_ID"
+          echo "Submission time: $(date)"
+          echo ""
+          
+          # Submit without --wait first to get submission ID
+          echo "Submitting to Apple notarization service..."
+          SUBMISSION_OUTPUT=$(xcrun notarytool submit "entrypoint-${{ matrix.target }}.zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --output-format json)
+          
+          echo "Submission response:"
+          echo "$SUBMISSION_OUTPUT"
+          
+          # Extract submission ID
+          SUBMISSION_ID=$(echo "$SUBMISSION_OUTPUT" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+          echo "Submission ID: $SUBMISSION_ID"
+          
+          if [[ -n "$SUBMISSION_ID" ]]; then
+            echo "=== Monitoring Python binary notarization progress ==="
+            echo "Checking status every 30 seconds..."
+            
+            while true; do
+              STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" \
+                --output-format json)
+              
+              STATUS=$(echo "$STATUS_OUTPUT" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+              echo "$(date): Status = $STATUS"
+              
+              case "$STATUS" in
+                "Accepted")
+                  echo "=== Python binary notarization SUCCESSFUL ==="
+                  echo "Stapling notarization to binary..."
+                  xcrun stapler staple ./dist/entrypoint
+                  echo "Notarization stapled successfully"
+                  break
+                  ;;
+                "Rejected")
+                  echo "=== Python binary notarization FAILED ==="
+                  echo "Full status output:"
+                  echo "$STATUS_OUTPUT"
+                  echo "Getting detailed log..."
+                  xcrun notarytool log "$SUBMISSION_ID" \
+                    --apple-id "$APPLE_ID" \
+                    --password "$APPLE_PASSWORD" \
+                    --team-id "$APPLE_TEAM_ID"
+                  exit 1
+                  ;;
+                "In Progress")
+                  echo "$(date): Still processing... waiting 30 seconds"
+                  sleep 30
+                  ;;
+                *)
+                  echo "$(date): Unknown status '$STATUS', waiting 30 seconds"
+                  sleep 30
+                  ;;
+              esac
+            done
+          else
+            echo "ERROR: Could not extract submission ID from response"
+            exit 1
+          fi
+          
+          # Clean up
+          rm "entrypoint-${{ matrix.target }}.zip"
+          echo "=== Python binary notarization process completed ==="
+
       - name: Rename binary for target platform
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
