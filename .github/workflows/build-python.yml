@@ -182,6 +182,17 @@ jobs:
 
       - name: Upload PyInstaller directory (Windows only)
         if: matrix.os == 'windows-latest'
+        run: |
+          if [ -d "./dist/entrypoint/" ]; then
+            echo "PyInstaller directory found, uploading as artifact"
+            echo "HAS_DIRECTORY=true" >> $GITHUB_ENV
+          else
+            echo "PyInstaller directory not found, skipping directory upload"
+            echo "HAS_DIRECTORY=false" >> $GITHUB_ENV
+          fi
+
+      - name: Upload PyInstaller directory artifact (Windows only)
+        if: matrix.os == 'windows-latest' && env.HAS_DIRECTORY == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: pyinstaller-directory-${{ matrix.target }}
