@@ -88,9 +88,37 @@ jobs:
         run: |
           mkdir -p ./tauri/src-tauri/binaries/
           
-          # Copy the platform-specific binary and rename it to what Tauri expects
-          cp ./temp-binary/${{ matrix.binary-name }} ./tauri/src-tauri/binaries/docuscope
-          chmod +x ./tauri/src-tauri/binaries/docuscope
+          # Debug: Check what was downloaded
+          echo "Contents of temp-binary directory:"
+          ls -la ./temp-binary/
+          
+          # Check if the expected binary exists
+          if [[ ! -f "./temp-binary/${{ matrix.binary-name }}" ]]; then
+            echo "ERROR: Expected binary './temp-binary/${{ matrix.binary-name }}' not found!"
+            echo "Available files in temp-binary:"
+            find ./temp-binary/ -type f -ls
+            
+            # Try to find any executable files
+            echo "Looking for executable files:"
+            find ./temp-binary/ -type f -executable -ls
+            
+            # Check if there's a file with similar name
+            echo "All files in temp-binary:"
+            ls -la ./temp-binary/
+            exit 1
+          fi
+          
+          # Copy the binary with the exact name Tauri expects
+          # Tauri looks for binaries/docuscope-{target} based on the externalBin config
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            # Windows binaries need .exe extension
+            cp ./temp-binary/${{ matrix.binary-name }} ./tauri/src-tauri/binaries/docuscope-${{ matrix.target }}.exe
+            chmod +x ./tauri/src-tauri/binaries/docuscope-${{ matrix.target }}.exe
+          else
+            # Unix systems (macOS, Linux) don't need extension
+            cp ./temp-binary/${{ matrix.binary-name }} ./tauri/src-tauri/binaries/docuscope-${{ matrix.target }}
+            chmod +x ./tauri/src-tauri/binaries/docuscope-${{ matrix.target }}
+          fi
           
           # Debug: List the binaries directory
           echo "Contents of binaries directory:"
