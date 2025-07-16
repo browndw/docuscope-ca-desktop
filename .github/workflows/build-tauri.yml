@@ -201,23 +201,90 @@ jobs:
           APP_PATH=$(find ./tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.app" | head -1)
           
           if [[ -n "$APP_PATH" ]]; then
-            echo "Notarizing app at: $APP_PATH"
+            echo "=== Starting notarization process ==="
+            echo "App path: $APP_PATH"
+            echo "Target: ${{ matrix.target }}"
+            echo "Timestamp: $(date)"
             
             # Create a zip file for notarization
+            echo "Creating zip file for notarization..."
             ditto -c -k --keepParent "$APP_PATH" "DocuScope CA.zip"
+            echo "Zip file created: DocuScope CA.zip ($(ls -lh 'DocuScope CA.zip' | awk '{print $5}'))"
             
-            # Submit for notarization
-            xcrun notarytool submit "DocuScope CA.zip" \
+            # Submit for notarization with detailed feedback
+            echo "=== Submitting for notarization ==="
+            echo "This process can take anywhere from 1-30 minutes depending on Apple's service load"
+            echo "Apple ID: $APPLE_ID"
+            echo "Team ID: $APPLE_TEAM_ID"
+            echo "Submission time: $(date)"
+            echo ""
+            
+            # Submit without --wait first to get submission ID
+            echo "Submitting to Apple notarization service..."
+            SUBMISSION_OUTPUT=$(xcrun notarytool submit "DocuScope CA.zip" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
-              --wait
+              --output-format json)
             
-            # Staple the notarization
-            xcrun stapler staple "$APP_PATH"
+            echo "Submission response:"
+            echo "$SUBMISSION_OUTPUT"
+            
+            # Extract submission ID
+            SUBMISSION_ID=$(echo "$SUBMISSION_OUTPUT" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+            echo "Submission ID: $SUBMISSION_ID"
+            
+            if [[ -n "$SUBMISSION_ID" ]]; then
+              echo "=== Monitoring notarization progress ==="
+              echo "Checking status every 30 seconds..."
+              
+              while true; do
+                STATUS_OUTPUT=$(xcrun notarytool info "$SUBMISSION_ID" \
+                  --apple-id "$APPLE_ID" \
+                  --password "$APPLE_PASSWORD" \
+                  --team-id "$APPLE_TEAM_ID" \
+                  --output-format json)
+                
+                STATUS=$(echo "$STATUS_OUTPUT" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+                echo "$(date): Status = $STATUS"
+                
+                case "$STATUS" in
+                  "Accepted")
+                    echo "=== Notarization SUCCESSFUL ==="
+                    echo "Stapling notarization to app..."
+                    xcrun stapler staple "$APP_PATH"
+                    echo "Notarization stapled successfully"
+                    break
+                    ;;
+                  "Rejected")
+                    echo "=== Notarization FAILED ==="
+                    echo "Full status output:"
+                    echo "$STATUS_OUTPUT"
+                    echo "Getting detailed log..."
+                    xcrun notarytool log "$SUBMISSION_ID" \
+                      --apple-id "$APPLE_ID" \
+                      --password "$APPLE_PASSWORD" \
+                      --team-id "$APPLE_TEAM_ID"
+                    exit 1
+                    ;;
+                  "In Progress")
+                    echo "$(date): Still processing... waiting 30 seconds"
+                    sleep 30
+                    ;;
+                  *)
+                    echo "$(date): Unknown status '$STATUS', waiting 30 seconds"
+                    sleep 30
+                    ;;
+                esac
+              done
+            else
+              echo "ERROR: Could not extract submission ID from response"
+              exit 1
+            fi
             
             # Clean up
             rm "DocuScope CA.zip"
+            echo "=== Notarization process completed ==="
           else
             echo "No .app bundle found for notarization"
           fi
