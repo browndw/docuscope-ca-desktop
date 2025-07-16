@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "./copy-splash.sh && tsc && vite build",
+    "build": "node copy-splash.js && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"
   },
