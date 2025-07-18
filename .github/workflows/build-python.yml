@@ -12,7 +12,7 @@ defaults:
 jobs:
   build-python-binary:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 240
+    timeout-minutes: 480
     strategy:
       matrix:
         include:
