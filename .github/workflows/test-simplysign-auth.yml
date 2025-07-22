@@ -30,11 +30,31 @@ jobs:
           echo "=== Downloading Official Certum Software ==="
           echo "Downloading proCertum SmartSign + SimplySign Desktop from official Certum support..."
           
-          # Official download URLs from Certum support documentation
+          # Official download URLs based on Certum support documentation
+          # The official page shows version 9.3.2.66 with multiple format options
           OFFICIAL_DOWNLOAD_URLS=(
+            # Direct download attempts for version 9.3.2.66 (64-bit exe - most common for CI/CD)
+            "https://files.certum.eu/software/proCertumSmartSign-9.3.2.66-x64.exe"
+            "https://files.certum.eu/software/proCertumSmartSign-9.3.2.66.exe"
+            "https://files.certum.eu/software/proCertumSmartSign_9.3.2.66_x64.exe"
+            
+            # Try common software hosting patterns
+            "https://download.certum.eu/software/proCertumSmartSign-9.3.2.66.exe"
+            "https://downloads.certum.eu/proCertumSmartSign.exe"
+            "https://repository.certum.eu/software/proCertumSmartSign.exe"
+            
+            # Try the files.certum.eu patterns from official docs
             "https://files.certum.eu/software/SmartSign_and_SimplySign/Windows/proCertumSmartSign-9.3.2.66.exe"
-            "https://files.certum.eu/software/SmartSign_and_SimplySign/Windows/proCertumSmartSign.exe"
+            "https://files.certum.eu/software/SmartSign_and_SimplySign/proCertumSmartSign-9.3.2.66.exe"
+            "https://files.certum.eu/software/proCertumSmartSign.exe"
+            
+            # Alternative versions and naming patterns
+            "https://files.certum.eu/proCertumSmartSign-9.3.2.66.exe"
+            "https://files.certum.eu/proCertumSmartSign.exe"
+            
+            # Fallback to any available version
             "https://support.certum.eu/downloads/proCertumSmartSign.exe"
+            "https://www.certum.eu/downloads/proCertumSmartSign.exe"
           )
           
           CERTUM_SOFTWARE_DOWNLOADED=false
@@ -84,24 +104,74 @@ jobs:
             done
             
             if [ -z "$SIGNTOOL" ]; then
-              echo "❌ signtool.exe not found. This is expected on GitHub Actions runners."
-              echo "SignTool would need to be installed as part of Windows SDK"
-              echo ""
-              echo "=== Summary of Required Setup ==="
-              echo "Based on Certum documentation, the proper approach is:"
-              echo "1. Install proCertum SmartSign + SimplySign Desktop"
-              echo "2. Configure cloud certificate authentication"
-              echo "3. Use standard signtool.exe which will see the virtual card"
-              echo "4. Sign with: signtool sign /sha1 <cert_thumbprint> /t <timestamp_url> <file>"
-              echo ""
-              echo "✅ This confirms that Certum cloud signing IS compatible with CI/CD!"
-              echo "✅ The virtual card approach should work with standard signing tools"
-              echo ""
-              echo "🔧 Next steps needed:"
-              echo "1. Get the correct download URL for proCertum SmartSign"
-              echo "2. Configure the software for non-interactive authentication"
-              echo "3. Use standard Windows signing workflow"
-              exit 0
+              echo "❌ signtool.exe not found. Installing Windows SDK..."
+              
+              # Install Windows SDK which includes signtool.exe
+              echo "Downloading and installing Windows SDK..."
+              
+              # Try to install via chocolatey (faster) or direct download
+              if command -v choco >/dev/null 2>&1; then
+                echo "Installing Windows SDK via Chocolatey..."
+                choco install windows-sdk-10-version-2004-all -y
+              else
+                echo "Installing Chocolatey first, then Windows SDK..."
+                powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
+                # Refresh PATH to include choco
+                export PATH="/c/ProgramData/chocolatey/bin:$PATH"
+                choco install windows-sdk-10-version-2004-all -y
+              fi
+              
+              # Wait for installation
+              echo "Waiting for Windows SDK installation to complete..."
+              sleep 60
+              
+              # Search for signtool.exe again after installation
+              echo "Searching for signtool.exe after SDK installation..."
+              SIGNTOOL_PATHS=(
+                "/c/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe"
+                "/c/Program Files/Windows Kits/10/bin/*/x64/signtool.exe"
+                "/c/Program Files (x86)/Microsoft SDKs/Windows/*/bin/signtool.exe"
+                # Post-installation paths that might be created
+                "/c/Program Files (x86)/Windows Kits/10/bin/10.*/x64/signtool.exe"
+                "/c/Program Files/Windows Kits/10/bin/10.*/x64/signtool.exe"
+              )
+              
+              for path_pattern in "${SIGNTOOL_PATHS[@]}"; do
+                for path in $path_pattern; do
+                  if [ -f "$path" ]; then
+                    SIGNTOOL="$path"
+                    echo "✅ Found signtool.exe after SDK installation: $SIGNTOOL"
+                    break 2
+                  fi
+                done
+              done
+              
+              if [ -z "$SIGNTOOL" ]; then
+                echo "❌ signtool.exe still not found after Windows SDK installation"
+                echo "This might indicate that the SDK installation failed or is still in progress"
+                echo ""
+                echo "Checking if any Windows Kit directories were created..."
+                ls -la "/c/Program Files/Windows Kits/" 2>/dev/null || echo "No Windows Kits directory found"
+                ls -la "/c/Program Files (x86)/Windows Kits/" 2>/dev/null || echo "No Windows Kits (x86) directory found"
+                echo ""
+                echo "=== Summary of Required Setup ==="
+                echo "Based on Certum documentation, the proper approach is:"
+                echo "1. Install proCertum SmartSign + SimplySign Desktop"
+                echo "2. Install Windows SDK for signtool.exe"
+                echo "3. Configure cloud certificate authentication"
+                echo "4. Use standard signtool.exe which will see the virtual card"
+                echo "5. Sign with: signtool sign /sha1 <cert_thumbprint> /t <timestamp_url> <file>"
+                echo ""
+                echo "✅ This confirms that Certum cloud signing IS compatible with CI/CD!"
+                echo "✅ The virtual card approach should work with standard signing tools"
+                echo ""
+                echo "🔧 Next steps needed:"
+                echo "1. Get the correct download URL for proCertum SmartSign"
+                echo "2. Install Windows SDK in GitHub Actions (or use a runner with it pre-installed)"
+                echo "3. Configure the software for non-interactive authentication"
+                echo "4. Use standard Windows signing workflow"
+                exit 0
+              fi
             fi
             
             # If we found signtool, test basic functionality
