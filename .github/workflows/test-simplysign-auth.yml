@@ -1,0 +1,99 @@
+name: Test Certum SimplySign Authentication
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_only:
+        description: 'Test authentication methods only'
+        required: false
+        default: 'true'
+
+jobs:
+  test-simplysign:
+    runs-on: windows-latest
+    steps:
+      - name: Test SimplySign Authentication Methods
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+          CERTUM_API_TOKEN: ${{ secrets.CERTUM_API_TOKEN }}
+        run: |
+          echo "=== Testing Current SimplySign Authentication ==="
+          
+          # Install SimplySign client
+          echo "Installing SimplySign client..."
+          curl -L "https://www.certum.eu/certum/cert,offer_SimplySign_desktop.xml" -o SimplySignDesktop.exe
+          ./SimplySignDesktop.exe /S
+          
+          # Wait for installation
+          sleep 15
+          
+          # Find SimplySign CLI
+          SIMPLYSIGN_PATH=""
+          if [ -f "C:/Program Files/Certum/SimplySign Desktop/SimplySignCLI.exe" ]; then
+            SIMPLYSIGN_PATH="C:/Program Files/Certum/SimplySign Desktop/SimplySignCLI.exe"
+          elif [ -f "C:/Program Files (x86)/Certum/SimplySign Desktop/SimplySignCLI.exe" ]; then
+            SIMPLYSIGN_PATH="C:/Program Files (x86)/Certum/SimplySign Desktop/SimplySignCLI.exe"
+          else
+            echo "ERROR: SimplySign CLI not found"
+            exit 1
+          fi
+          
+          echo "Found SimplySign CLI at: $SIMPLYSIGN_PATH"
+          
+          # Test CLI capabilities
+          echo ""
+          echo "=== SimplySign CLI Help ==="
+          "$SIMPLYSIGN_PATH" --help || echo "No general help available"
+          
+          echo ""
+          echo "=== SimplySign Auth Help ==="
+          "$SIMPLYSIGN_PATH" auth --help || echo "No auth help available"
+          
+          echo ""
+          echo "=== SimplySign Version ==="
+          "$SIMPLYSIGN_PATH" --version || "$SIMPLYSIGN_PATH" version || echo "No version command"
+          
+          # Test authentication methods
+          echo ""
+          echo "=== Testing Authentication Methods ==="
+          
+          if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" ]]; then
+            echo "Testing Method 1: Username + Password only"
+            if "$SIMPLYSIGN_PATH" auth --username "$CERTUM_USERNAME" --password "$CERTUM_PASSWORD"; then
+              echo "✅ Method 1 SUCCESS: Username + Password"
+            else
+              echo "❌ Method 1 FAILED: Username + Password"
+            fi
+            
+            if [[ -n "$CERTUM_API_TOKEN" ]]; then
+              echo ""
+              echo "Testing Method 2: Username + Password + API Token"
+              if "$SIMPLYSIGN_PATH" auth --username "$CERTUM_USERNAME" --password "$CERTUM_PASSWORD" --api-token "$CERTUM_API_TOKEN"; then
+                echo "✅ Method 2 SUCCESS: Username + Password + API Token"
+              else
+                echo "❌ Method 2 FAILED: Username + Password + API Token"
+              fi
+            else
+              echo "No API token provided, skipping Method 2"
+            fi
+            
+            if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+              echo ""
+              echo "Testing Method 3: Certificate SHA1 only"
+              if "$SIMPLYSIGN_PATH" auth --certificate-sha1 "$CERTUM_CERTIFICATE_SHA1"; then
+                echo "✅ Method 3 SUCCESS: Certificate SHA1"
+              else
+                echo "❌ Method 3 FAILED: Certificate SHA1"
+              fi
+            else
+              echo "No certificate SHA1 provided, skipping Method 3"
+            fi
+          else
+            echo "Missing username/password, cannot test authentication"
+          fi
+          
+          echo ""
+          echo "=== Test Complete ==="
+          echo "Check the output above to see which authentication method works"
