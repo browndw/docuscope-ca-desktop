@@ -13,6 +13,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Test SimplySign Authentication Methods
+        shell: bash
         env:
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
