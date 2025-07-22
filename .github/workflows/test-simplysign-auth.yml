@@ -69,17 +69,61 @@ jobs:
               # Create a dummy file to test signing
               echo "test content" > test_file.txt
               
-              # Test cloud signing with jsign
-              java -jar jsign.jar \
-                --storetype DIGICERTONE \
-                --keystore "https://clientauth.one.digicert.com/signingmanager/api/v1" \
-                --alias "$CERTUM_CERTIFICATE_SHA1" \
-                --username "$CERTUM_USERNAME" \
-                --password "$CERTUM_PASSWORD" \
-                --tsaurl "http://time.certum.pl" \
-                test_file.txt 2>&1 || echo "jsign cloud signing test completed (errors expected for test file)"
+              # Check jsign help first
+              echo "Checking jsign available options..."
+              java -jar jsign.jar --help | grep -E "(username|user|password|pass|certum|ssl|cloud)" || echo "No obvious cloud signing options found"
               
-              echo "✅ Cloud signing configuration appears to be set up correctly"
+              echo ""
+              echo "Testing different jsign parameter combinations for Certum cloud signing..."
+              
+              # Test Method 1: Try SSL keystore approach (common for cloud HSM)
+              echo "Method 1: SSL keystore approach"
+              java -jar jsign.jar \
+                --storetype PKCS11 \
+                --keystore "https://www.certum.eu/api/simplysign" \
+                --storepass "$CERTUM_PASSWORD" \
+                --alias "$CERTUM_CERTIFICATE_SHA1" \
+                --tsaurl "http://time.certum.pl" \
+                test_file.txt 2>&1 && echo "✅ Method 1 SUCCESS" || echo "❌ Method 1 failed"
+              
+              # Test Method 2: Try with different keystore URL
+              echo ""
+              echo "Method 2: Alternative keystore URL"
+              java -jar jsign.jar \
+                --storetype PKCS11 \
+                --keystore "https://api.certum.eu/simplysign/v1" \
+                --storepass "$CERTUM_USERNAME:$CERTUM_PASSWORD" \
+                --alias "$CERTUM_CERTIFICATE_SHA1" \
+                --tsaurl "http://time.certum.pl" \
+                test_file.txt 2>&1 && echo "✅ Method 2 SUCCESS" || echo "❌ Method 2 failed"
+              
+              # Test Method 3: Try ESSL approach (if Certum uses eSign protocol)
+              echo ""
+              echo "Method 3: eSSL protocol approach"
+              java -jar jsign.jar \
+                --storetype ESSL \
+                --keystore "https://api.certum.eu" \
+                --storepass "$CERTUM_USERNAME" \
+                --keypass "$CERTUM_PASSWORD" \
+                --alias "$CERTUM_CERTIFICATE_SHA1" \
+                --tsaurl "http://time.certum.pl" \
+                test_file.txt 2>&1 && echo "✅ Method 3 SUCCESS" || echo "❌ Method 3 failed"
+              
+              # Test Method 4: Basic PKCS12 cloud approach
+              echo ""
+              echo "Method 4: Cloud PKCS12 approach"
+              java -jar jsign.jar \
+                --storetype PKCS12 \
+                --keystore "certum-cloud" \
+                --storepass "$CERTUM_USERNAME:$CERTUM_PASSWORD" \
+                --alias "$CERTUM_CERTIFICATE_SHA1" \
+                --tsaurl "http://time.certum.pl" \
+                test_file.txt 2>&1 && echo "✅ Method 4 SUCCESS" || echo "❌ Method 4 failed"
+              
+              echo ""
+              echo "=== jsign Testing Complete ==="
+              echo "If any method succeeded, we can use jsign for code signing."
+              echo "If all failed, we may need to find the correct Certum cloud signing API endpoint."
             else
               echo "❌ Missing required credentials for cloud signing test"
             fi
