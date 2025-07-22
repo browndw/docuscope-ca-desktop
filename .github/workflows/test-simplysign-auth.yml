@@ -202,47 +202,153 @@ jobs:
           echo "=== Installing Official proCertum SmartSign + SimplySign Desktop ==="
           echo "Installing Certum software with silent installation..."
           
-          # Install silently
-          ./"$CERTUM_INSTALLER" /S /silent /quiet
+          # First, let's check what type of installer we have
+          echo "Checking installer type..."
+          file "$CERTUM_INSTALLER" || echo "File type detection not available"
           
-          # Wait for installation
-          echo "Waiting for installation to complete..."
-          sleep 30
+          echo "Installer size: $(ls -lh "$CERTUM_INSTALLER" | awk '{print $5}')"
           
-          # Look for installed software
+          # Try multiple silent installation approaches with timeout
           echo ""
-          echo "=== Checking Installation Results ==="
+          echo "Attempting silent installation (with 5-minute timeout)..."
           
-          # Check for proCertum SmartSign installation
-          PROCERTUM_PATHS=(
-            "C:/Program Files/Certum/proCertum SmartSign"
-            "C:/Program Files (x86)/Certum/proCertum SmartSign"
-            "C:/Program Files/Asseco/proCertum SmartSign"
-            "C:/Program Files (x86)/Asseco/proCertum SmartSign"
+          # Method 1: Standard NSIS silent install
+          echo "Method 1: NSIS silent installation (/S)"
+          timeout 300 ./"$CERTUM_INSTALLER" /S &
+          INSTALL_PID=$!
+          
+          # Wait and check if process completes
+          sleep 10
+          if kill -0 $INSTALL_PID 2>/dev/null; then
+            echo "Installation still running after 10 seconds..."
+            sleep 30
+            if kill -0 $INSTALL_PID 2>/dev/null; then
+              echo "Installation still running after 40 seconds..."
+              sleep 60
+              if kill -0 $INSTALL_PID 2>/dev/null; then
+                echo "Installation taking longer than expected (100+ seconds)"
+                echo "Waiting additional 2 minutes before timeout..."
+                wait $INSTALL_PID 2>/dev/null || echo "Installation process ended"
+              else
+                echo "Installation completed within 100 seconds"
+              fi
+            else
+              echo "Installation completed within 40 seconds"
+            fi
+          else
+            echo "Installation completed within 10 seconds"
+          fi
+          
+          # Check if installation was successful
+          echo ""
+          echo "Checking installation results after Method 1..."
+          
+          # Check for SimplySign Desktop installation paths
+          SIMPLYSIGN_PATHS=(
+            "C:/Program Files/Certum/SimplySign Desktop"
+            "C:/Program Files (x86)/Certum/SimplySign Desktop"
+            "C:/Program Files/Asseco/SimplySign Desktop"
+            "C:/Program Files (x86)/Asseco/SimplySign Desktop"
+            "C:/Program Files/SimplySign Desktop"
+            "C:/Program Files (x86)/SimplySign Desktop"
           )
           
-          PROCERTUM_INSTALLED=false
-          for path in "${PROCERTUM_PATHS[@]}"; do
-            echo "Checking for installation at: $path"
+          SIMPLYSIGN_INSTALLED=false
+          for path in "${SIMPLYSIGN_PATHS[@]}"; do
             if [ -d "$path" ]; then
-              echo "✅ Found proCertum SmartSign installation: $path"
-              ls -la "$path" || echo "Could not list directory contents"
-              PROCERTUM_INSTALLED=true
+              echo "✅ Found SimplySign Desktop installation: $path"
+              ls -la "$path" 2>/dev/null || echo "Could not list directory contents"
+              SIMPLYSIGN_INSTALLED=true
               break
             fi
           done
           
-          if [ "$PROCERTUM_INSTALLED" = true ]; then
-            echo "✅ proCertum SmartSign appears to be installed successfully"
+          if [ "$SIMPLYSIGN_INSTALLED" = false ]; then
+            echo "Method 1 did not result in visible installation. Trying Method 2..."
+            echo ""
+            echo "Method 2: Alternative silent parameters"
+            timeout 300 ./"$CERTUM_INSTALLER" /SILENT /NORESTART &
+            INSTALL_PID2=$!
+            sleep 60
+            if kill -0 $INSTALL_PID2 2>/dev/null; then
+              echo "Method 2 still running, terminating and trying Method 3..."
+              kill $INSTALL_PID2 2>/dev/null || true
+              
+              echo ""
+              echo "Method 3: MSI-style silent installation"
+              timeout 300 ./"$CERTUM_INSTALLER" /quiet /norestart &
+              INSTALL_PID3=$!
+              sleep 60
+              if kill -0 $INSTALL_PID3 2>/dev/null; then
+                echo "Method 3 taking too long, terminating..."
+                kill $INSTALL_PID3 2>/dev/null || true
+                echo "⚠️ All silent installation methods timed out or failed"
+              else
+                echo "Method 3 completed"
+              fi
+            else
+              echo "Method 2 completed"
+            fi
+          fi
+          
+          # Wait for any final installation processes
+          echo "Waiting briefly for any background installation processes..."
+          sleep 15
+          
+          # Final check for any Certum software installation
+          echo ""
+          echo "=== Final Installation Check ==="
+          
+          # Check for ALL possible Certum installation paths
+          ALL_CERTUM_PATHS=(
+            "C:/Program Files/Certum/SimplySign Desktop"
+            "C:/Program Files (x86)/Certum/SimplySign Desktop"
+            "C:/Program Files/Certum/proCertum SmartSign"
+            "C:/Program Files (x86)/Certum/proCertum SmartSign"
+            "C:/Program Files/Asseco/SimplySign Desktop"
+            "C:/Program Files (x86)/Asseco/SimplySign Desktop"
+            "C:/Program Files/Asseco/proCertum SmartSign"
+            "C:/Program Files (x86)/Asseco/proCertum SmartSign"
+            "C:/Program Files/SimplySign Desktop"
+            "C:/Program Files (x86)/SimplySign Desktop"
+          )
+          
+          CERTUM_SOFTWARE_INSTALLED=false
+          INSTALLED_PATH=""
+          
+          for path in "${ALL_CERTUM_PATHS[@]}"; do
+            echo "Checking for installation at: $path"
+            if [ -d "$path" ]; then
+              echo "✅ Found Certum software installation: $path"
+              ls -la "$path" 2>/dev/null || echo "Could not list directory contents"
+              CERTUM_SOFTWARE_INSTALLED=true
+              INSTALLED_PATH="$path"
+              break
+            fi
+          done
+          
+          if [ "$CERTUM_SOFTWARE_INSTALLED" = true ]; then
+            echo ""
+            echo "✅ Certum software appears to be installed successfully at: $INSTALLED_PATH"
             echo ""
             echo "=== Testing Virtual Card Functionality ==="
             echo "According to Certum documentation, SimplySign Desktop should now"
             echo "emulate a cryptographic card that works with standard tools"
             echo ""
+            
+            # Look for any installed executables
+            echo "Looking for Certum executables..."
+            find "$INSTALLED_PATH" -name "*.exe" -type f 2>/dev/null | head -10 || echo "No executables found or search failed"
+            
+            echo ""
             echo "Testing if certificate is available in Windows certificate store..."
             
             # Check Windows certificate store for the certificate
-            powershell -Command "Get-ChildItem -Path 'Cert:\CurrentUser\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' } | Format-Table Subject, Thumbprint, NotAfter"
+            if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+              powershell -Command "Get-ChildItem -Path 'Cert:\CurrentUser\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' } | Format-Table Subject, Thumbprint, NotAfter" || echo "Certificate store check failed"
+            else
+              echo "CERTUM_CERTIFICATE_SHA1 not provided, skipping certificate store check"
+            fi
             
             echo ""
             echo "✅ Installation completed successfully!"
@@ -250,9 +356,31 @@ jobs:
             echo "✅ Standard signtool.exe should be able to access the certificate"
             
           else
-            echo "❌ proCertum SmartSign installation not detected"
+            echo ""
+            echo "❌ No Certum software installation detected at any expected location"
+            echo ""
             echo "This could mean:"
-            echo "1. Installation is still in progress"
-            echo "2. Installation path is different than expected"
-            echo "3. Silent installation parameters need adjustment"
+            echo "1. Installation requires administrator privileges"
+            echo "2. Installation requires interactive user confirmation"
+            echo "3. Silent installation parameters are incorrect for this installer"
+            echo "4. Installation completed but uses a different directory structure"
+            echo ""
+            echo "Let's check if any Certum-related files were created anywhere..."
+            
+            # Search for any Certum-related directories
+            echo "Searching for any Certum directories in Program Files..."
+            find "/c/Program Files" -type d -iname "*certum*" 2>/dev/null || echo "No Certum directories found in Program Files"
+            find "/c/Program Files (x86)" -type d -iname "*certum*" 2>/dev/null || echo "No Certum directories found in Program Files (x86)"
+            
+            echo "Searching for any SimplySign directories..."
+            find "/c/Program Files" -type d -iname "*simply*" 2>/dev/null || echo "No SimplySign directories found in Program Files"
+            find "/c/Program Files (x86)" -type d -iname "*simply*" 2>/dev/null || echo "No SimplySign directories found in Program Files (x86)"
+            
+            echo ""
+            echo "=== Alternative Approach: Manual Configuration ==="
+            echo "Since silent installation may not work in CI/CD, we could:"
+            echo "1. Extract files from the installer manually"
+            echo "2. Use portable versions if available"
+            echo "3. Configure the software differently for CI/CD use"
+            echo "4. Use Windows Certificate Store directly without SimplySign Desktop"
           fi
