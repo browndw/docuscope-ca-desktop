@@ -30,45 +30,43 @@ jobs:
           echo "=== Downloading Official Certum Software ==="
           echo "Downloading proCertum SmartSign + SimplySign Desktop from official Certum support..."
           
-          # Official download URLs based on Certum support documentation
-          # The official page shows version 9.3.2.66 with multiple format options
+          # Official download URLs based on the pattern you found!
+          # Example: https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-64-bit.exe
           OFFICIAL_DOWNLOAD_URLS=(
-            # Direct download attempts for version 9.3.2.66 (64-bit exe - most common for CI/CD)
-            "https://files.certum.eu/software/proCertumSmartSign-9.3.2.66-x64.exe"
-            "https://files.certum.eu/software/proCertumSmartSign-9.3.2.66.exe"
-            "https://files.certum.eu/software/proCertumSmartSign_9.3.2.66_x64.exe"
+            # CORRECT PATTERN - SimplySignDesktop (not proCertumSmartSign!)
+            "https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-64-bit.exe"
+            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-64-bit.exe"
             
-            # Try common software hosting patterns
-            "https://download.certum.eu/software/proCertumSmartSign-9.3.2.66.exe"
-            "https://downloads.certum.eu/proCertumSmartSign.exe"
-            "https://repository.certum.eu/software/proCertumSmartSign.exe"
+            # Try both www and non-www versions
+            "https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-32-bit.exe"
+            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-32-bit.exe"
             
-            # Try the files.certum.eu patterns from official docs
-            "https://files.certum.eu/software/SmartSign_and_SimplySign/Windows/proCertumSmartSign-9.3.2.66.exe"
-            "https://files.certum.eu/software/SmartSign_and_SimplySign/proCertumSmartSign-9.3.2.66.exe"
-            "https://files.certum.eu/software/proCertumSmartSign.exe"
+            # Also try proCertumSmartSign with the same pattern structure
+            "https://files.certum.eu/software/proCertumSmartSign/Windows/9.3.2.66/proCertumSmartSign-9.3.2.66-win-64-bit.exe"
+            "https://www.files.certum.eu/software/proCertumSmartSign/Windows/9.3.2.66/proCertumSmartSign-9.3.2.66-win-64-bit.exe"
             
-            # Alternative versions and naming patterns
-            "https://files.certum.eu/proCertumSmartSign-9.3.2.66.exe"
-            "https://files.certum.eu/proCertumSmartSign.exe"
+            # Try without version path
+            "https://files.certum.eu/software/SimplySignDesktop/Windows/SimplySignDesktop-9.3.2.66-win-64-bit.exe"
+            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/SimplySignDesktop-9.3.2.66-win-64-bit.exe"
             
             # Fallback to any available version
-            "https://support.certum.eu/downloads/proCertumSmartSign.exe"
-            "https://www.certum.eu/downloads/proCertumSmartSign.exe"
+            "https://files.certum.eu/software/SimplySignDesktop/Windows/latest/SimplySignDesktop-win-64-bit.exe"
+            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/latest/SimplySignDesktop-win-64-bit.exe"
           )
           
           CERTUM_SOFTWARE_DOWNLOADED=false
           for url in "${OFFICIAL_DOWNLOAD_URLS[@]}"; do
-            echo "Trying official Certum download: $url"
-            if curl -L "$url" -o proCertumSmartSign.exe --fail --max-time 60; then
+            echo "Trying Certum download: $url"
+            if curl -L "$url" -o CertumSoftware.exe --fail --max-time 60; then
               # Verify it's a valid executable
-              if file proCertumSmartSign.exe | grep -q "executable\|PE32\|MS Windows"; then
-                echo "✅ Successfully downloaded official proCertum SmartSign: $url"
+              if file CertumSoftware.exe | grep -q "executable\|PE32\|MS Windows"; then
+                echo "✅ Successfully downloaded Certum software: $url"
                 CERTUM_SOFTWARE_DOWNLOADED=true
+                CERTUM_INSTALLER="CertumSoftware.exe"
                 break
               else
                 echo "❌ Downloaded file is not a valid executable"
-                rm -f proCertumSmartSign.exe
+                rm -f CertumSoftware.exe
               fi
             else
               echo "❌ Failed to download from: $url"
@@ -85,15 +83,33 @@ jobs:
             # Test with Windows signtool.exe approach
             echo "Looking for Windows SDK signtool.exe..."
             
-            # Find signtool.exe
+            # Find signtool.exe - Windows SDK installed, so let's look more thoroughly
             SIGNTOOL_PATHS=(
               "/c/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe"
               "/c/Program Files/Windows Kits/10/bin/*/x64/signtool.exe"
+              "/c/Program Files (x86)/Windows Kits/8.1/bin/x64/signtool.exe"
+              "/c/Program Files/Windows Kits/8.1/bin/x64/signtool.exe"
               "/c/Program Files (x86)/Microsoft SDKs/Windows/*/bin/signtool.exe"
+              # Be more specific about Windows 10 SDK versions
+              "/c/Program Files (x86)/Windows Kits/10/bin/10.*/x64/signtool.exe"
+              "/c/Program Files/Windows Kits/10/bin/10.*/x64/signtool.exe"
             )
             
             SIGNTOOL=""
+            echo "Searching for signtool.exe in Windows SDK directories..."
+            
+            # First, let's see what's actually in the Windows Kits directories
+            echo "Windows Kits 10 contents:"
+            find "/c/Program Files (x86)/Windows Kits/10" -name "signtool.exe" 2>/dev/null || echo "No signtool.exe found in Windows Kits 10 (x86)"
+            find "/c/Program Files/Windows Kits/10" -name "signtool.exe" 2>/dev/null || echo "No signtool.exe found in Windows Kits 10"
+            
+            echo "Windows Kits 8.1 contents:"
+            find "/c/Program Files (x86)/Windows Kits/8.1" -name "signtool.exe" 2>/dev/null || echo "No signtool.exe found in Windows Kits 8.1 (x86)"
+            find "/c/Program Files/Windows Kits/8.1" -name "signtool.exe" 2>/dev/null || echo "No signtool.exe found in Windows Kits 8.1"
+            
+            # Now try the specific patterns
             for path_pattern in "${SIGNTOOL_PATHS[@]}"; do
+              echo "Checking pattern: $path_pattern"
               for path in $path_pattern; do
                 if [ -f "$path" ]; then
                   SIGNTOOL="$path"
@@ -187,7 +203,7 @@ jobs:
           echo "Installing Certum software with silent installation..."
           
           # Install silently
-          ./proCertumSmartSign.exe /S /silent /quiet
+          ./"$CERTUM_INSTALLER" /S /silent /quiet
           
           # Wait for installation
           echo "Waiting for installation to complete..."
