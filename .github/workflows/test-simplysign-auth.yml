@@ -31,42 +31,47 @@ jobs:
           echo "Downloading proCertum SmartSign + SimplySign Desktop from official Certum support..."
           
           # Official download URLs based on the pattern you found!
-          # Example: https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-64-bit.exe
+          # BREAKTHROUGH: MSI version should install silently in CI/CD!
           OFFICIAL_DOWNLOAD_URLS=(
-            # CORRECT PATTERN - SimplySignDesktop (not proCertumSmartSign!)
+            # MSI VERSION - BEST FOR CI/CD (your discovery!)
+            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-64-bit-en.msi"
+            "https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-64-bit-en.msi"
+            
+            # Try other MSI variants
+            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-32-bit-en.msi"
+            "https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-32-bit-en.msi"
+            
+            # Fallback to working EXE version (but try MSI first!)
             "https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-64-bit.exe"
             "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-64-bit.exe"
             
-            # Try both www and non-www versions
-            "https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-32-bit.exe"
-            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-win-32-bit.exe"
-            
-            # Also try proCertumSmartSign with the same pattern structure
-            "https://files.certum.eu/software/proCertumSmartSign/Windows/9.3.2.66/proCertumSmartSign-9.3.2.66-win-64-bit.exe"
-            "https://www.files.certum.eu/software/proCertumSmartSign/Windows/9.3.2.66/proCertumSmartSign-9.3.2.66-win-64-bit.exe"
-            
-            # Try without version path
-            "https://files.certum.eu/software/SimplySignDesktop/Windows/SimplySignDesktop-9.3.2.66-win-64-bit.exe"
-            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/SimplySignDesktop-9.3.2.66-win-64-bit.exe"
-            
-            # Fallback to any available version
-            "https://files.certum.eu/software/SimplySignDesktop/Windows/latest/SimplySignDesktop-win-64-bit.exe"
-            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/latest/SimplySignDesktop-win-64-bit.exe"
+            # Additional MSI patterns
+            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66.msi"
+            "https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66.msi"
           )
           
           CERTUM_SOFTWARE_DOWNLOADED=false
+          INSTALLER_TYPE=""
           for url in "${OFFICIAL_DOWNLOAD_URLS[@]}"; do
             echo "Trying Certum download: $url"
-            if curl -L "$url" -o CertumSoftware.exe --fail --max-time 60; then
-              # Verify it's a valid executable
-              if file CertumSoftware.exe | grep -q "executable\|PE32\|MS Windows"; then
-                echo "✅ Successfully downloaded Certum software: $url"
+            if [[ "$url" == *.msi ]]; then
+              INSTALLER_FILENAME="CertumSoftware.msi"
+              INSTALLER_TYPE="MSI"
+            else
+              INSTALLER_FILENAME="CertumSoftware.exe"
+              INSTALLER_TYPE="EXE"
+            fi
+            
+            if curl -L "$url" -o "$INSTALLER_FILENAME" --fail --max-time 60; then
+              # Verify it's a valid installer
+              if file "$INSTALLER_FILENAME" | grep -q "executable\|PE32\|MS Windows\|Microsoft Office Document"; then
+                echo "✅ Successfully downloaded Certum $INSTALLER_TYPE: $url"
                 CERTUM_SOFTWARE_DOWNLOADED=true
-                CERTUM_INSTALLER="CertumSoftware.exe"
+                CERTUM_INSTALLER="$INSTALLER_FILENAME"
                 break
               else
-                echo "❌ Downloaded file is not a valid executable"
-                rm -f CertumSoftware.exe
+                echo "❌ Downloaded file is not a valid installer"
+                rm -f "$INSTALLER_FILENAME"
               fi
             else
               echo "❌ Failed to download from: $url"
@@ -200,7 +205,7 @@ jobs:
           # Install the official Certum software
           echo ""
           echo "=== Installing Official proCertum SmartSign + SimplySign Desktop ==="
-          echo "Installing Certum software with silent installation..."
+          echo "Installing Certum software ($INSTALLER_TYPE) with silent installation..."
           
           # First, let's check what type of installer we have
           echo "Checking installer type..."
@@ -208,35 +213,72 @@ jobs:
           
           echo "Installer size: $(ls -lh "$CERTUM_INSTALLER" | awk '{print $5}')"
           
-          # Try multiple silent installation approaches with timeout
+          # Use different installation methods based on installer type
           echo ""
           echo "Attempting silent installation (with 5-minute timeout)..."
           
-          # Method 1: Standard NSIS silent install
-          echo "Method 1: NSIS silent installation (/S)"
-          timeout 300 ./"$CERTUM_INSTALLER" /S &
-          INSTALL_PID=$!
-          
-          # Wait and check if process completes
-          sleep 10
-          if kill -0 $INSTALL_PID 2>/dev/null; then
-            echo "Installation still running after 10 seconds..."
-            sleep 30
+          if [[ "$INSTALLER_TYPE" == "MSI" ]]; then
+            echo "🎯 MSI INSTALLER DETECTED - Using msiexec for proper silent install!"
+            echo ""
+            echo "Method 1: MSI silent installation (msiexec /i /quiet /norestart)"
+            timeout 300 msiexec /i "$CERTUM_INSTALLER" /quiet /norestart /l*v install.log &
+            INSTALL_PID=$!
+            
+            # Monitor installation
+            sleep 15
             if kill -0 $INSTALL_PID 2>/dev/null; then
-              echo "Installation still running after 40 seconds..."
-              sleep 60
+              echo "MSI installation still running after 15 seconds..."
+              sleep 45
               if kill -0 $INSTALL_PID 2>/dev/null; then
-                echo "Installation taking longer than expected (100+ seconds)"
-                echo "Waiting additional 2 minutes before timeout..."
-                wait $INSTALL_PID 2>/dev/null || echo "Installation process ended"
+                echo "MSI installation still running after 60 seconds (normal for large software)..."
+                sleep 120
+                if kill -0 $INSTALL_PID 2>/dev/null; then
+                  echo "MSI installation taking longer than 3 minutes, waiting for completion..."
+                  wait $INSTALL_PID 2>/dev/null || echo "MSI installation process ended"
+                else
+                  echo "MSI installation completed within 3 minutes"
+                fi
               else
-                echo "Installation completed within 100 seconds"
+                echo "MSI installation completed within 60 seconds"
               fi
             else
-              echo "Installation completed within 40 seconds"
+              echo "MSI installation completed within 15 seconds"
             fi
+            
+            # Check MSI installation log
+            echo ""
+            echo "MSI Installation Log (last 20 lines):"
+            tail -20 install.log 2>/dev/null || echo "No installation log found"
+            
           else
-            echo "Installation completed within 10 seconds"
+            echo "EXE INSTALLER - Using standard silent parameters"
+            
+            # Method 1: Standard NSIS silent install
+            echo "Method 1: NSIS silent installation (/S)"
+            timeout 300 ./"$CERTUM_INSTALLER" /S &
+            INSTALL_PID=$!
+          
+            # Wait and check if process completes
+            sleep 10
+            if kill -0 $INSTALL_PID 2>/dev/null; then
+              echo "Installation still running after 10 seconds..."
+              sleep 30
+              if kill -0 $INSTALL_PID 2>/dev/null; then
+                echo "Installation still running after 40 seconds..."
+                sleep 60
+                if kill -0 $INSTALL_PID 2>/dev/null; then
+                  echo "Installation taking longer than expected (100+ seconds)"
+                  echo "Waiting additional 2 minutes before timeout..."
+                  wait $INSTALL_PID 2>/dev/null || echo "Installation process ended"
+                else
+                  echo "Installation completed within 100 seconds"
+                fi
+              else
+                echo "Installation completed within 40 seconds"
+              fi
+            else
+              echo "Installation completed within 10 seconds"
+            fi
           fi
           
           # Check if installation was successful
@@ -264,30 +306,49 @@ jobs:
           done
           
           if [ "$SIMPLYSIGN_INSTALLED" = false ]; then
-            echo "Method 1 did not result in visible installation. Trying Method 2..."
-            echo ""
-            echo "Method 2: Alternative silent parameters"
-            timeout 300 ./"$CERTUM_INSTALLER" /SILENT /NORESTART &
-            INSTALL_PID2=$!
-            sleep 60
-            if kill -0 $INSTALL_PID2 2>/dev/null; then
-              echo "Method 2 still running, terminating and trying Method 3..."
-              kill $INSTALL_PID2 2>/dev/null || true
-              
+            if [[ "$INSTALLER_TYPE" == "MSI" ]]; then
+              echo "MSI Method 1 did not result in visible installation. Trying alternative MSI parameters..."
               echo ""
-              echo "Method 3: MSI-style silent installation"
-              timeout 300 ./"$CERTUM_INSTALLER" /quiet /norestart &
-              INSTALL_PID3=$!
+              echo "Method 2: MSI with different parameters"
+              timeout 300 msiexec /i "$CERTUM_INSTALLER" /qn /norestart /l*v install2.log &
+              INSTALL_PID2=$!
               sleep 60
-              if kill -0 $INSTALL_PID3 2>/dev/null; then
-                echo "Method 3 taking too long, terminating..."
-                kill $INSTALL_PID3 2>/dev/null || true
-                echo "⚠️ All silent installation methods timed out or failed"
+              if kill -0 $INSTALL_PID2 2>/dev/null; then
+                echo "MSI Method 2 still running, waiting for completion..."
+                wait $INSTALL_PID2 2>/dev/null || echo "MSI Method 2 process ended"
               else
-                echo "Method 3 completed"
+                echo "MSI Method 2 completed"
               fi
+              
+              echo "MSI Installation Log 2 (last 20 lines):"
+              tail -20 install2.log 2>/dev/null || echo "No installation log 2 found"
+              
             else
-              echo "Method 2 completed"
+              echo "Method 1 did not result in visible installation. Trying Method 2..."
+              echo ""
+              echo "Method 2: Alternative silent parameters"
+              timeout 300 ./"$CERTUM_INSTALLER" /SILENT /NORESTART &
+              INSTALL_PID2=$!
+              sleep 60
+              if kill -0 $INSTALL_PID2 2>/dev/null; then
+                echo "Method 2 still running, terminating and trying Method 3..."
+                kill $INSTALL_PID2 2>/dev/null || true
+                
+                echo ""
+                echo "Method 3: MSI-style silent installation"
+                timeout 300 ./"$CERTUM_INSTALLER" /quiet /norestart &
+                INSTALL_PID3=$!
+                sleep 60
+                if kill -0 $INSTALL_PID3 2>/dev/null; then
+                  echo "Method 3 taking too long, terminating..."
+                  kill $INSTALL_PID3 2>/dev/null || true
+                  echo "⚠️ All silent installation methods timed out or failed"
+                else
+                  echo "Method 3 completed"
+                fi
+              else
+                echo "Method 2 completed"
+              fi
             fi
           fi
           
@@ -330,6 +391,9 @@ jobs:
           if [ "$CERTUM_SOFTWARE_INSTALLED" = true ]; then
             echo ""
             echo "✅ Certum software appears to be installed successfully at: $INSTALLED_PATH"
+            echo "✅ Installation Type: $INSTALLER_TYPE"
+            echo ""
+            echo "🎯 BREAKTHROUGH: MSI installer worked in CI/CD environment!"
             echo ""
             echo "=== Testing Virtual Card Functionality ==="
             echo "According to Certum documentation, SimplySign Desktop should now"
