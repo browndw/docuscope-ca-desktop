@@ -22,13 +22,66 @@ jobs:
         run: |
           echo "=== Testing Current SimplySign Authentication ==="
           
-          # Install SimplySign client
+          # Install SimplySign client - try multiple download sources
           echo "Installing SimplySign client..."
-          curl -L "https://www.certum.eu/certum/cert,offer_SimplySign_desktop.xml" -o SimplySignDesktop.exe
+          
+          # Method 1: Try direct download from Certum
+          echo "Attempting download from Certum website..."
+          if curl -L "https://www.certum.eu/en/simply-sign-desktop/" -o certum_page.html; then
+            echo "Downloaded Certum page, checking for download links..."
+            cat certum_page.html | grep -i "download" | head -5 || echo "No obvious download links found"
+          fi
+          
+          # Method 2: Try alternative download URLs
+          echo ""
+          echo "Trying alternative download methods..."
+          
+          # Common SimplySign download URLs to try
+          DOWNLOAD_URLS=(
+            "https://www.certum.eu/downloads/SimplySignDesktop.exe"
+            "https://www.certum.eu/en/downloads/SimplySignDesktop.exe"
+            "https://download.certum.eu/SimplySignDesktop.exe"
+            "https://files.certum.eu/SimplySignDesktop.exe"
+          )
+          
+          INSTALLER_DOWNLOADED=false
+          for url in "${DOWNLOAD_URLS[@]}"; do
+            echo "Trying: $url"
+            if curl -L "$url" -o SimplySignDesktop.exe --fail; then
+              # Check if it's actually an executable (not HTML)
+              if file SimplySignDesktop.exe | grep -q "executable\|PE32"; then
+                echo "✅ Successfully downloaded SimplySign installer from: $url"
+                INSTALLER_DOWNLOADED=true
+                break
+              else
+                echo "Downloaded file is not an executable, trying next URL..."
+                rm -f SimplySignDesktop.exe
+              fi
+            else
+              echo "Failed to download from: $url"
+            fi
+          done
+          
+          if [ "$INSTALLER_DOWNLOADED" = false ]; then
+            echo "❌ Could not download SimplySign installer from any source"
+            echo "This might mean:"
+            echo "1. The download URLs have changed"
+            echo "2. SimplySign Desktop is no longer available for download"
+            echo "3. We need to use a different approach"
+            echo ""
+            echo "Please check Certum's website manually for the current download link:"
+            echo "https://www.certum.eu/en/simply-sign-desktop/"
+            exit 1
+          fi
+          
+          # Install SimplySign Desktop
+          echo ""
+          echo "Installing SimplySign Desktop..."
           ./SimplySignDesktop.exe /S
           
-          # Wait for installation
-          sleep 15
+          # Wait for installation to complete
+          echo "Waiting for installation to complete..."
+          sleep 20
           
           # Find SimplySign CLI
           SIMPLYSIGN_PATH=""
