@@ -66,59 +66,80 @@ jobs:
             if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" && -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
               echo "Testing Certum cloud signing authentication..."
               
-              # Create a dummy file to test signing
-              echo "test content" > test_file.txt
+              # Create a dummy executable file to test signing (jsign only works with executables)
+              echo "Creating test executable for signing..."
+              # Download a small Windows executable for testing
+              curl -L "https://github.com/microsoft/vscode/releases/download/1.85.0/VSCodeUserSetup-x64-1.85.0.exe" -o test_executable.exe --fail || \
+              curl -L "https://notepad-plus-plus.org/downloads/v8.6/npp.8.6.Installer.exe" -o test_executable.exe --fail || \
+              echo "echo 'test'" > test_script.bat
               
-              # Check jsign help first
-              echo "Checking jsign available options..."
-              java -jar jsign.jar --help | grep -E "(username|user|password|pass|certum|ssl|cloud)" || echo "No obvious cloud signing options found"
+              # If we couldn't download an exe, create a simple batch file
+              if [ ! -f "test_executable.exe" ]; then
+                echo "Using batch file for testing..."
+                TEST_FILE="test_script.bat"
+              else
+                echo "Using downloaded executable for testing..."
+                TEST_FILE="test_executable.exe"
+              fi
+              
+              # Check jsign help for keystore types
+              echo "Available jsign keystore types:"
+              java -jar jsign.jar --help | grep -A1 -B1 "ESIGNER\|DIGICERT\|keystore type"
               
               echo ""
-              echo "Testing different jsign parameter combinations for Certum cloud signing..."
+              echo "Testing different jsign approaches for Certum cloud signing..."
               
-              # Test Method 1: Try SSL keystore approach (common for cloud HSM)
-              echo "Method 1: SSL keystore approach"
+              # Test Method 1: ESIGNER keystore (likely for SSL.com/Certum cloud signing)
+              echo "Method 1: ESIGNER keystore approach"
               java -jar jsign.jar \
-                --storetype PKCS11 \
-                --keystore "https://www.certum.eu/api/simplysign" \
-                --storepass "$CERTUM_PASSWORD" \
+                --storetype ESIGNER \
+                --storepass "$CERTUM_USERNAME|$CERTUM_PASSWORD" \
                 --alias "$CERTUM_CERTIFICATE_SHA1" \
                 --tsaurl "http://time.certum.pl" \
-                test_file.txt 2>&1 && echo "✅ Method 1 SUCCESS" || echo "❌ Method 1 failed"
+                "$TEST_FILE" 2>&1 && echo "✅ Method 1 SUCCESS" || echo "❌ Method 1 failed"
               
-              # Test Method 2: Try with different keystore URL
+              # Test Method 2: ESIGNER with different credential format
               echo ""
-              echo "Method 2: Alternative keystore URL"
+              echo "Method 2: ESIGNER with different credential format"
               java -jar jsign.jar \
-                --storetype PKCS11 \
-                --keystore "https://api.certum.eu/simplysign/v1" \
-                --storepass "$CERTUM_USERNAME:$CERTUM_PASSWORD" \
-                --alias "$CERTUM_CERTIFICATE_SHA1" \
-                --tsaurl "http://time.certum.pl" \
-                test_file.txt 2>&1 && echo "✅ Method 2 SUCCESS" || echo "❌ Method 2 failed"
-              
-              # Test Method 3: Try ESSL approach (if Certum uses eSign protocol)
-              echo ""
-              echo "Method 3: eSSL protocol approach"
-              java -jar jsign.jar \
-                --storetype ESSL \
-                --keystore "https://api.certum.eu" \
+                --storetype ESIGNER \
                 --storepass "$CERTUM_USERNAME" \
                 --keypass "$CERTUM_PASSWORD" \
                 --alias "$CERTUM_CERTIFICATE_SHA1" \
                 --tsaurl "http://time.certum.pl" \
-                test_file.txt 2>&1 && echo "✅ Method 3 SUCCESS" || echo "❌ Method 3 failed"
+                "$TEST_FILE" 2>&1 && echo "✅ Method 2 SUCCESS" || echo "❌ Method 2 failed"
               
-              # Test Method 4: Basic PKCS12 cloud approach
+              # Test Method 3: Try with certificate SHA1 as keystore reference
               echo ""
-              echo "Method 4: Cloud PKCS12 approach"
+              echo "Method 3: Direct certificate reference"
               java -jar jsign.jar \
-                --storetype PKCS12 \
-                --keystore "certum-cloud" \
+                --storetype ESIGNER \
+                --keystore "$CERTUM_CERTIFICATE_SHA1" \
+                --storepass "$CERTUM_USERNAME:$CERTUM_PASSWORD" \
+                --tsaurl "http://time.certum.pl" \
+                "$TEST_FILE" 2>&1 && echo "✅ Method 3 SUCCESS" || echo "❌ Method 3 failed"
+              
+              # Test Method 4: PKCS11 with Certum cloud endpoint
+              echo ""
+              echo "Method 4: PKCS11 cloud approach"
+              java -jar jsign.jar \
+                --storetype PKCS11 \
+                --keystore "https://api.certum.eu/pkcs11" \
                 --storepass "$CERTUM_USERNAME:$CERTUM_PASSWORD" \
                 --alias "$CERTUM_CERTIFICATE_SHA1" \
                 --tsaurl "http://time.certum.pl" \
-                test_file.txt 2>&1 && echo "✅ Method 4 SUCCESS" || echo "❌ Method 4 failed"
+                "$TEST_FILE" 2>&1 && echo "✅ Method 4 SUCCESS" || echo "❌ Method 4 failed"
+              
+              # Test Method 5: Check if we need to specify cloud endpoint
+              echo ""
+              echo "Method 5: ESIGNER with cloud endpoint"
+              java -jar jsign.jar \
+                --storetype ESIGNER \
+                --keystore "https://api.ssl.com" \
+                --storepass "$CERTUM_USERNAME|$CERTUM_PASSWORD|https://api.certum.eu" \
+                --alias "$CERTUM_CERTIFICATE_SHA1" \
+                --tsaurl "http://time.certum.pl" \
+                "$TEST_FILE" 2>&1 && echo "✅ Method 5 SUCCESS" || echo "❌ Method 5 failed"
               
               echo ""
               echo "=== jsign Testing Complete ==="
