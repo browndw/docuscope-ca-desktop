@@ -236,8 +236,27 @@ jobs:
           if [[ "$INSTALLER_TYPE" == "MSI" ]]; then
             echo "🎯 MSI INSTALLER DETECTED - Using msiexec for proper silent install!"
             echo ""
+            
+            # First, let's check MSI properties and requirements
+            echo "=== MSI Installer Analysis ==="
+            echo "Checking MSI installer properties..."
+            
+            # Use msiexec to list properties (non-destructive)
+            echo "MSI Product Information:"
+            msiexec /i "$CERTUM_INSTALLER" /qb- /l*v msi_properties.log REBOOT=Suppress || echo "Could not extract MSI properties"
+            
+            # Check if any obvious error in properties
+            if [ -f "msi_properties.log" ]; then
+              echo "MSI Properties Log (first 30 lines):"
+              head -30 msi_properties.log 2>/dev/null || echo "Could not read properties log"
+            fi
+            
+            echo ""
             echo "Method 1: MSI silent installation (msiexec /i /quiet /norestart)"
-            timeout 300 msiexec /i "$CERTUM_INSTALLER" /quiet /norestart /l*v install.log &
+            echo "Full command: msiexec /i \"$CERTUM_INSTALLER\" /quiet /norestart /l*v install.log REBOOT=Suppress"
+            
+            # Try with explicit REBOOT=Suppress and better logging
+            timeout 300 msiexec /i "$CERTUM_INSTALLER" /quiet /norestart /l*v install.log REBOOT=Suppress &
             INSTALL_PID=$!
             
             # Monitor installation
@@ -263,8 +282,22 @@ jobs:
             
             # Check MSI installation log
             echo ""
-            echo "MSI Installation Log (last 20 lines):"
-            tail -20 install.log 2>/dev/null || echo "No installation log found"
+            echo "MSI Installation Log Analysis:"
+            if [ -f "install.log" ]; then
+              echo "Installation log exists, size: $(ls -lh install.log | awk '{print $5}')"
+              echo ""
+              echo "=== Installation Log (last 50 lines) ==="
+              tail -50 install.log 2>/dev/null || echo "Could not read installation log"
+              echo ""
+              echo "=== Checking for Error Patterns ==="
+              echo "Return codes in log:"
+              grep -i "return value\|exit code\|error\|failed\|abort" install.log 2>/dev/null || echo "No obvious error patterns found"
+              echo ""
+              echo "Installation status:"
+              grep -i "installation\|complete\|success\|finish" install.log 2>/dev/null || echo "No completion status found"
+            else
+              echo "❌ No installation log created - this suggests msiexec failed to start or access was denied"
+            fi
             
           else
             echo "EXE INSTALLER - Using standard silent parameters"
@@ -325,8 +358,22 @@ jobs:
             if [[ "$INSTALLER_TYPE" == "MSI" ]]; then
               echo "MSI Method 1 did not result in visible installation. Trying alternative MSI parameters..."
               echo ""
-              echo "Method 2: MSI with different parameters"
-              timeout 300 msiexec /i "$CERTUM_INSTALLER" /qn /norestart /l*v install2.log &
+              
+              # Check Windows Installer service status first
+              echo "=== Windows Installer Service Check ==="
+              powershell -Command "Get-Service -Name 'msiserver' | Format-Table Name, Status, StartType" || echo "Could not check Windows Installer service"
+              
+              # Check Windows Event Log for MSI installation errors
+              echo ""
+              echo "=== Windows Event Log Check (last 10 MSI-related events) ==="
+              powershell -Command "Get-EventLog -LogName Application -Source 'MsiInstaller' -Newest 10 -ErrorAction SilentlyContinue | Format-Table TimeGenerated, EntryType, Message" || echo "No recent MSI events found"
+              
+              echo ""
+              echo "Method 2: MSI with different parameters (/qn = no UI, /forcerestart disabled)"
+              echo "Full command: msiexec /i \"$CERTUM_INSTALLER\" /qn /norestart /l*v install2.log ALLUSERS=1 REBOOT=Suppress"
+              
+              # Try with ALLUSERS=1 and different parameters
+              timeout 300 msiexec /i "$CERTUM_INSTALLER" /qn /norestart /l*v install2.log ALLUSERS=1 REBOOT=Suppress &
               INSTALL_PID2=$!
               sleep 60
               if kill -0 $INSTALL_PID2 2>/dev/null; then
@@ -336,8 +383,62 @@ jobs:
                 echo "MSI Method 2 completed"
               fi
               
-              echo "MSI Installation Log 2 (last 20 lines):"
-              tail -20 install2.log 2>/dev/null || echo "No installation log 2 found"
+              echo "MSI Installation Log 2 Analysis:"
+              if [ -f "install2.log" ]; then
+                echo "Installation log 2 exists, size: $(ls -lh install2.log | awk '{print $5}')"
+                echo ""
+                echo "=== Installation Log 2 (last 50 lines) ==="
+                tail -50 install2.log 2>/dev/null || echo "Could not read installation log 2"
+                echo ""
+                echo "=== Method 2 Error Analysis ==="
+                echo "Return codes in log 2:"
+                grep -i "return value\|exit code\|error\|failed\|abort" install2.log 2>/dev/null || echo "No obvious error patterns found"
+                echo ""
+                echo "Installation status 2:"
+                grep -i "installation\|complete\|success\|finish" install2.log 2>/dev/null || echo "No completion status found"
+                
+                # Check for specific MSI error codes
+                echo ""
+                echo "=== MSI Error Code Analysis ==="
+                if grep -q "1603" install2.log 2>/dev/null; then
+                  echo "❌ Error 1603: Fatal error during installation (generic failure)"
+                fi
+                if grep -q "1619" install2.log 2>/dev/null; then
+                  echo "❌ Error 1619: This installation package could not be opened"
+                fi
+                if grep -q "1631" install2.log 2>/dev/null; then
+                  echo "❌ Error 1631: The Windows Installer service could not be accessed"
+                fi
+              else
+                echo "❌ No installation log 2 created"
+              fi
+              
+              # Try a third method with minimal parameters
+              echo ""
+              echo "Method 3: MSI with minimal parameters (basic install)"
+              echo "Full command: msiexec /i \"$CERTUM_INSTALLER\" /qb /l*v install3.log"
+              
+              # Try with /qb (basic UI - might show progress but no interaction needed)
+              timeout 300 msiexec /i "$CERTUM_INSTALLER" /qb /l*v install3.log &
+              INSTALL_PID3=$!
+              
+              sleep 60
+              if kill -0 $INSTALL_PID3 2>/dev/null; then
+                echo "Method 3 still running after 60 seconds, waiting for completion..."
+                wait $INSTALL_PID3 2>/dev/null || echo "Method 3 process ended"
+              else
+                echo "Method 3 completed within 60 seconds"
+              fi
+              
+              echo ""
+              echo "MSI Installation Log 3 Analysis:"
+              if [ -f "install3.log" ]; then
+                echo "Installation log 3 exists, size: $(ls -lh install3.log | awk '{print $5}')"
+                echo "Last 30 lines of install3.log:"
+                tail -30 install3.log 2>/dev/null || echo "Could not read installation log 3"
+              else
+                echo "❌ No installation log 3 created"
+              fi
               
             else
               echo "Method 1 did not result in visible installation. Trying Method 2..."
