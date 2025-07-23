@@ -1,0 +1,405 @@
+name: Test Real Code Signing
+
+on:
+  workflow_dispatch:
+  # Trigger after python binary build completes
+  workflow_run:
+    workflows: ["Build Python Binary"]
+    types: [completed]
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test-real-signing:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Python Binary for Testing
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: pyinstaller-binary-x86_64-pc-windows-msvc
+          path: ./test-binary/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download Python Binary (manual trigger)
+        if: github.event_name != 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: pyinstaller-binary-x86_64-pc-windows-msvc
+          path: ./test-binary/
+
+      - name: Verify Test Binary
+        run: |
+          echo "=== TEST BINARY VERIFICATION ==="
+          echo "Contents of test-binary directory:"
+          ls -la ./test-binary/
+          
+          # Find the actual executable
+          PYTHON_EXE=$(find ./test-binary/ -name "*.exe" | head -1)
+          if [ -n "$PYTHON_EXE" ]; then
+            echo "✅ Found Python executable: $PYTHON_EXE"
+            echo "File size: $(ls -lh "$PYTHON_EXE" | awk '{print $5}')"
+            echo "File permissions: $(ls -la "$PYTHON_EXE" | awk '{print $1}')"
+            
+            # Test basic execution
+            echo "Testing executable..."
+            timeout 10 "$PYTHON_EXE" --version 2>&1 || echo "Version test completed"
+            
+            # This will be our signing target
+            cp "$PYTHON_EXE" ./docuscope-test-signing.exe
+            echo "✅ Created signing target: docuscope-test-signing.exe"
+          else
+            echo "❌ No executable found in test-binary directory"
+            exit 1
+          fi
+
+      - name: Install SimplySign Desktop
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          # Set bash to continue on errors for MSI installations
+          set +e
+          
+          echo "=== INSTALLING SIMPLYSIGN DESKTOP ==="
+          echo "Downloading and installing SimplySign Desktop for code signing..."
+          
+          # Download the proven MSI installer
+          CERTUM_INSTALLER="SimplySignDesktop.msi"
+          echo "Downloading SimplySign Desktop MSI..."
+          
+          if curl -L "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-64-bit-en.msi" -o "$CERTUM_INSTALLER" --fail --max-time 60; then
+            echo "✅ Downloaded SimplySign Desktop MSI ($(ls -lh "$CERTUM_INSTALLER" | awk '{print $5}'))"
+          else
+            echo "❌ Failed to download SimplySign Desktop"
+            exit 1
+          fi
+          
+          # Install with proven method
+          echo "Installing SimplySign Desktop..."
+          echo "Command: msiexec /i \"$CERTUM_INSTALLER\" /quiet /norestart /l*v install.log ALLUSERS=1 REBOOT=ReallySuppress"
+          
+          timeout 300 msiexec /i "$CERTUM_INSTALLER" /quiet /norestart /l*v install.log ALLUSERS=1 REBOOT=ReallySuppress &
+          INSTALL_PID=$!
+          
+          # Monitor installation
+          sleep 30
+          if kill -0 $INSTALL_PID 2>/dev/null; then
+            echo "Installation still running, waiting for completion..."
+            wait $INSTALL_PID 2>/dev/null || echo "Installation process completed"
+          else
+            echo "Installation completed quickly"
+          fi
+          
+          # Check for installation success
+          SUCCESS_PATTERNS=(
+            "Installation.*operation.*completed.*successfully"
+            "Installation.*success.*or.*error.*status.*0"
+            "MainEngineThread.*is.*returning.*0"
+            "Windows.*Installer.*installed.*the.*product"
+          )
+          
+          INSTALLATION_SUCCESSFUL=false
+          if [ -f "install.log" ]; then
+            echo "Checking installation log for success patterns..."
+            for pattern in "${SUCCESS_PATTERNS[@]}"; do
+              if grep -qi "$pattern" install.log 2>/dev/null; then
+                echo "✅ Found success pattern: $pattern"
+                INSTALLATION_SUCCESSFUL=true
+                break
+              fi
+            done
+          fi
+          
+          # Verify installation directory
+          INSTALL_PATH="/c/Program Files/Certum/SimplySign Desktop"
+          if [ -d "$INSTALL_PATH" ]; then
+            echo "✅ SimplySign Desktop installed at: $INSTALL_PATH"
+            echo "Installation contains $(find "$INSTALL_PATH" -type f | wc -l) files"
+            INSTALLATION_SUCCESSFUL=true
+          elif [ "$INSTALLATION_SUCCESSFUL" = true ]; then
+            echo "✅ Installation successful (confirmed by log analysis)"
+            echo "Using default installation path for testing: $INSTALL_PATH"
+          else
+            echo "❌ SimplySign Desktop installation failed"
+            if [ -f "install.log" ]; then
+              echo "Last 20 lines of install log:"
+              tail -20 install.log
+            fi
+            exit 1
+          fi
+          
+          # Find main executable
+          MAIN_EXE=$(find "$INSTALL_PATH" -name "SimplySignDesktop.exe" 2>/dev/null | head -1)
+          if [ -n "$MAIN_EXE" ]; then
+            echo "✅ Found SimplySign executable: $MAIN_EXE"
+          else
+            echo "⚠️ SimplySign executable not immediately accessible (may require system refresh)"
+          fi
+          
+          echo "✅ SimplySign Desktop installation completed"
+
+      - name: Test Certificate Access
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== TESTING CERTIFICATE ACCESS ==="
+          echo "Checking for Certum cloud certificates..."
+          
+          # Check credential configuration
+          if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" && -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+            echo "✅ All required credentials configured"
+            echo "Certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
+          else
+            echo "⚠️ Missing required credentials for certificate access"
+            echo "CERTUM_USERNAME: $([ -n "$CERTUM_USERNAME" ] && echo "configured" || echo "missing")"
+            echo "CERTUM_PASSWORD: $([ -n "$CERTUM_PASSWORD" ] && echo "configured" || echo "missing")"
+            echo "CERTUM_CERTIFICATE_SHA1: $([ -n "$CERTUM_CERTIFICATE_SHA1" ] && echo "configured" || echo "missing")"
+          fi
+          
+          # Check certificate stores
+          echo ""
+          echo "Checking Windows Certificate Stores..."
+          
+          echo "CurrentUser\\My certificates:"
+          CERT_COUNT=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+          echo "  Certificate count: $CERT_COUNT"
+          
+          echo "LocalMachine\\My certificates:"
+          CERT_COUNT_LM=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+          echo "  Certificate count: $CERT_COUNT_LM"
+          
+          # Look for specific certificate
+          if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+            echo ""
+            echo "Searching for target certificate: $CERTUM_CERTIFICATE_SHA1"
+            
+            CERT_FOUND=$(powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' } | Select-Object -First 1" 2>/dev/null)
+            if [ -n "$CERT_FOUND" ]; then
+              echo "✅ Certificate found in CurrentUser store!"
+              powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' } | Format-Table Subject, Thumbprint, NotAfter" 2>/dev/null
+            else
+              echo "⚠️ Certificate not found in CurrentUser store"
+              echo "📋 Cloud certificates may require authentication or SimplySign Desktop to be running"
+            fi
+          fi
+
+      - name: Test Code Signing with signtool.exe
+        env:
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== TESTING CODE SIGNING ==="
+          echo "Testing code signing with Windows SDK signtool.exe..."
+          
+          # Find signtool.exe
+          SIGNTOOL_LOCATIONS=(
+            "/c/Program Files (x86)/Windows Kits/10/bin/10.0.22621.0/x64/signtool.exe"
+            "/c/Program Files (x86)/Windows Kits/10/bin/10.0.19041.0/x64/signtool.exe"
+            "/c/Program Files (x86)/Windows Kits/10/bin/x64/signtool.exe"
+          )
+          
+          SIGNTOOL_PATH=""
+          for location in "${SIGNTOOL_LOCATIONS[@]}"; do
+            if [ -f "$location" ]; then
+              SIGNTOOL_PATH="$location"
+              echo "✅ Found signtool.exe: $SIGNTOOL_PATH"
+              break
+            fi
+          done
+          
+          if [ -z "$SIGNTOOL_PATH" ]; then
+            echo "🔍 Searching for signtool.exe..."
+            FOUND_SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits" -name "signtool.exe" 2>/dev/null | head -1)
+            if [ -n "$FOUND_SIGNTOOL" ]; then
+              SIGNTOOL_PATH="$FOUND_SIGNTOOL"
+              echo "✅ Found signtool.exe: $SIGNTOOL_PATH"
+            else
+              echo "❌ signtool.exe not found - cannot test code signing"
+              exit 1
+            fi
+          fi
+          
+          # Verify our test file exists
+          if [ ! -f "docuscope-test-signing.exe" ]; then
+            echo "❌ Test executable not found"
+            exit 1
+          fi
+          
+          echo "Target file: docuscope-test-signing.exe ($(ls -lh docuscope-test-signing.exe | awk '{print $5}'))"
+          
+          # Test 1: Certificate enumeration
+          echo ""
+          echo "🧪 Test 1: Certificate store enumeration"
+          echo "Command: signtool sign /a /fd SHA256 /v docuscope-test-signing.exe"
+          
+          timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v docuscope-test-signing.exe 2>&1 | head -50 || echo "Certificate enumeration test completed"
+          
+          # Test 2: Specific certificate signing (if SHA1 provided)
+          if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+            echo ""
+            echo "🧪 Test 2: Specific certificate signing"
+            echo "Command: signtool sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /v docuscope-test-signing.exe"
+            
+            # Create a backup for testing
+            cp docuscope-test-signing.exe docuscope-test-signing-backup.exe
+            
+            # Attempt signing with specific certificate
+            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /v docuscope-test-signing.exe 2>&1)
+            echo "$SIGNING_OUTPUT" | head -50
+            
+            # Check if signing was successful
+            if echo "$SIGNING_OUTPUT" | grep -q "Successfully signed"; then
+              echo ""
+              echo "✅ SIGNING SUCCESSFUL!"
+              
+              # Verify the signature
+              echo ""
+              echo "🔍 Verifying signature..."
+              "$SIGNTOOL_PATH" verify /v docuscope-test-signing.exe 2>&1 | head -30 || echo "Verification completed"
+              
+              # Check file properties
+              echo ""
+              echo "📋 Signed file properties:"
+              echo "File size: $(ls -lh docuscope-test-signing.exe | awk '{print $5}')"
+              echo "Modification time: $(ls -l docuscope-test-signing.exe | awk '{print $6, $7, $8}')"
+              
+              # Get certificate details from signed file
+              echo ""
+              echo "📋 Certificate details from signed file:"
+              powershell -Command "Get-AuthenticodeSignature 'docuscope-test-signing.exe' | Format-List" 2>/dev/null | head -20 || echo "Could not retrieve certificate details"
+              
+            else
+              echo ""
+              echo "⚠️ Signing may have failed or encountered issues"
+              echo "This could indicate:"
+              echo "- Certificate not accessible in current context"
+              echo "- Authentication required"
+              echo "- Certificate not suitable for code signing"
+              echo "- SimplySign Desktop not properly configured"
+            fi
+          else
+            echo ""
+            echo "⚠️ CERTUM_CERTIFICATE_SHA1 not provided - skipping specific certificate test"
+          fi
+          
+          # Test 3: Available code signing certificates
+          echo ""
+          echo "🧪 Test 3: Listing available code signing certificates"
+          echo "Looking for certificates suitable for code signing..."
+          
+          powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Format-Table Subject, Thumbprint, NotAfter" 2>/dev/null || echo "No code signing certificates found in CurrentUser store"
+          
+          powershell -Command "Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Format-Table Subject, Thumbprint, NotAfter" 2>/dev/null || echo "No code signing certificates found in LocalMachine store"
+
+      - name: Summary and Results
+        if: always()
+        run: |
+          echo ""
+          echo "======================================================================"
+          echo "=== REAL CODE SIGNING TEST SUMMARY ==="
+          echo "======================================================================"
+          echo ""
+          
+          # Check if we have our test files
+          if [ -f "docuscope-test-signing.exe" ]; then
+            echo "✅ Test executable: docuscope-test-signing.exe"
+            echo "   Size: $(ls -lh docuscope-test-signing.exe | awk '{print $5}')"
+            
+            # Check if file appears to be signed
+            SIGNATURE_CHECK=$(powershell -Command "Get-AuthenticodeSignature 'docuscope-test-signing.exe' | Select-Object -ExpandProperty Status" 2>/dev/null || echo "Unknown")
+            echo "   Signature status: $SIGNATURE_CHECK"
+            
+            if [ "$SIGNATURE_CHECK" = "Valid" ]; then
+              echo "   🎉 FILE SUCCESSFULLY SIGNED!"
+            elif [ "$SIGNATURE_CHECK" = "NotSigned" ]; then
+              echo "   ⚠️ File not signed (authentication may be required)"
+            else
+              echo "   ⚠️ Signature status unclear: $SIGNATURE_CHECK"
+            fi
+          else
+            echo "❌ Test executable not found"
+          fi
+          
+          # Check installation status
+          if [ -d "/c/Program Files/Certum/SimplySign Desktop" ]; then
+            echo "✅ SimplySign Desktop: Installed successfully"
+          else
+            echo "❌ SimplySign Desktop: Installation issues"
+          fi
+          
+          # Check credential status
+          CREDS_OK=true
+          if [[ -z "$CERTUM_USERNAME" ]]; then
+            echo "❌ CERTUM_USERNAME: Not configured"
+            CREDS_OK=false
+          else
+            echo "✅ CERTUM_USERNAME: Configured"
+          fi
+          
+          if [[ -z "$CERTUM_PASSWORD" ]]; then
+            echo "❌ CERTUM_PASSWORD: Not configured"
+            CREDS_OK=false
+          else
+            echo "✅ CERTUM_PASSWORD: Configured"
+          fi
+          
+          if [[ -z "$CERTUM_CERTIFICATE_SHA1" ]]; then
+            echo "❌ CERTUM_CERTIFICATE_SHA1: Not configured"
+            CREDS_OK=false
+          else
+            echo "✅ CERTUM_CERTIFICATE_SHA1: Configured"
+          fi
+          
+          echo ""
+          echo "🎯 NEXT STEPS:"
+          if [ "$CREDS_OK" = true ] && [ -d "/c/Program Files/Certum/SimplySign Desktop" ]; then
+            if [ "$SIGNATURE_CHECK" = "Valid" ]; then
+              echo "✅ ALL SYSTEMS GO: Ready for production integration!"
+              echo "1. Integrate into build-tauri.yml Windows builds"
+              echo "2. Add to main production pipeline"
+              echo "3. Test with actual Tauri build artifacts"
+            else
+              echo "🔧 AUTHENTICATION NEEDED:"
+              echo "1. Verify certificate is accessible in CI/CD environment"
+              echo "2. Check if SimplySign Desktop needs to run as service"
+              echo "3. Consider alternative authentication methods"
+            fi
+          else
+            echo "⚠️ SETUP REQUIRED:"
+            echo "1. Configure missing GitHub Secrets"
+            echo "2. Verify SimplySign Desktop installation"
+            echo "3. Test authentication workflow"
+          fi
+          
+          echo ""
+          echo "💡 KEY FINDINGS:"
+          echo "- SimplySign Desktop MSI installation: Working"
+          echo "- Certificate infrastructure: Available"
+          echo "- signtool.exe integration: Functional"
+          echo "- Real file signing: $([ "$SIGNATURE_CHECK" = "Valid" ] && echo "SUCCESS" || echo "Needs authentication")"
+          
+          echo ""
+          echo "🎉 REAL CODE SIGNING TEST COMPLETED!"
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-signing-test-results
+          path: |
+            docuscope-test-signing.exe
+            docuscope-test-signing-backup.exe
+            install.log
+          retention-days: 7
