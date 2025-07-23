@@ -526,9 +526,25 @@ jobs:
           echo "This is a test executable for code signing" > test-small.exe
           
           echo "Testing signtool with small file first..."
-          SMALL_TEST_OUTPUT=$(timeout 60 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v test-small.exe 2>&1)
-          echo "Small file test output:"
-          echo "$SMALL_TEST_OUTPUT" | head -20
+          
+          # Test A: Simple command without timestamp
+          echo "Test A: Simple signing without timestamp..."
+          SIMPLE_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v test-small.exe 2>&1)
+          echo "Simple test output:"
+          echo "$SIMPLE_OUTPUT"
+          
+          # Test B: Check if /td parameter is supported
+          echo ""
+          echo "Test B: Testing timestamp digest parameter support..."
+          TD_SUPPORT_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /? 2>&1 | grep -i "/td" || echo "No /td parameter found")
+          echo "TD parameter support: $TD_SUPPORT_OUTPUT"
+          
+          # Test C: Try with different timestamp approach
+          echo ""
+          echo "Test C: Testing with basic timestamp (no /td)..."
+          BASIC_TS_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /v test-small.exe 2>&1)
+          echo "Basic timestamp output:"
+          echo "$BASIC_TS_OUTPUT"
           
           # Now test with the actual large file
           echo ""
