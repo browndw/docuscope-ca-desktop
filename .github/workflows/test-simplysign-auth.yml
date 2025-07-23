@@ -236,24 +236,12 @@ jobs:
           if [[ "$INSTALLER_TYPE" == "MSI" ]]; then
             echo "🎯 MSI INSTALLER DETECTED - Using msiexec for proper silent install!"
             echo ""
-            
-            # First, let's check MSI properties and requirements
-            echo "=== MSI Installer Analysis ==="
-            echo "Checking MSI installer properties..."
-            
-            # Use msiexec to list properties (non-destructive)
-            echo "MSI Product Information:"
-            msiexec /i "$CERTUM_INSTALLER" /qb- /l*v msi_properties.log REBOOT=Suppress || echo "Could not extract MSI properties"
-            
-            # Check if any obvious error in properties
-            if [ -f "msi_properties.log" ]; then
-              echo "MSI Properties Log (first 30 lines):"
-              head -30 msi_properties.log 2>/dev/null || echo "Could not read properties log"
-            fi
-            
-            echo ""
             echo "Method 1: MSI silent installation (msiexec /i /quiet /norestart)"
             echo "Full command: msiexec /i \"$CERTUM_INSTALLER\" /quiet /norestart /l*v install.log REBOOT=Suppress"
+            
+            # Skip MSI properties check to avoid hanging - go straight to installation
+            echo "⚠️ Skipping MSI properties analysis to avoid UI hanging in CI/CD"
+            echo ""
             
             # Try with explicit REBOOT=Suppress and better logging
             timeout 300 msiexec /i "$CERTUM_INSTALLER" /quiet /norestart /l*v install.log REBOOT=Suppress &
