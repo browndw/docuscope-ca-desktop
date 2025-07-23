@@ -529,55 +529,193 @@ jobs:
           
           # Test A: Simple command without timestamp
           echo "Test A: Simple signing without timestamp..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd SHA256 /v test-small.exe"
+          
+          set +e  # Don't exit on error
           SIMPLE_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v test-small.exe 2>&1)
+          SIMPLE_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Simple test exit code: $SIMPLE_EXIT_CODE"
           echo "Simple test output:"
-          echo "$SIMPLE_OUTPUT"
+          if [ -n "$SIMPLE_OUTPUT" ]; then
+            echo "$SIMPLE_OUTPUT"
+          else
+            echo "⚠️ No output from simple signtool test"
+          fi
+          
+          # Immediate certificate check after failure
+          echo ""
+          echo "🔍 IMMEDIATE CERTIFICATE DIAGNOSIS:"
+          echo "Checking certificate stores immediately after signing failure..."
+          
+          CERT_COUNT_CU=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+          CERT_COUNT_LM=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+          
+          echo "CurrentUser\\My certificates: $CERT_COUNT_CU"
+          echo "LocalMachine\\My certificates: $CERT_COUNT_LM"
+          
+          # Quick certificate details
+          if [ "$CERT_COUNT_CU" != "0" ]; then
+            echo "CurrentUser certificates:"
+            powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Format-Table Subject, Thumbprint, HasPrivateKey -AutoSize" 2>/dev/null || echo "Error listing CurrentUser certs"
+          fi
+          
+          if [ "$CERT_COUNT_LM" != "0" ]; then
+            echo "LocalMachine certificates:"
+            powershell -Command "Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Format-Table Subject, Thumbprint, HasPrivateKey -AutoSize" 2>/dev/null || echo "Error listing LocalMachine certs"
+          fi
+          
+          # Check for code signing specific certificates
+          echo "Code signing certificates check:"
+          CS_CERTS=$(powershell -Command "
+            \$cs1 = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Measure-Object | Select-Object -ExpandProperty Count
+            \$cs2 = Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Measure-Object | Select-Object -ExpandProperty Count
+            Write-Host \"CurrentUser code signing certs: \$cs1\"
+            Write-Host \"LocalMachine code signing certs: \$cs2\"
+            \$cs1 + \$cs2
+          " 2>/dev/null || echo "0")
+          echo "Total code signing certificates: $CS_CERTS"
           
           # Test A2: Certificate enumeration diagnosis
           echo ""
           echo "Test A2: Certificate enumeration diagnosis..."
           echo "Checking what certificates signtool can see..."
-          CERT_ENUM_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v /debug test-small.exe 2>&1 | head -20)
-          echo "Certificate enumeration details:"
-          echo "$CERT_ENUM_OUTPUT"
+          echo "Command: timeout 10 signtool.exe sign /a /fd SHA256 /v test-small.exe"
+          
+          # Run signtool with better error capture
+          set +e  # Don't exit on error
+          CERT_ENUM_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v test-small.exe 2>&1)
+          CERT_ENUM_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Certificate enumeration exit code: $CERT_ENUM_EXIT_CODE"
+          echo "Certificate enumeration output (first 30 lines):"
+          echo "$CERT_ENUM_OUTPUT" | head -30
+          
+          if [ -z "$CERT_ENUM_OUTPUT" ]; then
+            echo "⚠️ No output from signtool - command may have failed silently"
+          fi
           
           # Test A3: Direct certificate store check
           echo ""
           echo "Test A3: Direct certificate store verification..."
-          powershell -Command "
-            Write-Host 'CurrentUser\\My certificates:'
-            Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | ForEach-Object {
-              Write-Host \"  Subject: \$(\$_.Subject)\"
-              Write-Host \"  Thumbprint: \$(\$_.Thumbprint)\"
-              Write-Host \"  HasPrivateKey: \$(\$_.HasPrivateKey)\"
-              Write-Host \"  KeyUsage: \$(\$_.Extensions | Where-Object {\$_.Oid.FriendlyName -eq 'Key Usage'} | Select-Object -ExpandProperty Format -First 1)\"
-              Write-Host \"  EKU: \$(\$_.EnhancedKeyUsageList -join ', ')\"
-              Write-Host \"  ---\"
+          echo "Running PowerShell certificate enumeration..."
+          
+          # Run PowerShell with better error handling
+          set +e  # Don't exit on error
+          POWERSHELL_OUTPUT=$(powershell -Command "
+            try {
+              Write-Host 'Starting certificate enumeration...'
+              
+              Write-Host 'CurrentUser\\\\My certificates:'
+              \$cuCerts = Get-ChildItem -Path 'Cert:\\\\CurrentUser\\\\My' -ErrorAction SilentlyContinue
+              if (\$cuCerts) {
+                \$cuCerts | ForEach-Object {
+                  Write-Host \"  Subject: \$(\$_.Subject)\"
+                  Write-Host \"  Thumbprint: \$(\$_.Thumbprint)\"
+                  Write-Host \"  HasPrivateKey: \$(\$_.HasPrivateKey)\"
+                  Write-Host \"  NotAfter: \$(\$_.NotAfter)\"
+                  try {
+                    \$keyUsage = \$_.Extensions | Where-Object {\$_.Oid.FriendlyName -eq 'Key Usage'} | Select-Object -ExpandProperty Format -First 1
+                    Write-Host \"  KeyUsage: \$keyUsage\"
+                  } catch {
+                    Write-Host \"  KeyUsage: Unable to read\"
+                  }
+                  try {
+                    \$eku = \$_.EnhancedKeyUsageList -join ', '
+                    Write-Host \"  EKU: \$eku\"
+                  } catch {
+                    Write-Host \"  EKU: Unable to read\"
+                  }
+                  Write-Host \"  ---\"
+                }
+              } else {
+                Write-Host '  No certificates found in CurrentUser\\\\My'
+              }
+              
+              Write-Host 'LocalMachine\\\\My certificates:'
+              \$lmCerts = Get-ChildItem -Path 'Cert:\\\\LocalMachine\\\\My' -ErrorAction SilentlyContinue
+              if (\$lmCerts) {
+                \$lmCerts | ForEach-Object {
+                  Write-Host \"  Subject: \$(\$_.Subject)\"
+                  Write-Host \"  Thumbprint: \$(\$_.Thumbprint)\"
+                  Write-Host \"  HasPrivateKey: \$(\$_.HasPrivateKey)\"
+                  Write-Host \"  NotAfter: \$(\$_.NotAfter)\"
+                  try {
+                    \$keyUsage = \$_.Extensions | Where-Object {\$_.Oid.FriendlyName -eq 'Key Usage'} | Select-Object -ExpandProperty Format -First 1
+                    Write-Host \"  KeyUsage: \$keyUsage\"
+                  } catch {
+                    Write-Host \"  KeyUsage: Unable to read\"
+                  }
+                  try {
+                    \$eku = \$_.EnhancedKeyUsageList -join ', '
+                    Write-Host \"  EKU: \$eku\"
+                  } catch {
+                    Write-Host \"  EKU: Unable to read\"
+                  }
+                  Write-Host \"  ---\"
+                }
+              } else {
+                Write-Host '  No certificates found in LocalMachine\\\\My'
+              }
+              
+              Write-Host 'Certificate enumeration completed successfully'
+            } catch {
+              Write-Host \"PowerShell certificate enumeration failed: \$(\$_.Exception.Message)\"
+              Write-Host \"Error details: \$(\$_.Exception.ToString())\"
             }
-            
-            Write-Host 'LocalMachine\\My certificates:'
-            Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | ForEach-Object {
-              Write-Host \"  Subject: \$(\$_.Subject)\"
-              Write-Host \"  Thumbprint: \$(\$_.Thumbprint)\"
-              Write-Host \"  HasPrivateKey: \$(\$_.HasPrivateKey)\"
-              Write-Host \"  KeyUsage: \$(\$_.Extensions | Where-Object {\$_.Oid.FriendlyName -eq 'Key Usage'} | Select-Object -ExpandProperty Format -First 1)\"
-              Write-Host \"  EKU: \$(\$_.EnhancedKeyUsageList -join ', ')\"
-              Write-Host \"  ---\"
-            }
-          " 2>/dev/null || echo "Certificate enumeration failed"
+          " 2>&1)
+          POWERSHELL_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "PowerShell exit code: $POWERSHELL_EXIT_CODE"
+          if [ -n "$POWERSHELL_OUTPUT" ]; then
+            echo "PowerShell output:"
+            echo "$POWERSHELL_OUTPUT"
+          else
+            echo "⚠️ No output from PowerShell certificate enumeration"
+          fi
           
           # Test B: Check if /td parameter is supported
           echo ""
           echo "Test B: Testing timestamp digest parameter support..."
-          TD_SUPPORT_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /? 2>&1 | grep -i "/td" || echo "No /td parameter found")
-          echo "TD parameter support: $TD_SUPPORT_OUTPUT"
+          echo "Command: signtool.exe sign /?"
+          
+          set +e  # Don't exit on error
+          TD_SUPPORT_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /? 2>&1)
+          TD_HELP_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Signtool help exit code: $TD_HELP_EXIT_CODE"
+          if [ -n "$TD_SUPPORT_OUTPUT" ]; then
+            echo "Checking for /td parameter in help..."
+            TD_GREP_RESULT=$(echo "$TD_SUPPORT_OUTPUT" | grep -i "/td" || echo "No /td parameter found")
+            echo "TD parameter support: $TD_GREP_RESULT"
+            
+            echo "Full help output (first 20 lines):"
+            echo "$TD_SUPPORT_OUTPUT" | head -20
+          else
+            echo "⚠️ No output from signtool help command"
+          fi
           
           # Test C: Try with different timestamp approach
           echo ""
           echo "Test C: Testing with basic timestamp (no /td)..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd SHA256 /tr http://timestamp.digicert.com /v test-small.exe"
+          
+          set +e  # Don't exit on error
           BASIC_TS_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /v test-small.exe 2>&1)
+          BASIC_TS_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Basic timestamp exit code: $BASIC_TS_EXIT_CODE"
           echo "Basic timestamp output:"
-          echo "$BASIC_TS_OUTPUT"
+          if [ -n "$BASIC_TS_OUTPUT" ]; then
+            echo "$BASIC_TS_OUTPUT"
+          else
+            echo "⚠️ No output from basic timestamp test"
+          fi
           
           # Now test with the actual large file
           echo ""
