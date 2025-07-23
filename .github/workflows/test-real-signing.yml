@@ -533,6 +533,39 @@ jobs:
           echo "Simple test output:"
           echo "$SIMPLE_OUTPUT"
           
+          # Test A2: Certificate enumeration diagnosis
+          echo ""
+          echo "Test A2: Certificate enumeration diagnosis..."
+          echo "Checking what certificates signtool can see..."
+          CERT_ENUM_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v /debug test-small.exe 2>&1 | head -20)
+          echo "Certificate enumeration details:"
+          echo "$CERT_ENUM_OUTPUT"
+          
+          # Test A3: Direct certificate store check
+          echo ""
+          echo "Test A3: Direct certificate store verification..."
+          powershell -Command "
+            Write-Host 'CurrentUser\\My certificates:'
+            Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | ForEach-Object {
+              Write-Host \"  Subject: \$(\$_.Subject)\"
+              Write-Host \"  Thumbprint: \$(\$_.Thumbprint)\"
+              Write-Host \"  HasPrivateKey: \$(\$_.HasPrivateKey)\"
+              Write-Host \"  KeyUsage: \$(\$_.Extensions | Where-Object {\$_.Oid.FriendlyName -eq 'Key Usage'} | Select-Object -ExpandProperty Format -First 1)\"
+              Write-Host \"  EKU: \$(\$_.EnhancedKeyUsageList -join ', ')\"
+              Write-Host \"  ---\"
+            }
+            
+            Write-Host 'LocalMachine\\My certificates:'
+            Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | ForEach-Object {
+              Write-Host \"  Subject: \$(\$_.Subject)\"
+              Write-Host \"  Thumbprint: \$(\$_.Thumbprint)\"
+              Write-Host \"  HasPrivateKey: \$(\$_.HasPrivateKey)\"
+              Write-Host \"  KeyUsage: \$(\$_.Extensions | Where-Object {\$_.Oid.FriendlyName -eq 'Key Usage'} | Select-Object -ExpandProperty Format -First 1)\"
+              Write-Host \"  EKU: \$(\$_.EnhancedKeyUsageList -join ', ')\"
+              Write-Host \"  ---\"
+            }
+          " 2>/dev/null || echo "Certificate enumeration failed"
+          
           # Test B: Check if /td parameter is supported
           echo ""
           echo "Test B: Testing timestamp digest parameter support..."
