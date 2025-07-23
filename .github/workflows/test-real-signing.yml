@@ -897,6 +897,48 @@ jobs:
             echo "⚠️ No output from quoted algorithm test"
           fi
           
+          # Test C12: CRITICAL TEST - Try with existing LocalMachine certificate
+          echo ""
+          echo "Test C12: 🔥 CRITICAL TEST - Testing with existing LocalMachine certificate..."
+          echo "This will prove whether the issue is syntax vs certificate availability"
+          
+          # Get the first available certificate thumbprint from LocalMachine
+          LOCALHOST_CERT=$(powershell -Command "Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Select-Object -First 1 | Select-Object -ExpandProperty Thumbprint" 2>/dev/null || echo "")
+          
+          if [ -n "$LOCALHOST_CERT" ]; then
+            echo "Found LocalMachine certificate: $LOCALHOST_CERT"
+            echo "Command: timeout 30 signtool.exe sign /sha1 $LOCALHOST_CERT /fd SHA256 /v test-small.exe"
+            
+            set +e  # Don't exit on error
+            LOCALHOST_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /sha1 "$LOCALHOST_CERT" /fd SHA256 /v test-small.exe 2>&1)
+            LOCALHOST_EXIT_CODE=$?
+            set -e  # Re-enable exit on error
+            
+            echo "LocalMachine cert exit code: $LOCALHOST_EXIT_CODE"
+            echo "LocalMachine cert output:"
+            if [ -n "$LOCALHOST_OUTPUT" ]; then
+              echo "$LOCALHOST_OUTPUT"
+            else
+              echo "⚠️ No output from LocalMachine cert test"
+            fi
+            
+            # Analyze the result
+            if echo "$LOCALHOST_OUTPUT" | grep -q "No file digest algorithm specified"; then
+              echo "🔥 SAME ERROR - This proves it's NOT a certificate availability issue!"
+              echo "🔥 This suggests a deeper signtool.exe policy or environment issue"
+            elif echo "$LOCALHOST_OUTPUT" | grep -q "not valid for signing\|not intended for code signing"; then
+              echo "✅ DIFFERENT ERROR - Syntax works! Certificate is not for code signing"
+              echo "✅ This proves our /fd syntax is correct and we need proper code signing certificates"
+            elif echo "$LOCALHOST_OUTPUT" | grep -q "Successfully signed"; then
+              echo "🎉 SUCCESS! Syntax works with available certificates!"
+              echo "🎉 The issue is purely that we need the Certum code signing certificate loaded"
+            else
+              echo "🤔 Different error - need to investigate certificate type/usage"
+            fi
+          else
+            echo "❌ No LocalMachine certificates found for testing"
+          fi
+          
           # Now test with the actual large file
           echo ""
           echo "Testing signtool with actual executable..."
