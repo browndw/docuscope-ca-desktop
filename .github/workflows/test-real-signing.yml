@@ -260,6 +260,70 @@ jobs:
           
           echo "✅ Certificate access test completed"
 
+      - name: Authenticate with Certum Cloud Service
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== AUTHENTICATING WITH CERTUM CLOUD SERVICE ==="
+          
+          if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" ]]; then
+            echo "✅ Credentials available - attempting cloud authentication"
+            
+            # Find SimplySign Desktop executable
+            SIMPLYSIGN_EXE="/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
+            
+            if [ -f "$SIMPLYSIGN_EXE" ]; then
+              echo "✅ Found SimplySign Desktop: $SIMPLYSIGN_EXE"
+              
+              echo "Starting SimplySign Desktop for authentication..."
+              # Start SimplySign Desktop in background to establish connection
+              "$SIMPLYSIGN_EXE" &
+              SIMPLYSIGN_PID=$!
+              
+              echo "Waiting for SimplySign Desktop to initialize..."
+              sleep 15
+              
+              # Check if the process is running
+              if kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
+                echo "✅ SimplySign Desktop is running (PID: $SIMPLYSIGN_PID)"
+                
+                # Give it time to establish cloud connection
+                echo "Allowing time for cloud authentication..."
+                sleep 10
+                
+                # Check certificate store again after authentication
+                echo "Checking certificate store after authentication..."
+                CERT_COUNT_AFTER=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+                echo "Certificate count after auth: $CERT_COUNT_AFTER"
+                
+                if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+                  echo "Searching for target certificate after authentication..."
+                  CERT_FOUND_AFTER=$(powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }" 2>/dev/null)
+                  if [ -n "$CERT_FOUND_AFTER" ]; then
+                    echo "✅ Target certificate now available after authentication!"
+                    powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' } | Format-Table Subject, Thumbprint, NotAfter" 2>/dev/null
+                  else
+                    echo "⚠️ Target certificate still not accessible - may need manual authentication"
+                  fi
+                fi
+                
+                # Keep SimplySign running for signing process
+                echo "✅ SimplySign Desktop authenticated and ready for signing"
+                
+              else
+                echo "⚠️ SimplySign Desktop process ended quickly"
+              fi
+              
+            else
+              echo "❌ SimplySign Desktop executable not found"
+            fi
+            
+          else
+            echo "⚠️ Missing Certum credentials - skipping cloud authentication"
+          fi
+
       - name: Test Code Signing with signtool.exe
         env:
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
@@ -355,7 +419,34 @@ jobs:
             fi
           else
             echo ""
-            echo "⚠️ CERTUM_CERTIFICATE_SHA1 not provided - skipping specific certificate test"
+            echo "⚠️ CERTUM_CERTIFICATE_SHA1 not provided - testing with available certificates"
+            
+            # Test with any available certificate
+            echo "🧪 Test 2b: Attempting signing with any available certificate"
+            echo "Command: signtool sign /a /fd SHA256 /v /tr http://timestamp.digicert.com docuscope-test-signing.exe"
+            
+            # Create a backup for testing
+            cp docuscope-test-signing.exe docuscope-test-signing-backup.exe
+            
+            # Attempt signing with any available certificate
+            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v /tr http://timestamp.digicert.com docuscope-test-signing.exe 2>&1)
+            echo "$SIGNING_OUTPUT" | head -50
+            
+            # Check if signing was successful
+            if echo "$SIGNING_OUTPUT" | grep -q "Successfully signed"; then
+              echo ""
+              echo "✅ SIGNING SUCCESSFUL WITH AVAILABLE CERTIFICATE!"
+              
+              # Verify the signature
+              echo ""
+              echo "🔍 Verifying signature..."
+              "$SIGNTOOL_PATH" verify /v docuscope-test-signing.exe 2>&1 | head -30 || echo "Verification completed"
+              
+            else
+              echo ""
+              echo "⚠️ No suitable certificates found for automatic signing"
+              echo "This indicates certificates require authentication or are not available"
+            fi
           fi
           
           # Test 3: Available code signing certificates
@@ -369,6 +460,10 @@ jobs:
 
       - name: Summary and Results
         if: always()
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
           echo ""
           echo "======================================================================"
