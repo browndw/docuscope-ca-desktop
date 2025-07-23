@@ -236,6 +236,22 @@ jobs:
           if [[ "$INSTALLER_TYPE" == "MSI" ]]; then
             echo "🎯 MSI INSTALLER DETECTED - Using msiexec for proper silent install!"
             echo ""
+            
+            # CRITICAL: Start Windows Installer service for MSI installations
+            echo "=== Windows Installer Service Setup ==="
+            echo "Checking Windows Installer service status..."
+            powershell -Command "Get-Service -Name 'msiserver' | Format-Table Name, Status, StartType" || echo "Could not check Windows Installer service"
+            
+            echo "Starting Windows Installer service..."
+            powershell -Command "Start-Service -Name 'msiserver' -ErrorAction SilentlyContinue" || echo "Could not start service (may already be running)"
+            
+            # Wait a moment for service to fully start
+            sleep 3
+            
+            echo "Verifying Windows Installer service is now running..."
+            powershell -Command "Get-Service -Name 'msiserver' | Format-Table Name, Status, StartType" || echo "Could not verify service status"
+            
+            echo ""
             echo "Method 1: MSI silent installation (msiexec /i /quiet /norestart)"
             echo "Full command: msiexec /i \"$CERTUM_INSTALLER\" /quiet /norestart /l*v install.log REBOOT=Suppress"
             
@@ -284,7 +300,8 @@ jobs:
               echo "Installation status:"
               grep -i "installation\|complete\|success\|finish" install.log 2>/dev/null || echo "No completion status found"
             else
-              echo "❌ No installation log created - this suggests msiexec failed to start or access was denied"
+              echo "❌ No installation log created - this suggests msiexec failed to start or Windows Installer service is not running"
+              echo "🔧 Solution: The Windows Installer service may need to be started manually in CI/CD environments"
             fi
             
           else
@@ -350,6 +367,12 @@ jobs:
               # Check Windows Installer service status first
               echo "=== Windows Installer Service Check ==="
               powershell -Command "Get-Service -Name 'msiserver' | Format-Table Name, Status, StartType" || echo "Could not check Windows Installer service"
+              
+              # Ensure service is running for Method 2
+              echo "Ensuring Windows Installer service is running for Method 2..."
+              powershell -Command "Start-Service -Name 'msiserver' -ErrorAction SilentlyContinue" || echo "Service may already be running"
+              sleep 2
+              powershell -Command "Get-Service -Name 'msiserver' | Format-Table Name, Status, StartType" || echo "Could not verify service status"
               
               # Check Windows Event Log for MSI installation errors
               echo ""
