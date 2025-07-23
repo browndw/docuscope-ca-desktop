@@ -322,6 +322,33 @@ jobs:
                   timeout 30 "$SIMPLYSIGN_CLI" --help 2>&1 | head -10 || echo "CLI help completed"
                 fi
                 
+                # Method 2b: Try manual authentication with credentials
+                if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" ]]; then
+                  echo "Method 2b: Attempting manual authentication with credentials..."
+                  
+                  # Try to create a simple authentication request
+                  echo "Testing credential format..."
+                  echo "Username length: ${#CERTUM_USERNAME}"
+                  echo "Password configured: $([ -n "$CERTUM_PASSWORD" ] && echo "Yes" || echo "No")"
+                  echo "Certificate SHA1 configured: $([ -n "$CERTUM_CERTIFICATE_SHA1" ] && echo "Yes" || echo "No")"
+                  
+                  # Look for any Certum-specific configuration or authentication tools
+                  CERTUM_CONFIG_PATHS=(
+                    "/c/Program Files/Certum/SimplySign Desktop/config"
+                    "/c/Users/$USER/AppData/Local/Certum"
+                    "/c/Users/$USER/AppData/Roaming/Certum"
+                    "/c/ProgramData/Certum"
+                  )
+                  
+                  echo "Checking for Certum configuration directories..."
+                  for config_path in "${CERTUM_CONFIG_PATHS[@]}"; do
+                    if [ -d "$config_path" ]; then
+                      echo "Found: $config_path"
+                      ls -la "$config_path" 2>/dev/null | head -5 || echo "  (empty or no access)"
+                    fi
+                  done
+                fi
+                
                 # Method 3: Try to trigger authentication through Java application
                 JAVA_APP="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/proCertumCardManager.jar"
                 JAVA_EXE="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/jre/bin/java.exe"
@@ -485,24 +512,34 @@ jobs:
           # Test 1: Certificate enumeration
           echo ""
           echo "🧪 Test 1: Certificate store enumeration"
-          echo "Command: signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /v docuscope-test-signing.exe"
+          echo "Command: signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
           
           # Create a copy for testing
           cp docuscope-test-signing.exe docuscope-test-enumeration.exe
           
-          timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /v docuscope-test-enumeration.exe 2>&1 | head -50 || echo "Certificate enumeration test completed"
+          ENUMERATION_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-enumeration.exe 2>&1)
+          echo "$ENUMERATION_OUTPUT" | head -50
+          
+          # Check if enumeration found any certificates
+          if echo "$ENUMERATION_OUTPUT" | grep -q "Successfully signed"; then
+            echo "✅ Certificate enumeration succeeded - found suitable certificate!"
+          elif echo "$ENUMERATION_OUTPUT" | grep -q "No certificates were found"; then
+            echo "⚠️ No suitable certificates found for automatic signing"
+          else
+            echo "⚠️ Certificate enumeration completed with issues"
+          fi
           
           # Test 2: Specific certificate signing (if SHA1 provided)
           if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
             echo ""
             echo "🧪 Test 2: Specific certificate signing"
-            echo "Command: signtool sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /tr http://timestamp.digicert.com /v docuscope-test-signing.exe"
+            echo "Command: signtool sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
             
             # Create a backup for testing
             cp docuscope-test-signing.exe docuscope-test-signing-backup.exe
             
             # Attempt signing with specific certificate
-            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /tr http://timestamp.digicert.com /v docuscope-test-signing.exe 2>&1)
+            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe 2>&1)
             echo "$SIGNING_OUTPUT" | head -50
             
             # Check if signing was successful
@@ -530,15 +567,18 @@ jobs:
               echo ""
               echo "⚠️ Signing failed or encountered issues"
               echo "Specific error analysis:"
-              if echo "$SIGNING_OUTPUT" | grep -q "Cannot find a certificate matching the hash"; then
+              if echo "$SIGNING_OUTPUT" | grep -q "Cannot find a certificate matching the hash\|The specified certificate is not valid for signing"; then
                 echo "- Certificate with SHA1 $CERTUM_CERTIFICATE_SHA1 not found in certificate stores"
                 echo "- This indicates the Certum certificate has not been loaded properly"
-              elif echo "$SIGNING_OUTPUT" | grep -q "SignerSign() failed"; then
-                echo "- Signing operation failed (possibly authentication required)"
-              elif echo "$SIGNING_OUTPUT" | grep -q "private key"; then
-                echo "- Private key not accessible (authentication required)"
+                echo "- SimplySign Desktop may need interactive authentication"
+              elif echo "$SIGNING_OUTPUT" | grep -q "SignerSign() failed\|private key is not available"; then
+                echo "- Signing operation failed (private key not accessible)"
+                echo "- This usually means authentication is required"
+              elif echo "$SIGNING_OUTPUT" | grep -q "No file digest algorithm specified"; then
+                echo "- Command syntax error (this should be fixed now)"
               else
                 echo "- Other signing issue detected"
+                echo "- Full error context needed for diagnosis"
               fi
             fi
           else
@@ -547,13 +587,13 @@ jobs:
             
             # Test with any available certificate
             echo "🧪 Test 2b: Attempting signing with any available certificate"
-            echo "Command: signtool sign /a /fd SHA256 /v /tr http://timestamp.digicert.com docuscope-test-signing.exe"
+            echo "Command: signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
             
             # Create a backup for testing
             cp docuscope-test-signing.exe docuscope-test-signing-backup.exe
             
             # Attempt signing with any available certificate
-            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v /tr http://timestamp.digicert.com docuscope-test-signing.exe 2>&1)
+            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe 2>&1)
             echo "$SIGNING_OUTPUT" | head -50
             
             # Check if signing was successful
@@ -569,7 +609,15 @@ jobs:
             else
               echo ""
               echo "⚠️ No suitable certificates found for automatic signing"
-              echo "This indicates certificates require authentication or are not available"
+              echo "Error analysis:"
+              if echo "$SIGNING_OUTPUT" | grep -q "No certificates were found that met all the given criteria"; then
+                echo "- No code signing certificates available in certificate stores"
+                echo "- This confirms that Certum certificate loading is the main issue"
+              elif echo "$SIGNING_OUTPUT" | grep -q "No file digest algorithm specified"; then
+                echo "- Command syntax error (this should be fixed now)"
+              else
+                echo "- Other certificate access issue"
+              fi
             fi
           fi
           
