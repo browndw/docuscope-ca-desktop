@@ -311,12 +311,72 @@ jobs:
                   }
                 "
                 
-                # Method 2: Try to access Certum API directly if possible
-                echo "Method 2: Allowing additional time for cloud authentication..."
-                sleep 20
+                # Method 2: Try SimplySign Desktop command line authentication
+                echo "Method 2: Attempting SimplySign Desktop CLI authentication..."
                 
-                # Check certificate store again after extended wait
-                echo "Checking certificate store after extended authentication time..."
+                # Try to use SimplySign CLI for authentication if available
+                SIMPLYSIGN_CLI="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/proCertumCardManager.exe"
+                if [ -f "$SIMPLYSIGN_CLI" ]; then
+                  echo "Found SimplySign CLI: $SIMPLYSIGN_CLI"
+                  echo "Attempting CLI authentication..."
+                  timeout 30 "$SIMPLYSIGN_CLI" --help 2>&1 | head -10 || echo "CLI help completed"
+                fi
+                
+                # Method 3: Try to trigger authentication through Java application
+                JAVA_APP="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/proCertumCardManager.jar"
+                JAVA_EXE="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/jre/bin/java.exe"
+                if [ -f "$JAVA_APP" ] && [ -f "$JAVA_EXE" ]; then
+                  echo "Method 3: Attempting Java-based authentication..."
+                  echo "Command: java -jar proCertumCardManager.jar"
+                  cd "/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign"
+                  timeout 30 "$JAVA_EXE" -jar proCertumCardManager.jar --help 2>&1 | head -10 || echo "Java auth attempt completed"
+                  cd - > /dev/null
+                fi
+                
+                # Method 4: Extended wait with periodic certificate store checks
+                echo "Method 4: Extended authentication with monitoring..."
+                for i in {1..6}; do
+                  echo "Authentication attempt $i/6..."
+                  sleep 10
+                  
+                  # Check certificate stores
+                  CERT_COUNT_CU=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+                  CERT_COUNT_LM=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+                  
+                  echo "  CurrentUser certificates: $CERT_COUNT_CU"
+                  echo "  LocalMachine certificates: $CERT_COUNT_LM"
+                  
+                  # Check for target certificate
+                  if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+                    TARGET_FOUND=$(powershell -Command "
+                      \$cert1 = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
+                      \$cert2 = Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
+                      if (\$cert1 -or \$cert2) { 'FOUND' } else { 'NOT_FOUND' }
+                    " 2>/dev/null || echo "NOT_FOUND")
+                    
+                    if [ "$TARGET_FOUND" = "FOUND" ]; then
+                      echo "  ✅ Target certificate detected! Breaking authentication loop."
+                      break
+                    fi
+                  fi
+                  
+                  # Try to refresh certificate stores
+                  if [ $((i % 2)) -eq 0 ]; then
+                    echo "  Refreshing certificate stores..."
+                    powershell -Command "
+                      try {
+                        Get-ChildItem -Path 'Cert:\\CurrentUser\\My' -Recurse | Out-Null
+                        Get-ChildItem -Path 'Cert:\\LocalMachine\\My' -Recurse | Out-Null
+                        Write-Host '  Certificate store refresh completed'
+                      } catch {
+                        Write-Host '  Certificate refresh failed: ' \$_.Exception.Message
+                      }
+                    "
+                  fi
+                done
+                
+                # Final certificate count check
+                echo "Final authentication results:"
                 CERT_COUNT_AFTER=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
                 echo "Certificate count after auth: $CERT_COUNT_AFTER"
                 
@@ -425,21 +485,24 @@ jobs:
           # Test 1: Certificate enumeration
           echo ""
           echo "🧪 Test 1: Certificate store enumeration"
-          echo "Command: signtool sign /a /fd SHA256 /v docuscope-test-signing.exe"
+          echo "Command: signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /v docuscope-test-signing.exe"
           
-          timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v docuscope-test-signing.exe 2>&1 | head -50 || echo "Certificate enumeration test completed"
+          # Create a copy for testing
+          cp docuscope-test-signing.exe docuscope-test-enumeration.exe
+          
+          timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /v docuscope-test-enumeration.exe 2>&1 | head -50 || echo "Certificate enumeration test completed"
           
           # Test 2: Specific certificate signing (if SHA1 provided)
           if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
             echo ""
             echo "🧪 Test 2: Specific certificate signing"
-            echo "Command: signtool sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /v docuscope-test-signing.exe"
+            echo "Command: signtool sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /tr http://timestamp.digicert.com /v docuscope-test-signing.exe"
             
             # Create a backup for testing
             cp docuscope-test-signing.exe docuscope-test-signing-backup.exe
             
             # Attempt signing with specific certificate
-            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /v docuscope-test-signing.exe 2>&1)
+            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /tr http://timestamp.digicert.com /v docuscope-test-signing.exe 2>&1)
             echo "$SIGNING_OUTPUT" | head -50
             
             # Check if signing was successful
@@ -465,12 +528,18 @@ jobs:
               
             else
               echo ""
-              echo "⚠️ Signing may have failed or encountered issues"
-              echo "This could indicate:"
-              echo "- Certificate not accessible in current context"
-              echo "- Authentication required"
-              echo "- Certificate not suitable for code signing"
-              echo "- SimplySign Desktop not properly configured"
+              echo "⚠️ Signing failed or encountered issues"
+              echo "Specific error analysis:"
+              if echo "$SIGNING_OUTPUT" | grep -q "Cannot find a certificate matching the hash"; then
+                echo "- Certificate with SHA1 $CERTUM_CERTIFICATE_SHA1 not found in certificate stores"
+                echo "- This indicates the Certum certificate has not been loaded properly"
+              elif echo "$SIGNING_OUTPUT" | grep -q "SignerSign() failed"; then
+                echo "- Signing operation failed (possibly authentication required)"
+              elif echo "$SIGNING_OUTPUT" | grep -q "private key"; then
+                echo "- Private key not accessible (authentication required)"
+              else
+                echo "- Other signing issue detected"
+              fi
             fi
           else
             echo ""
