@@ -509,24 +509,55 @@ jobs:
           
           echo "Target file: docuscope-test-signing.exe ($(ls -lh docuscope-test-signing.exe | awk '{print $5}'))"
           
-          # Test 1: Certificate enumeration
+          # Test 0: Basic signtool validation
+          echo ""
+          echo "🧪 Test 0: Basic signtool validation"
+          echo "Testing signtool help and basic functionality..."
+          
+          "$SIGNTOOL_PATH" /? 2>&1 | head -10 || echo "Signtool help completed"
+          
+          # Test 1: Certificate enumeration with better error capture
           echo ""
           echo "🧪 Test 1: Certificate store enumeration"
           echo "Command: signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
           
+          # Create a smaller test file first to avoid timeout issues
+          echo "Creating smaller test file for initial validation..."
+          echo "This is a test executable for code signing" > test-small.exe
+          
+          echo "Testing signtool with small file first..."
+          SMALL_TEST_OUTPUT=$(timeout 60 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v test-small.exe 2>&1)
+          echo "Small file test output:"
+          echo "$SMALL_TEST_OUTPUT" | head -20
+          
+          # Now test with the actual large file
+          echo ""
+          echo "Testing signtool with actual executable..."
           # Create a copy for testing
           cp docuscope-test-signing.exe docuscope-test-enumeration.exe
           
-          ENUMERATION_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-enumeration.exe 2>&1)
-          echo "$ENUMERATION_OUTPUT" | head -50
+          ENUMERATION_OUTPUT=$(timeout 180 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-enumeration.exe 2>&1)
+          echo "Full enumeration output:"
+          echo "$ENUMERATION_OUTPUT"
           
           # Check if enumeration found any certificates
           if echo "$ENUMERATION_OUTPUT" | grep -q "Successfully signed"; then
             echo "✅ Certificate enumeration succeeded - found suitable certificate!"
           elif echo "$ENUMERATION_OUTPUT" | grep -q "No certificates were found"; then
             echo "⚠️ No suitable certificates found for automatic signing"
+          elif echo "$ENUMERATION_OUTPUT" | grep -q "No file digest algorithm specified"; then
+            echo "❌ Signtool syntax error - need to fix command format"
+          elif echo "$ENUMERATION_OUTPUT" | grep -q "Invalid timestamp server"; then
+            echo "⚠️ Timestamp server issue - trying without timestamping"
+            
+            # Retry without timestamping
+            echo "Retrying without timestamp server..."
+            RETRY_OUTPUT=$(timeout 180 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v docuscope-test-enumeration.exe 2>&1)
+            echo "Retry output:"
+            echo "$RETRY_OUTPUT" | head -30
           else
             echo "⚠️ Certificate enumeration completed with issues"
+            echo "Exit code analysis needed - checking specific error patterns..."
           fi
           
           # Test 2: Specific certificate signing (if SHA1 provided)
