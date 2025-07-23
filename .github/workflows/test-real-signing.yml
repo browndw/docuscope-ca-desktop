@@ -753,6 +753,96 @@ jobs:
             echo "⚠️ No output from no timestamp test"
           fi
           
+          # Test C4: Try with different parameter syntax - space vs equals
+          echo ""
+          echo "Test C4: Testing parameter syntax variations..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd=SHA256 /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          EQUALS_SYNTAX_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd=SHA256 /v test-small.exe 2>&1)
+          EQUALS_SYNTAX_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Equals syntax exit code: $EQUALS_SYNTAX_EXIT_CODE"
+          echo "Equals syntax output:"
+          if [ -n "$EQUALS_SYNTAX_OUTPUT" ]; then
+            echo "$EQUALS_SYNTAX_OUTPUT"
+          else
+            echo "⚠️ No output from equals syntax test"
+          fi
+          
+          # Test C5: Try with SHA1 digest algorithm (matching certificate)
+          echo ""
+          echo "Test C5: Testing with SHA1 digest algorithm..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd SHA1 /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          SHA1_DIGEST_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA1 /v test-small.exe 2>&1)
+          SHA1_DIGEST_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "SHA1 digest exit code: $SHA1_DIGEST_EXIT_CODE"
+          echo "SHA1 digest output:"
+          if [ -n "$SHA1_DIGEST_OUTPUT" ]; then
+            echo "$SHA1_DIGEST_OUTPUT"
+          else
+            echo "⚠️ No output from SHA1 digest test"
+          fi
+          
+          # Test C6: Try completely minimal command
+          echo ""
+          echo "Test C6: Testing minimal signtool command..."
+          echo "Command: timeout 30 signtool.exe sign /a test-small.exe"
+          
+          set +e  # Don't exit on error
+          MINIMAL_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a test-small.exe 2>&1)
+          MINIMAL_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Minimal command exit code: $MINIMAL_EXIT_CODE"
+          echo "Minimal command output:"
+          if [ -n "$MINIMAL_OUTPUT" ]; then
+            echo "$MINIMAL_OUTPUT"
+          else
+            echo "⚠️ No output from minimal command test"
+          fi
+          
+          # Test C7: Check signtool version and default behavior
+          echo ""
+          echo "Test C7: Checking signtool version and default behavior..."
+          echo "Command: signtool.exe /??"
+          
+          set +e  # Don't exit on error
+          VERSION_OUTPUT=$("$SIGNTOOL_PATH" /? 2>&1 | head -5)
+          VERSION_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Version check exit code: $VERSION_EXIT_CODE"
+          echo "Version output:"
+          if [ -n "$VERSION_OUTPUT" ]; then
+            echo "$VERSION_OUTPUT"
+          else
+            echo "⚠️ No version output"
+          fi
+          
+          # Test C8: Try with explicit legacy SHA1 behavior
+          echo ""
+          echo "Test C8: Testing legacy SHA1 behavior (pre-SHA256 requirement)..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd sha1 test-small.exe"
+          
+          set +e  # Don't exit on error
+          LEGACY_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd sha1 test-small.exe 2>&1)
+          LEGACY_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Legacy SHA1 exit code: $LEGACY_EXIT_CODE"
+          echo "Legacy SHA1 output:"
+          if [ -n "$LEGACY_OUTPUT" ]; then
+            echo "$LEGACY_OUTPUT"
+          else
+            echo "⚠️ No output from legacy SHA1 test"
+          fi
+          
           # Now test with the actual large file
           echo ""
           echo "Testing signtool with actual executable..."
