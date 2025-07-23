@@ -13,54 +13,112 @@ defaults:
     shell: bash
 
 jobs:
-  test-real-signing:
+  build-and-test-signing:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Python Binary for Testing
-        if: github.event_name == 'workflow_run'
-        uses: actions/download-artifact@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
         with:
-          name: pyinstaller-binary-x86_64-pc-windows-msvc
-          path: ./test-binary/
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
+          python-version: "3.11.9"
 
-      - name: Download Python Binary (manual trigger)
-        if: github.event_name != 'workflow_run'
-        uses: actions/download-artifact@v4
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
         with:
-          name: pyinstaller-binary-x86_64-pc-windows-msvc
-          path: ./test-binary/
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
 
-      - name: Verify Test Binary
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-3.11.9-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Cache PyInstaller build
+        uses: actions/cache@v3
+        with:
+          path: |
+            build/
+            dist/
+          key: pyinstaller-${{ runner.os }}-x86_64-pc-windows-msvc-${{ hashFiles('entrypoint.py', 'entrypoint.spec', 'requirements-deploy.txt') }}
+          restore-keys: |
+            pyinstaller-${{ runner.os }}-x86_64-pc-windows-msvc-
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root --with build
+
+      - name: Build Python package
+        run: poetry build
+
+      - name: Install deployment requirements
         run: |
-          echo "=== TEST BINARY VERIFICATION ==="
-          echo "Contents of test-binary directory:"
-          ls -la ./test-binary/
+          poetry run pip install -r requirements-deploy.txt
+          poetry run pip install pyinstaller
+
+      - name: Create PyInstaller binary
+        run: |
+          echo "=== BUILDING PYTHON EXECUTABLE FOR SIGNING TEST ==="
+          echo "Starting PyInstaller build..."
+          echo "This may take several minutes, please be patient..."
           
-          # Find the actual executable
-          PYTHON_EXE=$(find ./test-binary/ -name "*.exe" | head -1)
-          if [ -n "$PYTHON_EXE" ]; then
-            echo "✅ Found Python executable: $PYTHON_EXE"
-            echo "File size: $(ls -lh "$PYTHON_EXE" | awk '{print $5}')"
-            echo "File permissions: $(ls -la "$PYTHON_EXE" | awk '{print $1}')"
+          # Run PyInstaller with progress monitoring
+          poetry run pyinstaller entrypoint.spec --log-level=WARN --noconfirm &
+          PYINSTALLER_PID=$!
+          
+          # Monitor progress
+          while kill -0 $PYINSTALLER_PID 2>/dev/null; do
+            echo "PyInstaller build still running... ($(date))"
+            sleep 30
+          done
+          
+          # Wait for the process to complete
+          wait $PYINSTALLER_PID
+          PYINSTALLER_EXIT_CODE=$?
+          
+          if [ $PYINSTALLER_EXIT_CODE -eq 0 ]; then
+            echo "✅ PyInstaller build completed successfully"
+          else
+            echo "❌ PyInstaller build failed with exit code $PYINSTALLER_EXIT_CODE"
+            exit $PYINSTALLER_EXIT_CODE
+          fi
+
+      - name: Verify and prepare test binary
+        run: |
+          echo "=== PREPARING TEST BINARY ==="
+          
+          # Check for Windows executable
+          if [ -f "./dist/entrypoint.exe" ]; then
+            echo "✅ Windows executable created successfully"
+            ls -la ./dist/entrypoint.exe
+            echo "File size: $(ls -lh ./dist/entrypoint.exe | awk '{print $5}')"
             
             # Test basic execution
-            echo "Testing executable..."
-            timeout 10 "$PYTHON_EXE" --version 2>&1 || echo "Version test completed"
+            echo "Testing executable functionality..."
+            timeout 15 ./dist/entrypoint.exe --version 2>&1 || echo "Version test completed"
             
-            # This will be our signing target
-            cp "$PYTHON_EXE" ./docuscope-test-signing.exe
+            # Create our signing target
+            cp ./dist/entrypoint.exe ./docuscope-test-signing.exe
             echo "✅ Created signing target: docuscope-test-signing.exe"
+            
+          elif [ -f "./dist/entrypoint" ]; then
+            echo "⚠️ Found Unix-style executable, copying for Windows test"
+            cp ./dist/entrypoint ./docuscope-test-signing.exe
+            
           else
-            echo "❌ No executable found in test-binary directory"
+            echo "❌ No executable found in dist directory!"
+            echo "Contents of dist directory:"
+            ls -la ./dist/
             exit 1
           fi
+          
+          echo "✅ Test binary ready for code signing"
 
       - name: Install SimplySign Desktop
         env:
