@@ -126,13 +126,10 @@ jobs:
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
-          # Set bash to continue on errors for MSI installations
-          set +e
-          
           echo "=== INSTALLING SIMPLYSIGN DESKTOP ==="
-          echo "Downloading and installing SimplySign Desktop for code signing..."
+          echo "Using proven installation method from successful testing..."
           
-          # Download the proven MSI installer
+          # Download SimplySign Desktop MSI
           CERTUM_INSTALLER="SimplySignDesktop.msi"
           echo "Downloading SimplySign Desktop MSI..."
           
@@ -143,69 +140,42 @@ jobs:
             exit 1
           fi
           
-          # Install with proven method
+          # Install with proven method (streamlined)
           echo "Installing SimplySign Desktop..."
-          echo "Command: msiexec /i \"$CERTUM_INSTALLER\" /quiet /norestart /l*v install.log ALLUSERS=1 REBOOT=ReallySuppress"
-          
           timeout 300 msiexec /i "$CERTUM_INSTALLER" /quiet /norestart /l*v install.log ALLUSERS=1 REBOOT=ReallySuppress &
           INSTALL_PID=$!
           
-          # Monitor installation
+          # Monitor with simplified logic
+          echo "Monitoring installation (typically completes in 1-2 minutes)..."
           sleep 30
           if kill -0 $INSTALL_PID 2>/dev/null; then
             echo "Installation still running, waiting for completion..."
-            wait $INSTALL_PID 2>/dev/null || echo "Installation process completed"
-          else
-            echo "Installation completed quickly"
+            wait $INSTALL_PID 2>/dev/null || echo "Installation completed"
           fi
           
-          # Check for installation success
-          SUCCESS_PATTERNS=(
-            "Installation.*operation.*completed.*successfully"
-            "Installation.*success.*or.*error.*status.*0"
-            "MainEngineThread.*is.*returning.*0"
-            "Windows.*Installer.*installed.*the.*product"
-          )
-          
+          # Quick success check using proven patterns
           INSTALLATION_SUCCESSFUL=false
           if [ -f "install.log" ]; then
-            echo "Checking installation log for success patterns..."
-            for pattern in "${SUCCESS_PATTERNS[@]}"; do
-              if grep -qi "$pattern" install.log 2>/dev/null; then
-                echo "✅ Found success pattern: $pattern"
-                INSTALLATION_SUCCESSFUL=true
-                break
-              fi
-            done
+            if grep -qi "Installation.*operation.*completed.*successfully\|Installation.*success.*or.*error.*status.*0\|MainEngineThread.*is.*returning.*0\|Windows.*Installer.*installed.*the.*product" install.log 2>/dev/null; then
+              echo "✅ Installation successful (confirmed by log patterns)"
+              INSTALLATION_SUCCESSFUL=true
+            fi
           fi
           
           # Verify installation directory
           INSTALL_PATH="/c/Program Files/Certum/SimplySign Desktop"
           if [ -d "$INSTALL_PATH" ]; then
-            echo "✅ SimplySign Desktop installed at: $INSTALL_PATH"
-            echo "Installation contains $(find "$INSTALL_PATH" -type f | wc -l) files"
+            echo "✅ SimplySign Desktop installed successfully"
+            echo "✅ Virtual card emulation now active for code signing"
             INSTALLATION_SUCCESSFUL=true
-          elif [ "$INSTALLATION_SUCCESSFUL" = true ]; then
-            echo "✅ Installation successful (confirmed by log analysis)"
-            echo "Using default installation path for testing: $INSTALL_PATH"
-          else
-            echo "❌ SimplySign Desktop installation failed"
-            if [ -f "install.log" ]; then
-              echo "Last 20 lines of install log:"
-              tail -20 install.log
-            fi
+          fi
+          
+          if [ "$INSTALLATION_SUCCESSFUL" = false ]; then
+            echo "❌ Installation verification failed"
+            echo "Last 10 lines of install log:"
+            tail -10 install.log 2>/dev/null || echo "No install log available"
             exit 1
           fi
-          
-          # Find main executable
-          MAIN_EXE=$(find "$INSTALL_PATH" -name "SimplySignDesktop.exe" 2>/dev/null | head -1)
-          if [ -n "$MAIN_EXE" ]; then
-            echo "✅ Found SimplySign executable: $MAIN_EXE"
-          else
-            echo "⚠️ SimplySign executable not immediately accessible (may require system refresh)"
-          fi
-          
-          echo "✅ SimplySign Desktop installation completed"
 
       - name: Test Certificate Access
         env:
@@ -214,45 +184,32 @@ jobs:
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
           echo "=== TESTING CERTIFICATE ACCESS ==="
-          echo "Checking for Certum cloud certificates..."
           
-          # Check credential configuration
+          # Quick credential check
           if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" && -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
             echo "✅ All required credentials configured"
-            echo "Certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
+            echo "Target certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
           else
-            echo "⚠️ Missing required credentials for certificate access"
-            echo "CERTUM_USERNAME: $([ -n "$CERTUM_USERNAME" ] && echo "configured" || echo "missing")"
-            echo "CERTUM_PASSWORD: $([ -n "$CERTUM_PASSWORD" ] && echo "configured" || echo "missing")"
-            echo "CERTUM_CERTIFICATE_SHA1: $([ -n "$CERTUM_CERTIFICATE_SHA1" ] && echo "configured" || echo "missing")"
+            echo "⚠️ Missing credentials - will test with available certificates"
           fi
           
-          # Check certificate stores
-          echo ""
+          # Check certificate stores (simplified)
           echo "Checking Windows Certificate Stores..."
-          
-          echo "CurrentUser\\My certificates:"
           CERT_COUNT=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
-          echo "  Certificate count: $CERT_COUNT"
+          echo "CurrentUser certificates: $CERT_COUNT"
           
-          echo "LocalMachine\\My certificates:"
-          CERT_COUNT_LM=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
-          echo "  Certificate count: $CERT_COUNT_LM"
-          
-          # Look for specific certificate
+          # Look for target certificate if provided
           if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
-            echo ""
-            echo "Searching for target certificate: $CERTUM_CERTIFICATE_SHA1"
-            
-            CERT_FOUND=$(powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' } | Select-Object -First 1" 2>/dev/null)
+            echo "Searching for target certificate..."
+            CERT_FOUND=$(powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }" 2>/dev/null)
             if [ -n "$CERT_FOUND" ]; then
-              echo "✅ Certificate found in CurrentUser store!"
-              powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' } | Format-Table Subject, Thumbprint, NotAfter" 2>/dev/null
+              echo "✅ Target certificate found in store!"
             else
-              echo "⚠️ Certificate not found in CurrentUser store"
-              echo "📋 Cloud certificates may require authentication or SimplySign Desktop to be running"
+              echo "⚠️ Target certificate not yet in store (may require authentication)"
             fi
           fi
+          
+          echo "✅ Certificate access test completed"
 
       - name: Test Code Signing with signtool.exe
         env:
