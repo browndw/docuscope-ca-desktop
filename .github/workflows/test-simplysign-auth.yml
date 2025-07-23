@@ -371,9 +371,16 @@ jobs:
                 echo "The process exit code can be misleading in CI/CD - actual installation succeeded"
                 
                 # Extract installation location from log
-                INSTALL_LOCATION=$(grep -i "ARPINSTALLLOCATION" install.log 2>/dev/null | head -1 | cut -d'=' -f2 | tr -d ' ')
+                INSTALL_LOCATION=$(grep -i "ARPINSTALLLOCATION" install.log 2>/dev/null | head -1 | sed 's/.*ARPINSTALLLOCATION.*=\s*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
                 if [ -n "$INSTALL_LOCATION" ]; then
                   echo "✅ Installation location from log: $INSTALL_LOCATION"
+                  # Convert Windows path to Unix-style path for bash
+                  INSTALL_LOCATION_UNIX=$(echo "$INSTALL_LOCATION" | sed 's|C:\\|/c/|g' | sed 's|\\|/|g')
+                  echo "✅ Unix-style path: $INSTALL_LOCATION_UNIX"
+                else
+                  echo "⚠️ Could not extract installation location from log, using default"
+                  INSTALL_LOCATION="C:\\Program Files\\Certum\\SimplySign Desktop\\"
+                  INSTALL_LOCATION_UNIX="/c/Program Files/Certum/SimplySign Desktop"
                 fi
                 
                 echo "Proceeding to verify installation directories..."
@@ -518,8 +525,12 @@ jobs:
               echo "Searching using installation location from MSI log..."
               
               # Try the exact path from the MSI log first
-              if [ -n "$INSTALL_LOCATION" ] && [ -d "$INSTALL_LOCATION" ]; then
-                echo "✅ Found installation at MSI log location: $INSTALL_LOCATION"
+              if [ -n "$INSTALL_LOCATION_UNIX" ] && [ -d "$INSTALL_LOCATION_UNIX" ]; then
+                echo "✅ Found installation at MSI log location: $INSTALL_LOCATION_UNIX"
+                SIMPLYSIGN_INSTALLED=true
+                INSTALLED_PATH="$INSTALL_LOCATION_UNIX"
+              elif [ -n "$INSTALL_LOCATION" ] && [ -d "$INSTALL_LOCATION" ]; then
+                echo "✅ Found installation at MSI log location (Windows path): $INSTALL_LOCATION"
                 SIMPLYSIGN_INSTALLED=true
                 INSTALLED_PATH="$INSTALL_LOCATION"
               else
