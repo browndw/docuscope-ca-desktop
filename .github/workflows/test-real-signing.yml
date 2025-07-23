@@ -843,6 +843,60 @@ jobs:
             echo "⚠️ No output from legacy SHA1 test"
           fi
           
+          # Test C9: Try with /fd certHash as suggested by error message
+          echo ""
+          echo "Test C9: Testing with /fd certHash (as suggested by error message)..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd certHash /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          CERTHASH_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd certHash /v test-small.exe 2>&1)
+          CERTHASH_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "CertHash exit code: $CERTHASH_EXIT_CODE"
+          echo "CertHash output:"
+          if [ -n "$CERTHASH_OUTPUT" ]; then
+            echo "$CERTHASH_OUTPUT"
+          else
+            echo "⚠️ No output from certHash test"
+          fi
+          
+          # Test C10: Try without /fd at all (let signtool choose default)
+          echo ""
+          echo "Test C10: Testing without /fd parameter (signtool default)..."
+          echo "Command: timeout 30 signtool.exe sign /a /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          NO_FD_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /v test-small.exe 2>&1)
+          NO_FD_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "No /fd exit code: $NO_FD_EXIT_CODE"
+          echo "No /fd output:"
+          if [ -n "$NO_FD_OUTPUT" ]; then
+            echo "$NO_FD_OUTPUT"
+          else
+            echo "⚠️ No output from no /fd test"
+          fi
+          
+          # Test C11: Try with double quotes around algorithm
+          echo ""
+          echo "Test C11: Testing with quoted algorithm..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd \"SHA256\" /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          QUOTED_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd "SHA256" /v test-small.exe 2>&1)
+          QUOTED_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Quoted algorithm exit code: $QUOTED_EXIT_CODE"
+          echo "Quoted algorithm output:"
+          if [ -n "$QUOTED_OUTPUT" ]; then
+            echo "$QUOTED_OUTPUT"
+          else
+            echo "⚠️ No output from quoted algorithm test"
+          fi
+          
           # Now test with the actual large file
           echo ""
           echo "Testing signtool with actual executable..."
