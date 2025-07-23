@@ -717,13 +717,56 @@ jobs:
             echo "⚠️ No output from basic timestamp test"
           fi
           
+          # Test C2: Try with correct timestamp parameter order
+          echo ""
+          echo "Test C2: Testing with corrected timestamp parameter order..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          CORRECTED_TS_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v test-small.exe 2>&1)
+          CORRECTED_TS_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Corrected timestamp exit code: $CORRECTED_TS_EXIT_CODE"
+          echo "Corrected timestamp output:"
+          if [ -n "$CORRECTED_TS_OUTPUT" ]; then
+            echo "$CORRECTED_TS_OUTPUT"
+          else
+            echo "⚠️ No output from corrected timestamp test"
+          fi
+          
+          # Test C3: Try without any timestamp to isolate certificate issues
+          echo ""
+          echo "Test C3: Testing without timestamp to isolate certificate availability..."
+          echo "Command: timeout 30 signtool.exe sign /a /fd SHA256 /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          NO_TS_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v test-small.exe 2>&1)
+          NO_TS_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "No timestamp exit code: $NO_TS_EXIT_CODE"
+          echo "No timestamp output:"
+          if [ -n "$NO_TS_OUTPUT" ]; then
+            echo "$NO_TS_OUTPUT"
+          else
+            echo "⚠️ No output from no timestamp test"
+          fi
+          
           # Now test with the actual large file
           echo ""
           echo "Testing signtool with actual executable..."
+          echo "Command: timeout 180 signtool.exe sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-enumeration.exe"
+          
           # Create a copy for testing
           cp docuscope-test-signing.exe docuscope-test-enumeration.exe
           
+          set +e  # Don't exit on error
           ENUMERATION_OUTPUT=$(timeout 180 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-enumeration.exe 2>&1)
+          ENUMERATION_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Full enumeration exit code: $ENUMERATION_EXIT_CODE"
           echo "Full enumeration output:"
           echo "$ENUMERATION_OUTPUT"
           
