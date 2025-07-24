@@ -412,7 +412,7 @@ jobs:
                             \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store(\$storeName, \$location)
                             \$store.Open('ReadOnly')
                             if (\$store.Certificates.Count -gt 0) {
-                              Write-Host \"Store \$location\\\\\$storeName: \$(\$store.Certificates.Count) certificates\"
+                              Write-Host \"Store \${location}\\\\\${storeName} has \$(\$store.Certificates.Count) certificates\"
                             }
                             \$store.Close()
                           } catch {
@@ -1129,10 +1129,10 @@ jobs:
                           \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store(\$storeName, \$location)
                           \$store.Open('ReadWrite')
                           \$certCount = \$store.Certificates.Count
-                          Write-Host \"Store \$location\\\\\$storeName has \$certCount certificates\"
+                          Write-Host \"Store \${location}\\\\\${storeName} has \$certCount certificates\"
                           \$store.Close()
                         } catch {
-                          Write-Host \"Could not access \$location\\\\\$storeName store\"
+                          Write-Host \"Could not access \${location}\\\\\${storeName} store\"
                         }
                       }
                     }
