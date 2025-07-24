@@ -473,28 +473,48 @@ jobs:
           echo "=== TESTING CODE SIGNING ==="
           echo "Testing code signing with Windows SDK signtool.exe..."
           
-          # Find signtool.exe
+          # Find signtool.exe - prioritize working older versions first
+          echo "🔧 USING WORKING SIGNTOOL VERSION based on diagnostic results..."
+          echo "Avoiding Windows SDK 10.0.22621.0 due to /fd parameter parsing regression"
+          
           SIGNTOOL_LOCATIONS=(
-            "/c/Program Files (x86)/Windows Kits/10/bin/10.0.22621.0/x64/signtool.exe"
+            # Working older versions first (proven to parse parameters correctly)
+            "/c/Program Files (x86)/Windows Kits/10/bin/10.0.17763.0/x64/signtool.exe"
             "/c/Program Files (x86)/Windows Kits/10/bin/10.0.19041.0/x64/signtool.exe"
+            "/c/Program Files (x86)/Windows Kits/10/bin/10.0.18362.0/x64/signtool.exe"
+            # Fallback to newer versions if older not available
             "/c/Program Files (x86)/Windows Kits/10/bin/x64/signtool.exe"
+            # Last resort: the problematic version
+            "/c/Program Files (x86)/Windows Kits/10/bin/10.0.22621.0/x64/signtool.exe"
           )
           
           SIGNTOOL_PATH=""
           for location in "${SIGNTOOL_LOCATIONS[@]}"; do
             if [ -f "$location" ]; then
               SIGNTOOL_PATH="$location"
-              echo "✅ Found signtool.exe: $SIGNTOOL_PATH"
-              break
+              echo "✅ Found working signtool.exe: $SIGNTOOL_PATH"
+              
+              # Test if this version can parse /fd parameter correctly
+              echo "🧪 Testing /fd parameter parsing with this version..."
+              TEST_FD_OUTPUT=$("$SIGNTOOL_PATH" sign /fd INVALID_TEST_ALGORITHM 2>&1 || true)
+              
+              if echo "$TEST_FD_OUTPUT" | grep -q "No file digest algorithm specified"; then
+                echo "⚠️ This version also has /fd parsing issues, trying next..."
+                continue
+              else
+                echo "✅ This version correctly parses /fd parameter!"
+                break
+              fi
             fi
           done
           
           if [ -z "$SIGNTOOL_PATH" ]; then
-            echo "🔍 Searching for signtool.exe..."
-            FOUND_SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits" -name "signtool.exe" 2>/dev/null | head -1)
+            echo "❌ No working signtool.exe found - all versions have /fd parameter parsing issues"
+            echo "🔍 Searching for any available signtool.exe as last resort..."
+            FOUND_SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits" -name "signtool.exe" -path "*/x64/*" 2>/dev/null | head -1)
             if [ -n "$FOUND_SIGNTOOL" ]; then
               SIGNTOOL_PATH="$FOUND_SIGNTOOL"
-              echo "✅ Found signtool.exe: $SIGNTOOL_PATH"
+              echo "⚠️ Using fallback signtool.exe: $SIGNTOOL_PATH"
             else
               echo "❌ signtool.exe not found - cannot test code signing"
               exit 1
@@ -508,46 +528,68 @@ jobs:
           fi
           
           echo "Target file: docuscope-test-signing.exe ($(ls -lh docuscope-test-signing.exe | awk '{print $5}'))"
+          echo "Working signtool version: $SIGNTOOL_PATH"
           
-          # Test 0: Basic signtool validation
+          # Test 0: Verify working signtool version
           echo ""
-          echo "🧪 Test 0: Basic signtool validation"
-          echo "Testing signtool help and basic functionality..."
+          echo "🧪 Test 0: Verify working signtool version"
+          echo "Testing that this version correctly parses /fd parameter..."
           
-          "$SIGNTOOL_PATH" /? 2>&1 | head -10 || echo "Signtool help completed"
-          
-          # Test 1: Certificate enumeration with better error capture
-          echo ""
-          echo "🧪 Test 1: Certificate store enumeration"
-          echo "Command: signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
-          
-          # Create a smaller test file first to avoid timeout issues
-          echo "Creating smaller test file for initial validation..."
+          # Create a small test file
+          echo "Creating test file for parameter validation..."
           echo "This is a test executable for code signing" > test-small.exe
           
-          echo "Testing signtool with small file first..."
-          
-          # Test A: Simple command without timestamp
-          echo "Test A: Simple signing without timestamp..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd SHA256 /v test-small.exe"
+          # Test /fd parameter parsing with this version
+          echo "Command: signtool.exe sign /a /fd SHA256 /v test-small.exe"
           
           set +e  # Don't exit on error
-          SIMPLE_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v test-small.exe 2>&1)
-          SIMPLE_EXIT_CODE=$?
+          WORKING_TEST_OUTPUT=$("$SIGNTOOL_PATH" sign /a /fd SHA256 /v test-small.exe 2>&1)
+          WORKING_TEST_EXIT_CODE=$?
           set -e  # Re-enable exit on error
           
-          echo "Simple test exit code: $SIMPLE_EXIT_CODE"
-          echo "Simple test output:"
-          if [ -n "$SIMPLE_OUTPUT" ]; then
-            echo "$SIMPLE_OUTPUT"
+          echo "Working version test exit code: $WORKING_TEST_EXIT_CODE"
+          echo "Working version test output:"
+          echo "$WORKING_TEST_OUTPUT"
+          
+          # Verify this version can parse /fd
+          if echo "$WORKING_TEST_OUTPUT" | grep -q "No file digest algorithm specified"; then
+            echo "❌ This signtool version ALSO has /fd parsing issues!"
+            echo "❌ All Windows SDK versions in GitHub Actions may be affected"
+            echo "🔧 Need alternative approach - trying command shell workaround..."
+            
+            # Try using cmd.exe with proper Windows path format
+            WINDOWS_SIGNTOOL_PATH=$(echo "$SIGNTOOL_PATH" | sed 's|^/c/|C:\\|' | sed 's|/|\\|g')
+            echo "Trying Windows-style path via cmd.exe: $WINDOWS_SIGNTOOL_PATH"
+            
+            CMD_TEST_OUTPUT=$(cmd.exe /c "\"$WINDOWS_SIGNTOOL_PATH\" sign /a /fd SHA256 /v test-small.exe" 2>&1)
+            echo "CMD.exe test output:"
+            echo "$CMD_TEST_OUTPUT"
+            
+            if echo "$CMD_TEST_OUTPUT" | grep -q "No file digest algorithm specified"; then
+              echo "❌ Even cmd.exe workaround fails - this is a systematic GitHub Actions issue"
+              echo "🚨 CRITICAL: Windows SDK in GitHub Actions has broken /fd parameter parsing"
+              echo "🚨 This requires Microsoft to fix GitHub Actions Windows SDK environment"
+              echo ""
+              echo "WORKAROUND OPTIONS:"
+              echo "1. Use self-hosted Windows runners with older Windows SDK"
+              echo "2. Use alternative code signing tools (osslsigncode, Azure SignTool)"
+              echo "3. Wait for Microsoft to fix GitHub Actions Windows SDK"
+              echo "4. Use Docker with older Windows SDK version"
+              exit 1
+            else
+              echo "✅ CMD.exe workaround works! Using Windows-style path execution."
+              # Update signtool path to use cmd.exe wrapper
+              SIGNTOOL_CMD="cmd.exe /c \"\\\"$WINDOWS_SIGNTOOL_PATH\\\"\""
+            fi
           else
-            echo "⚠️ No output from simple signtool test"
+            echo "✅ This signtool version correctly parses /fd parameter!"
+            echo "✅ Ready for code signing tests"
           fi
           
-          # Immediate certificate check after failure
+          # Test 1: Certificate store analysis
           echo ""
-          echo "🔍 IMMEDIATE CERTIFICATE DIAGNOSIS:"
-          echo "Checking certificate stores immediately after signing failure..."
+          echo "🧪 Test 1: Certificate store analysis"
+          echo "Checking available certificates for code signing..."
           
           CERT_COUNT_CU=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
           CERT_COUNT_LM=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
@@ -555,19 +597,7 @@ jobs:
           echo "CurrentUser\\My certificates: $CERT_COUNT_CU"
           echo "LocalMachine\\My certificates: $CERT_COUNT_LM"
           
-          # Quick certificate details
-          if [ "$CERT_COUNT_CU" != "0" ]; then
-            echo "CurrentUser certificates:"
-            powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Format-Table Subject, Thumbprint, HasPrivateKey -AutoSize" 2>/dev/null || echo "Error listing CurrentUser certs"
-          fi
-          
-          if [ "$CERT_COUNT_LM" != "0" ]; then
-            echo "LocalMachine certificates:"
-            powershell -Command "Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Format-Table Subject, Thumbprint, HasPrivateKey -AutoSize" 2>/dev/null || echo "Error listing LocalMachine certs"
-          fi
-          
           # Check for code signing specific certificates
-          echo "Code signing certificates check:"
           CS_CERTS=$(powershell -Command "
             \$cs1 = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Measure-Object | Select-Object -ExpandProperty Count
             \$cs2 = Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Measure-Object | Select-Object -ExpandProperty Count
@@ -577,588 +607,108 @@ jobs:
           " 2>/dev/null || echo "0")
           echo "Total code signing certificates: $CS_CERTS"
           
-          # Test A2: Certificate enumeration diagnosis
+          # Test 2: Real code signing attempt
           echo ""
-          echo "Test A2: Certificate enumeration diagnosis..."
-          echo "Checking what certificates signtool can see..."
-          echo "Command: timeout 10 signtool.exe sign /a /fd SHA256 /v test-small.exe"
+          echo "🧪 Test 2: Real code signing with working signtool"
+          echo "Attempting to sign executable with available certificates..."
           
-          # Run signtool with better error capture
-          set +e  # Don't exit on error
-          CERT_ENUM_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v test-small.exe 2>&1)
-          CERT_ENUM_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Certificate enumeration exit code: $CERT_ENUM_EXIT_CODE"
-          echo "Certificate enumeration output (first 30 lines):"
-          echo "$CERT_ENUM_OUTPUT" | head -30
-          
-          if [ -z "$CERT_ENUM_OUTPUT" ]; then
-            echo "⚠️ No output from signtool - command may have failed silently"
-          fi
-          
-          # Test A3: Direct certificate store check
-          echo ""
-          echo "Test A3: Direct certificate store verification..."
-          echo "Running PowerShell certificate enumeration..."
-          
-          # Run PowerShell with better error handling
-          set +e  # Don't exit on error
-          POWERSHELL_OUTPUT=$(powershell -Command "
-            try {
-              Write-Host 'Starting certificate enumeration...'
-              
-              Write-Host 'CurrentUser\\\\My certificates:'
-              \$cuCerts = Get-ChildItem -Path 'Cert:\\\\CurrentUser\\\\My' -ErrorAction SilentlyContinue
-              if (\$cuCerts) {
-                \$cuCerts | ForEach-Object {
-                  Write-Host \"  Subject: \$(\$_.Subject)\"
-                  Write-Host \"  Thumbprint: \$(\$_.Thumbprint)\"
-                  Write-Host \"  HasPrivateKey: \$(\$_.HasPrivateKey)\"
-                  Write-Host \"  NotAfter: \$(\$_.NotAfter)\"
-                  try {
-                    \$keyUsage = \$_.Extensions | Where-Object {\$_.Oid.FriendlyName -eq 'Key Usage'} | Select-Object -ExpandProperty Format -First 1
-                    Write-Host \"  KeyUsage: \$keyUsage\"
-                  } catch {
-                    Write-Host \"  KeyUsage: Unable to read\"
-                  }
-                  try {
-                    \$eku = \$_.EnhancedKeyUsageList -join ', '
-                    Write-Host \"  EKU: \$eku\"
-                  } catch {
-                    Write-Host \"  EKU: Unable to read\"
-                  }
-                  Write-Host \"  ---\"
-                }
-              } else {
-                Write-Host '  No certificates found in CurrentUser\\\\My'
-              }
-              
-              Write-Host 'LocalMachine\\\\My certificates:'
-              \$lmCerts = Get-ChildItem -Path 'Cert:\\\\LocalMachine\\\\My' -ErrorAction SilentlyContinue
-              if (\$lmCerts) {
-                \$lmCerts | ForEach-Object {
-                  Write-Host \"  Subject: \$(\$_.Subject)\"
-                  Write-Host \"  Thumbprint: \$(\$_.Thumbprint)\"
-                  Write-Host \"  HasPrivateKey: \$(\$_.HasPrivateKey)\"
-                  Write-Host \"  NotAfter: \$(\$_.NotAfter)\"
-                  try {
-                    \$keyUsage = \$_.Extensions | Where-Object {\$_.Oid.FriendlyName -eq 'Key Usage'} | Select-Object -ExpandProperty Format -First 1
-                    Write-Host \"  KeyUsage: \$keyUsage\"
-                  } catch {
-                    Write-Host \"  KeyUsage: Unable to read\"
-                  }
-                  try {
-                    \$eku = \$_.EnhancedKeyUsageList -join ', '
-                    Write-Host \"  EKU: \$eku\"
-                  } catch {
-                    Write-Host \"  EKU: Unable to read\"
-                  }
-                  Write-Host \"  ---\"
-                }
-              } else {
-                Write-Host '  No certificates found in LocalMachine\\\\My'
-              }
-              
-              Write-Host 'Certificate enumeration completed successfully'
-            } catch {
-              Write-Host \"PowerShell certificate enumeration failed: \$(\$_.Exception.Message)\"
-              Write-Host \"Error details: \$(\$_.Exception.ToString())\"
-            }
-          " 2>&1)
-          POWERSHELL_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "PowerShell exit code: $POWERSHELL_EXIT_CODE"
-          if [ -n "$POWERSHELL_OUTPUT" ]; then
-            echo "PowerShell output:"
-            echo "$POWERSHELL_OUTPUT"
+          # Determine signing command based on working version
+          if [ -n "$SIGNTOOL_CMD" ]; then
+            echo "Using cmd.exe wrapper for signing..."
+            SIGN_COMMAND="$SIGNTOOL_CMD sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
           else
-            echo "⚠️ No output from PowerShell certificate enumeration"
+            echo "Using direct signtool execution..."
+            SIGN_COMMAND="\"$SIGNTOOL_PATH\" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
           fi
           
-          # Test B: Check if /td parameter is supported
-          echo ""
-          echo "Test B: Testing timestamp digest parameter support..."
-          echo "Command: signtool.exe sign /?"
+          echo "Signing command: $SIGN_COMMAND"
           
           set +e  # Don't exit on error
-          TD_SUPPORT_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /? 2>&1)
-          TD_HELP_EXIT_CODE=$?
+          if [ -n "$SIGNTOOL_CMD" ]; then
+            # Use cmd.exe wrapper
+            SIGN_OUTPUT=$(timeout 120 cmd.exe /c "\"$WINDOWS_SIGNTOOL_PATH\" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe" 2>&1)
+          else
+            # Use direct execution
+            SIGN_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe 2>&1)
+          fi
+          SIGN_EXIT_CODE=$?
           set -e  # Re-enable exit on error
           
-          echo "Signtool help exit code: $TD_HELP_EXIT_CODE"
-          if [ -n "$TD_SUPPORT_OUTPUT" ]; then
-            echo "Checking for /td parameter in help..."
-            TD_GREP_RESULT=$(echo "$TD_SUPPORT_OUTPUT" | grep -i "/td" || echo "No /td parameter found")
-            echo "TD parameter support: $TD_GREP_RESULT"
+          echo "Signing exit code: $SIGN_EXIT_CODE"
+          echo "Signing output:"
+          echo "$SIGN_OUTPUT"
+          
+          # Analyze signing results
+          if echo "$SIGN_OUTPUT" | grep -q "Successfully signed"; then
+            echo ""
+            echo "🎉 SIGNING SUCCESSFUL!"
+            echo "✅ signtool.exe working correctly with certificates"
             
-            echo "Full help output (first 20 lines):"
-            echo "$TD_SUPPORT_OUTPUT" | head -20
-          else
-            echo "⚠️ No output from signtool help command"
-          fi
-          
-          # Test C: Try with different timestamp approach
-          echo ""
-          echo "Test C: Testing with basic timestamp (no /td)..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd SHA256 /tr http://timestamp.digicert.com /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          BASIC_TS_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /v test-small.exe 2>&1)
-          BASIC_TS_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Basic timestamp exit code: $BASIC_TS_EXIT_CODE"
-          echo "Basic timestamp output:"
-          if [ -n "$BASIC_TS_OUTPUT" ]; then
-            echo "$BASIC_TS_OUTPUT"
-          else
-            echo "⚠️ No output from basic timestamp test"
-          fi
-          
-          # Test C2: Try with correct timestamp parameter order
-          echo ""
-          echo "Test C2: Testing with corrected timestamp parameter order..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          CORRECTED_TS_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v test-small.exe 2>&1)
-          CORRECTED_TS_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Corrected timestamp exit code: $CORRECTED_TS_EXIT_CODE"
-          echo "Corrected timestamp output:"
-          if [ -n "$CORRECTED_TS_OUTPUT" ]; then
-            echo "$CORRECTED_TS_OUTPUT"
-          else
-            echo "⚠️ No output from corrected timestamp test"
-          fi
-          
-          # Test C3: Try without any timestamp to isolate certificate issues
-          echo ""
-          echo "Test C3: Testing without timestamp to isolate certificate availability..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd SHA256 /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          NO_TS_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v test-small.exe 2>&1)
-          NO_TS_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "No timestamp exit code: $NO_TS_EXIT_CODE"
-          echo "No timestamp output:"
-          if [ -n "$NO_TS_OUTPUT" ]; then
-            echo "$NO_TS_OUTPUT"
-          else
-            echo "⚠️ No output from no timestamp test"
-          fi
-          
-          # Test C4: Try with different parameter syntax - space vs equals
-          echo ""
-          echo "Test C4: Testing parameter syntax variations..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd=SHA256 /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          EQUALS_SYNTAX_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd=SHA256 /v test-small.exe 2>&1)
-          EQUALS_SYNTAX_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Equals syntax exit code: $EQUALS_SYNTAX_EXIT_CODE"
-          echo "Equals syntax output:"
-          if [ -n "$EQUALS_SYNTAX_OUTPUT" ]; then
-            echo "$EQUALS_SYNTAX_OUTPUT"
-          else
-            echo "⚠️ No output from equals syntax test"
-          fi
-          
-          # Test C5: Try with SHA1 digest algorithm (matching certificate)
-          echo ""
-          echo "Test C5: Testing with SHA1 digest algorithm..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd SHA1 /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          SHA1_DIGEST_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd SHA1 /v test-small.exe 2>&1)
-          SHA1_DIGEST_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "SHA1 digest exit code: $SHA1_DIGEST_EXIT_CODE"
-          echo "SHA1 digest output:"
-          if [ -n "$SHA1_DIGEST_OUTPUT" ]; then
-            echo "$SHA1_DIGEST_OUTPUT"
-          else
-            echo "⚠️ No output from SHA1 digest test"
-          fi
-          
-          # Test C6: Try completely minimal command
-          echo ""
-          echo "Test C6: Testing minimal signtool command..."
-          echo "Command: timeout 30 signtool.exe sign /a test-small.exe"
-          
-          set +e  # Don't exit on error
-          MINIMAL_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a test-small.exe 2>&1)
-          MINIMAL_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Minimal command exit code: $MINIMAL_EXIT_CODE"
-          echo "Minimal command output:"
-          if [ -n "$MINIMAL_OUTPUT" ]; then
-            echo "$MINIMAL_OUTPUT"
-          else
-            echo "⚠️ No output from minimal command test"
-          fi
-          
-          # Test C7: Check signtool version and default behavior
-          echo ""
-          echo "Test C7: Checking signtool version and default behavior..."
-          echo "Command: signtool.exe /??"
-          
-          set +e  # Don't exit on error
-          VERSION_OUTPUT=$("$SIGNTOOL_PATH" /? 2>&1 | head -5)
-          VERSION_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Version check exit code: $VERSION_EXIT_CODE"
-          echo "Version output:"
-          if [ -n "$VERSION_OUTPUT" ]; then
-            echo "$VERSION_OUTPUT"
-          else
-            echo "⚠️ No version output"
-          fi
-          
-          # Test C8: Try with explicit legacy SHA1 behavior
-          echo ""
-          echo "Test C8: Testing legacy SHA1 behavior (pre-SHA256 requirement)..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd sha1 test-small.exe"
-          
-          set +e  # Don't exit on error
-          LEGACY_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd sha1 test-small.exe 2>&1)
-          LEGACY_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Legacy SHA1 exit code: $LEGACY_EXIT_CODE"
-          echo "Legacy SHA1 output:"
-          if [ -n "$LEGACY_OUTPUT" ]; then
-            echo "$LEGACY_OUTPUT"
-          else
-            echo "⚠️ No output from legacy SHA1 test"
-          fi
-          
-          # Test C9: Try with /fd certHash as suggested by error message
-          echo ""
-          echo "Test C9: Testing with /fd certHash (as suggested by error message)..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd certHash /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          CERTHASH_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd certHash /v test-small.exe 2>&1)
-          CERTHASH_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "CertHash exit code: $CERTHASH_EXIT_CODE"
-          echo "CertHash output:"
-          if [ -n "$CERTHASH_OUTPUT" ]; then
-            echo "$CERTHASH_OUTPUT"
-          else
-            echo "⚠️ No output from certHash test"
-          fi
-          
-          # Test C10: Try without /fd at all (let signtool choose default)
-          echo ""
-          echo "Test C10: Testing without /fd parameter (signtool default)..."
-          echo "Command: timeout 30 signtool.exe sign /a /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          NO_FD_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /v test-small.exe 2>&1)
-          NO_FD_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "No /fd exit code: $NO_FD_EXIT_CODE"
-          echo "No /fd output:"
-          if [ -n "$NO_FD_OUTPUT" ]; then
-            echo "$NO_FD_OUTPUT"
-          else
-            echo "⚠️ No output from no /fd test"
-          fi
-          
-          # Test C11: Try with double quotes around algorithm
-          echo ""
-          echo "Test C11: Testing with quoted algorithm..."
-          echo "Command: timeout 30 signtool.exe sign /a /fd \"SHA256\" /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          QUOTED_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /a /fd "SHA256" /v test-small.exe 2>&1)
-          QUOTED_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Quoted algorithm exit code: $QUOTED_EXIT_CODE"
-          echo "Quoted algorithm output:"
-          if [ -n "$QUOTED_OUTPUT" ]; then
-            echo "$QUOTED_OUTPUT"
-          else
-            echo "⚠️ No output from quoted algorithm test"
-          fi
-          
-          # Test C12: CRITICAL TEST - Try with existing LocalMachine certificate
-          echo ""
-          echo "Test C12: 🔥 CRITICAL TEST - Testing with existing LocalMachine certificate..."
-          echo "This will prove whether the issue is syntax vs certificate availability"
-          
-          # Get the first available certificate thumbprint from LocalMachine
-          LOCALHOST_CERT=$(powershell -Command "Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Select-Object -First 1 | Select-Object -ExpandProperty Thumbprint" 2>/dev/null || echo "")
-          
-          if [ -n "$LOCALHOST_CERT" ]; then
-            echo "Found LocalMachine certificate: $LOCALHOST_CERT"
-            echo "Command: timeout 30 signtool.exe sign /sha1 $LOCALHOST_CERT /fd SHA256 /v test-small.exe"
-            
-            set +e  # Don't exit on error
-            LOCALHOST_OUTPUT=$(timeout 30 "$SIGNTOOL_PATH" sign /sha1 "$LOCALHOST_CERT" /fd SHA256 /v test-small.exe 2>&1)
-            LOCALHOST_EXIT_CODE=$?
-            set -e  # Re-enable exit on error
-            
-            echo "LocalMachine cert exit code: $LOCALHOST_EXIT_CODE"
-            echo "LocalMachine cert output:"
-            if [ -n "$LOCALHOST_OUTPUT" ]; then
-              echo "$LOCALHOST_OUTPUT"
+            # Verify the signature
+            echo ""
+            echo "🔍 Verifying signature..."
+            if [ -n "$SIGNTOOL_CMD" ]; then
+              VERIFY_OUTPUT=$(cmd.exe /c "\"$WINDOWS_SIGNTOOL_PATH\" verify /v docuscope-test-signing.exe" 2>&1)
             else
-              echo "⚠️ No output from LocalMachine cert test"
+              VERIFY_OUTPUT=$("$SIGNTOOL_PATH" verify /v docuscope-test-signing.exe 2>&1)
             fi
+            echo "$VERIFY_OUTPUT"
             
-            # Analyze the result
-            if echo "$LOCALHOST_OUTPUT" | grep -q "No file digest algorithm specified"; then
-              echo "🔥 SAME ERROR - This proves it's NOT a certificate availability issue!"
-              echo "🔥 This suggests a deeper signtool.exe policy or environment issue"
-            elif echo "$LOCALHOST_OUTPUT" | grep -q "not valid for signing\|not intended for code signing"; then
-              echo "✅ DIFFERENT ERROR - Syntax works! Certificate is not for code signing"
-              echo "✅ This proves our /fd syntax is correct and we need proper code signing certificates"
-            elif echo "$LOCALHOST_OUTPUT" | grep -q "Successfully signed"; then
-              echo "🎉 SUCCESS! Syntax works with available certificates!"
-              echo "🎉 The issue is purely that we need the Certum code signing certificate loaded"
-            else
-              echo "🤔 Different error - need to investigate certificate type/usage"
-            fi
-          else
-            echo "❌ No LocalMachine certificates found for testing"
-          fi
-          
-          # Test C13: ENVIRONMENT DIAGNOSIS - Check Windows SDK environment issues
-          echo ""
-          echo "Test C13: 🔬 ENVIRONMENT DIAGNOSIS - Windows SDK environment analysis..."
-          echo "Investigating why signtool.exe doesn't recognize /fd parameter despite correct syntax"
-          
-          # Check Windows SDK version and environment
-          echo "Windows SDK Environment Analysis:"
-          echo "Signtool path: $SIGNTOOL_PATH"
-          
-          # Get signtool version information
-          echo "Getting detailed signtool version info..."
-          SIGNTOOL_VERSION_FULL=$("$SIGNTOOL_PATH" /? 2>&1 | head -10)
-          echo "Signtool version output:"
-          echo "$SIGNTOOL_VERSION_FULL"
-          
-          # Check for Windows SDK environment variables
-          echo "Windows SDK environment variables:"
-          env | grep -i "windows\|sdk\|signtool" || echo "No Windows SDK environment variables found"
-          
-          # Check .NET Framework version (affects signtool behavior)
-          echo "Checking .NET Framework version..."
-          REG_OUTPUT=$(reg query "HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP" /s 2>/dev/null | grep -i "version" | tail -5 || echo "Could not read .NET registry")
-          echo ".NET Framework versions: $REG_OUTPUT"
-          
-          # Test C14: ALTERNATIVE SIGNTOOL VERSIONS
-          echo ""
-          echo "Test C14: 🔍 ALTERNATIVE SIGNTOOL VERSIONS - Testing different Windows SDK versions..."
-          
-          # Look for other signtool versions
-          echo "Searching for alternative signtool.exe versions..."
-          ALTERNATIVE_SIGNTOOLS=$(find "/c/Program Files (x86)/Windows Kits" -name "signtool.exe" 2>/dev/null | head -5)
-          
-          if [ -n "$ALTERNATIVE_SIGNTOOLS" ]; then
-            echo "Found alternative signtool versions:"
-            echo "$ALTERNATIVE_SIGNTOOLS"
+          elif echo "$SIGN_OUTPUT" | grep -q "No certificates were found that met all the given criteria"; then
+            echo ""
+            echo "⚠️ No suitable code signing certificates found"
+            echo "✅ But signtool.exe is working correctly - /fd parameter parsing fixed!"
+            echo "🔧 Need to ensure Certum certificate is loaded into certificate stores"
             
-            # Test with the oldest available version (more permissive)
-            OLDEST_SIGNTOOL=$(echo "$ALTERNATIVE_SIGNTOOLS" | grep -E "10\.0\.[0-9]+\.[0-9]+" | sort -V | head -1)
+          elif echo "$SIGN_OUTPUT" | grep -q "No file digest algorithm specified"; then
+            echo ""
+            echo "❌ Still getting /fd parameter parsing error"
+            echo "❌ This indicates a systematic GitHub Actions Windows SDK issue"
+            echo "🚨 All available Windows SDK versions have broken /fd parameter parsing"
             
-            if [ -n "$OLDEST_SIGNTOOL" ] && [ "$OLDEST_SIGNTOOL" != "$SIGNTOOL_PATH" ]; then
-              echo "Testing with older signtool version: $OLDEST_SIGNTOOL"
-              echo "Command: timeout 30 \"$OLDEST_SIGNTOOL\" sign /a /fd SHA256 /v test-small.exe"
-              
-              set +e  # Don't exit on error
-              OLDER_SIGNTOOL_OUTPUT=$(timeout 30 "$OLDEST_SIGNTOOL" sign /a /fd SHA256 /v test-small.exe 2>&1)
-              OLDER_SIGNTOOL_EXIT_CODE=$?
-              set -e  # Re-enable exit on error
-              
-              echo "Older signtool exit code: $OLDER_SIGNTOOL_EXIT_CODE"
-              echo "Older signtool output:"
-              if [ -n "$OLDER_SIGNTOOL_OUTPUT" ]; then
-                echo "$OLDER_SIGNTOOL_OUTPUT"
-              else
-                echo "⚠️ No output from older signtool test"
-              fi
-              
-              # Compare results
-              if echo "$OLDER_SIGNTOOL_OUTPUT" | grep -q "No file digest algorithm specified"; then
-                echo "🔥 SAME ERROR with older version - This is a systematic Windows SDK issue!"
-              else
-                echo "✅ DIFFERENT BEHAVIOR with older version - SDK version matters!"
-              fi
-            fi
           else
-            echo "❌ No alternative signtool versions found"
+            echo ""
+            echo "⚠️ Other signing error encountered"
+            echo "Need to analyze specific error pattern..."
           fi
           
-          # Test C15: COMMAND SHELL DIAGNOSIS
-          echo ""
-          echo "Test C15: 🐚 COMMAND SHELL DIAGNOSIS - Testing different execution environments..."
-          
-          # Test via cmd.exe directly
-          echo "Testing signtool via cmd.exe directly..."
-          echo "Command: cmd.exe /c \"$SIGNTOOL_PATH\" sign /a /fd SHA256 /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          CMD_OUTPUT=$(timeout 30 cmd.exe /c "\"$SIGNTOOL_PATH\" sign /a /fd SHA256 /v test-small.exe" 2>&1)
-          CMD_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "CMD.exe exit code: $CMD_EXIT_CODE"
-          echo "CMD.exe output:"
-          if [ -n "$CMD_OUTPUT" ]; then
-            echo "$CMD_OUTPUT"
-          else
-            echo "⚠️ No output from cmd.exe test"
-          fi
-          
-          # Test via PowerShell directly
-          echo "Testing signtool via PowerShell directly..."
-          echo "Command: powershell -Command \"& '$SIGNTOOL_PATH' sign /a /fd SHA256 /v test-small.exe\""
-          
-          set +e  # Don't exit on error
-          PS_OUTPUT=$(timeout 30 powershell -Command "& '$SIGNTOOL_PATH' sign /a /fd SHA256 /v test-small.exe" 2>&1)
-          PS_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "PowerShell exit code: $PS_EXIT_CODE"
-          echo "PowerShell output:"
-          if [ -n "$PS_OUTPUT" ]; then
-            echo "$PS_OUTPUT"
-          else
-            echo "⚠️ No output from PowerShell test"
-          fi
-          
-          # Test C16: PARAMETER ISOLATION TEST
-          echo ""
-          echo "Test C16: 🧬 PARAMETER ISOLATION TEST - Testing if /fd parameter is recognized at all..."
-          
-          # Test just the /fd parameter with help
-          echo "Testing if /fd parameter is recognized in help..."
-          echo "Command: \"$SIGNTOOL_PATH\" sign /fd"
-          
-          set +e  # Don't exit on error
-          FD_PARAM_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /fd 2>&1)
-          FD_PARAM_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "FD parameter test exit code: $FD_PARAM_EXIT_CODE"
-          echo "FD parameter test output:"
-          if [ -n "$FD_PARAM_OUTPUT" ]; then
-            echo "$FD_PARAM_OUTPUT"
-          else
-            echo "⚠️ No output from FD parameter test"
-          fi
-          
-          # Check if the error message changes when we use invalid /fd value
-          echo "Testing with invalid /fd value to see if parameter is parsed..."
-          echo "Command: \"$SIGNTOOL_PATH\" sign /a /fd INVALID_ALGORITHM /v test-small.exe"
-          
-          set +e  # Don't exit on error
-          INVALID_FD_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /a /fd INVALID_ALGORITHM /v test-small.exe 2>&1)
-          INVALID_FD_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Invalid FD test exit code: $INVALID_FD_EXIT_CODE"
-          echo "Invalid FD test output:"
-          if [ -n "$INVALID_FD_OUTPUT" ]; then
-            echo "$INVALID_FD_OUTPUT"
-          else
-            echo "⚠️ No output from invalid FD test"
-          fi
-          
-          # Final analysis
-          echo ""
-          echo "🧪 ENVIRONMENT DIAGNOSIS SUMMARY:"
-          if echo "$INVALID_FD_OUTPUT" | grep -q "No file digest algorithm specified"; then
-            echo "🚨 CRITICAL FINDING: signtool.exe is NOT parsing the /fd parameter at all!"
-            echo "🚨 This suggests a fundamental Windows SDK environment or compatibility issue"
-            echo "🚨 Possible causes:"
-            echo "   - Windows SDK 10.0.22621.0 has breaking changes in parameter parsing"
-            echo "   - GitHub Actions Windows environment has restricted signtool execution"
-            echo "   - Missing Windows SDK dependencies or environment setup"
-            echo "   - signtool.exe execution context is sandboxed or restricted"
-          elif echo "$INVALID_FD_OUTPUT" | grep -q "invalid\|unknown\|unsupported"; then
-            echo "✅ PARAMETER RECOGNIZED: /fd parameter is being parsed but values rejected"
-            echo "✅ This suggests the issue is with algorithm names or certificate context"
-          else
-            echo "🤔 MIXED RESULTS: Need to analyze specific error patterns"
-          fi
-          
-          # Now test with the actual large file
-          echo ""
-          echo "Testing signtool with actual executable..."
-          echo "Command: timeout 180 signtool.exe sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-enumeration.exe"
-          
-          # Create a copy for testing
-          cp docuscope-test-signing.exe docuscope-test-enumeration.exe
-          
-          set +e  # Don't exit on error
-          ENUMERATION_OUTPUT=$(timeout 180 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-enumeration.exe 2>&1)
-          ENUMERATION_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          echo "Full enumeration exit code: $ENUMERATION_EXIT_CODE"
-          echo "Full enumeration output:"
-          echo "$ENUMERATION_OUTPUT"
-          
-          # Check if enumeration found any certificates
-          if echo "$ENUMERATION_OUTPUT" | grep -q "Successfully signed"; then
-            echo "✅ Certificate enumeration succeeded - found suitable certificate!"
-          elif echo "$ENUMERATION_OUTPUT" | grep -q "No certificates were found"; then
-            echo "⚠️ No suitable certificates found for automatic signing"
-          elif echo "$ENUMERATION_OUTPUT" | grep -q "No file digest algorithm specified"; then
-            echo "❌ Signtool syntax error - need to fix command format"
-          elif echo "$ENUMERATION_OUTPUT" | grep -q "Invalid timestamp server"; then
-            echo "⚠️ Timestamp server issue - trying without timestamping"
-            
-            # Retry without timestamping
-            echo "Retrying without timestamp server..."
-            RETRY_OUTPUT=$(timeout 180 "$SIGNTOOL_PATH" sign /a /fd SHA256 /v docuscope-test-enumeration.exe 2>&1)
-            echo "Retry output:"
-            echo "$RETRY_OUTPUT" | head -30
-          else
-            echo "⚠️ Certificate enumeration completed with issues"
-            echo "Exit code analysis needed - checking specific error patterns..."
-          fi
-          
-          # Test 2: Specific certificate signing (if SHA1 provided)
+          # Test 3: Specific certificate signing (if SHA1 provided)
           if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
             echo ""
-            echo "🧪 Test 2: Specific certificate signing"
+            echo "🧪 Test 3: Specific certificate signing"
             echo "Command: signtool sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
             
             # Create a backup for testing
             cp docuscope-test-signing.exe docuscope-test-signing-backup.exe
             
             # Attempt signing with specific certificate
-            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe 2>&1)
-            echo "$SIGNING_OUTPUT" | head -50
+            set +e  # Don't exit on error
+            if [ -n "$SIGNTOOL_CMD" ]; then
+              SPECIFIC_SIGNING_OUTPUT=$(timeout 120 cmd.exe /c "\"$WINDOWS_SIGNTOOL_PATH\" sign /sha1 \"$CERTUM_CERTIFICATE_SHA1\" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe" 2>&1)
+            else
+              SPECIFIC_SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe 2>&1)
+            fi
+            SPECIFIC_SIGNING_EXIT_CODE=$?
+            set -e  # Re-enable exit on error
+            
+            echo "Specific signing exit code: $SPECIFIC_SIGNING_EXIT_CODE"
+            echo "Specific signing output:"
+            echo "$SPECIFIC_SIGNING_OUTPUT" | head -50
             
             # Check if signing was successful
-            if echo "$SIGNING_OUTPUT" | grep -q "Successfully signed"; then
+            if echo "$SPECIFIC_SIGNING_OUTPUT" | grep -q "Successfully signed"; then
               echo ""
-              echo "✅ SIGNING SUCCESSFUL!"
+              echo "✅ SIGNING SUCCESSFUL WITH CERTUM CERTIFICATE!"
               
               # Verify the signature
               echo ""
               echo "🔍 Verifying signature..."
-              "$SIGNTOOL_PATH" verify /v docuscope-test-signing.exe 2>&1 | head -30 || echo "Verification completed"
+              if [ -n "$SIGNTOOL_CMD" ]; then
+                VERIFY_OUTPUT=$(cmd.exe /c "\"$WINDOWS_SIGNTOOL_PATH\" verify /v docuscope-test-signing.exe" 2>&1)
+              else
+                VERIFY_OUTPUT=$("$SIGNTOOL_PATH" verify /v docuscope-test-signing.exe 2>&1)
+              fi
+              echo "$VERIFY_OUTPUT" | head -30 || echo "Verification completed"
               
               # Check file properties
               echo ""
@@ -1173,17 +723,18 @@ jobs:
               
             else
               echo ""
-              echo "⚠️ Signing failed or encountered issues"
-              echo "Specific error analysis:"
-              if echo "$SIGNING_OUTPUT" | grep -q "Cannot find a certificate matching the hash\|The specified certificate is not valid for signing"; then
+              echo "⚠️ Specific certificate signing failed"
+              echo "Error analysis:"
+              if echo "$SPECIFIC_SIGNING_OUTPUT" | grep -q "Cannot find a certificate matching the hash\|The specified certificate is not valid for signing"; then
                 echo "- Certificate with SHA1 $CERTUM_CERTIFICATE_SHA1 not found in certificate stores"
                 echo "- This indicates the Certum certificate has not been loaded properly"
                 echo "- SimplySign Desktop may need interactive authentication"
-              elif echo "$SIGNING_OUTPUT" | grep -q "SignerSign() failed\|private key is not available"; then
+              elif echo "$SPECIFIC_SIGNING_OUTPUT" | grep -q "SignerSign() failed\|private key is not available"; then
                 echo "- Signing operation failed (private key not accessible)"
                 echo "- This usually means authentication is required"
-              elif echo "$SIGNING_OUTPUT" | grep -q "No file digest algorithm specified"; then
-                echo "- Command syntax error (this should be fixed now)"
+              elif echo "$SPECIFIC_SIGNING_OUTPUT" | grep -q "No file digest algorithm specified"; then
+                echo "- signtool.exe still has /fd parameter parsing issues"
+                echo "- Even the older/working version has problems"
               else
                 echo "- Other signing issue detected"
                 echo "- Full error context needed for diagnosis"
@@ -1191,47 +742,12 @@ jobs:
             fi
           else
             echo ""
-            echo "⚠️ CERTUM_CERTIFICATE_SHA1 not provided - testing with available certificates"
-            
-            # Test with any available certificate
-            echo "🧪 Test 2b: Attempting signing with any available certificate"
-            echo "Command: signtool sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe"
-            
-            # Create a backup for testing
-            cp docuscope-test-signing.exe docuscope-test-signing-backup.exe
-            
-            # Attempt signing with any available certificate
-            SIGNING_OUTPUT=$(timeout 120 "$SIGNTOOL_PATH" sign /a /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /v docuscope-test-signing.exe 2>&1)
-            echo "$SIGNING_OUTPUT" | head -50
-            
-            # Check if signing was successful
-            if echo "$SIGNING_OUTPUT" | grep -q "Successfully signed"; then
-              echo ""
-              echo "✅ SIGNING SUCCESSFUL WITH AVAILABLE CERTIFICATE!"
-              
-              # Verify the signature
-              echo ""
-              echo "🔍 Verifying signature..."
-              "$SIGNTOOL_PATH" verify /v docuscope-test-signing.exe 2>&1 | head -30 || echo "Verification completed"
-              
-            else
-              echo ""
-              echo "⚠️ No suitable certificates found for automatic signing"
-              echo "Error analysis:"
-              if echo "$SIGNING_OUTPUT" | grep -q "No certificates were found that met all the given criteria"; then
-                echo "- No code signing certificates available in certificate stores"
-                echo "- This confirms that Certum certificate loading is the main issue"
-              elif echo "$SIGNING_OUTPUT" | grep -q "No file digest algorithm specified"; then
-                echo "- Command syntax error (this should be fixed now)"
-              else
-                echo "- Other certificate access issue"
-              fi
-            fi
+            echo "⚠️ CERTUM_CERTIFICATE_SHA1 not provided - skipping specific certificate test"
           fi
           
-          # Test 3: Available code signing certificates
+          # Test 4: Available code signing certificates
           echo ""
-          echo "🧪 Test 3: Listing available code signing certificates"
+          echo "🧪 Test 4: Listing available code signing certificates"
           echo "Looking for certificates suitable for code signing..."
           
           powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Format-Table Subject, Thumbprint, NotAfter" 2>/dev/null || echo "No code signing certificates found in CurrentUser store"
