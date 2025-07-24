@@ -956,6 +956,8 @@ jobs:
                 # Cleanup
                 rm -f desktop_cookies.txt oauth2_response.html 2>/dev/null || true
                   fi
+                fi
+                fi
                   
                   # Method D: CORRECTED - Two-Step Certum Authentication (Mobile → Desktop)
                   echo ""
@@ -1260,6 +1262,7 @@ jobs:
                     echo "❌ No CERTUM_API_TOKEN available - cannot perform desktop authentication"
                     echo "Mobile authentication step failed - falling back to password-based approach"
                   fi
+                fi
                   
                 
                 # Step D3: Final Authentication Summary
@@ -1375,7 +1378,7 @@ jobs:
                     }
                     
                     Write-Host ''
-                    Write-Host '📊 Authentication Workflow Summary:'
+                    Write-Host '� Authentication Workflow Summary:'
                     Write-Host '  📱 Mobile OAuth2 with CAS login: Attempted'
                     Write-Host '  🔑 SEED/API token generation: Attempted'  
                     Write-Host '  🖥️  Desktop GUI automation: Attempted'
