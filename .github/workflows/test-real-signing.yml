@@ -939,6 +939,167 @@ jobs:
             echo "❌ No LocalMachine certificates found for testing"
           fi
           
+          # Test C13: ENVIRONMENT DIAGNOSIS - Check Windows SDK environment issues
+          echo ""
+          echo "Test C13: 🔬 ENVIRONMENT DIAGNOSIS - Windows SDK environment analysis..."
+          echo "Investigating why signtool.exe doesn't recognize /fd parameter despite correct syntax"
+          
+          # Check Windows SDK version and environment
+          echo "Windows SDK Environment Analysis:"
+          echo "Signtool path: $SIGNTOOL_PATH"
+          
+          # Get signtool version information
+          echo "Getting detailed signtool version info..."
+          SIGNTOOL_VERSION_FULL=$("$SIGNTOOL_PATH" /? 2>&1 | head -10)
+          echo "Signtool version output:"
+          echo "$SIGNTOOL_VERSION_FULL"
+          
+          # Check for Windows SDK environment variables
+          echo "Windows SDK environment variables:"
+          env | grep -i "windows\|sdk\|signtool" || echo "No Windows SDK environment variables found"
+          
+          # Check .NET Framework version (affects signtool behavior)
+          echo "Checking .NET Framework version..."
+          REG_OUTPUT=$(reg query "HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP" /s 2>/dev/null | grep -i "version" | tail -5 || echo "Could not read .NET registry")
+          echo ".NET Framework versions: $REG_OUTPUT"
+          
+          # Test C14: ALTERNATIVE SIGNTOOL VERSIONS
+          echo ""
+          echo "Test C14: 🔍 ALTERNATIVE SIGNTOOL VERSIONS - Testing different Windows SDK versions..."
+          
+          # Look for other signtool versions
+          echo "Searching for alternative signtool.exe versions..."
+          ALTERNATIVE_SIGNTOOLS=$(find "/c/Program Files (x86)/Windows Kits" -name "signtool.exe" 2>/dev/null | head -5)
+          
+          if [ -n "$ALTERNATIVE_SIGNTOOLS" ]; then
+            echo "Found alternative signtool versions:"
+            echo "$ALTERNATIVE_SIGNTOOLS"
+            
+            # Test with the oldest available version (more permissive)
+            OLDEST_SIGNTOOL=$(echo "$ALTERNATIVE_SIGNTOOLS" | grep -E "10\.0\.[0-9]+\.[0-9]+" | sort -V | head -1)
+            
+            if [ -n "$OLDEST_SIGNTOOL" ] && [ "$OLDEST_SIGNTOOL" != "$SIGNTOOL_PATH" ]; then
+              echo "Testing with older signtool version: $OLDEST_SIGNTOOL"
+              echo "Command: timeout 30 \"$OLDEST_SIGNTOOL\" sign /a /fd SHA256 /v test-small.exe"
+              
+              set +e  # Don't exit on error
+              OLDER_SIGNTOOL_OUTPUT=$(timeout 30 "$OLDEST_SIGNTOOL" sign /a /fd SHA256 /v test-small.exe 2>&1)
+              OLDER_SIGNTOOL_EXIT_CODE=$?
+              set -e  # Re-enable exit on error
+              
+              echo "Older signtool exit code: $OLDER_SIGNTOOL_EXIT_CODE"
+              echo "Older signtool output:"
+              if [ -n "$OLDER_SIGNTOOL_OUTPUT" ]; then
+                echo "$OLDER_SIGNTOOL_OUTPUT"
+              else
+                echo "⚠️ No output from older signtool test"
+              fi
+              
+              # Compare results
+              if echo "$OLDER_SIGNTOOL_OUTPUT" | grep -q "No file digest algorithm specified"; then
+                echo "🔥 SAME ERROR with older version - This is a systematic Windows SDK issue!"
+              else
+                echo "✅ DIFFERENT BEHAVIOR with older version - SDK version matters!"
+              fi
+            fi
+          else
+            echo "❌ No alternative signtool versions found"
+          fi
+          
+          # Test C15: COMMAND SHELL DIAGNOSIS
+          echo ""
+          echo "Test C15: 🐚 COMMAND SHELL DIAGNOSIS - Testing different execution environments..."
+          
+          # Test via cmd.exe directly
+          echo "Testing signtool via cmd.exe directly..."
+          echo "Command: cmd.exe /c \"$SIGNTOOL_PATH\" sign /a /fd SHA256 /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          CMD_OUTPUT=$(timeout 30 cmd.exe /c "\"$SIGNTOOL_PATH\" sign /a /fd SHA256 /v test-small.exe" 2>&1)
+          CMD_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "CMD.exe exit code: $CMD_EXIT_CODE"
+          echo "CMD.exe output:"
+          if [ -n "$CMD_OUTPUT" ]; then
+            echo "$CMD_OUTPUT"
+          else
+            echo "⚠️ No output from cmd.exe test"
+          fi
+          
+          # Test via PowerShell directly
+          echo "Testing signtool via PowerShell directly..."
+          echo "Command: powershell -Command \"& '$SIGNTOOL_PATH' sign /a /fd SHA256 /v test-small.exe\""
+          
+          set +e  # Don't exit on error
+          PS_OUTPUT=$(timeout 30 powershell -Command "& '$SIGNTOOL_PATH' sign /a /fd SHA256 /v test-small.exe" 2>&1)
+          PS_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "PowerShell exit code: $PS_EXIT_CODE"
+          echo "PowerShell output:"
+          if [ -n "$PS_OUTPUT" ]; then
+            echo "$PS_OUTPUT"
+          else
+            echo "⚠️ No output from PowerShell test"
+          fi
+          
+          # Test C16: PARAMETER ISOLATION TEST
+          echo ""
+          echo "Test C16: 🧬 PARAMETER ISOLATION TEST - Testing if /fd parameter is recognized at all..."
+          
+          # Test just the /fd parameter with help
+          echo "Testing if /fd parameter is recognized in help..."
+          echo "Command: \"$SIGNTOOL_PATH\" sign /fd"
+          
+          set +e  # Don't exit on error
+          FD_PARAM_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /fd 2>&1)
+          FD_PARAM_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "FD parameter test exit code: $FD_PARAM_EXIT_CODE"
+          echo "FD parameter test output:"
+          if [ -n "$FD_PARAM_OUTPUT" ]; then
+            echo "$FD_PARAM_OUTPUT"
+          else
+            echo "⚠️ No output from FD parameter test"
+          fi
+          
+          # Check if the error message changes when we use invalid /fd value
+          echo "Testing with invalid /fd value to see if parameter is parsed..."
+          echo "Command: \"$SIGNTOOL_PATH\" sign /a /fd INVALID_ALGORITHM /v test-small.exe"
+          
+          set +e  # Don't exit on error
+          INVALID_FD_OUTPUT=$(timeout 10 "$SIGNTOOL_PATH" sign /a /fd INVALID_ALGORITHM /v test-small.exe 2>&1)
+          INVALID_FD_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          echo "Invalid FD test exit code: $INVALID_FD_EXIT_CODE"
+          echo "Invalid FD test output:"
+          if [ -n "$INVALID_FD_OUTPUT" ]; then
+            echo "$INVALID_FD_OUTPUT"
+          else
+            echo "⚠️ No output from invalid FD test"
+          fi
+          
+          # Final analysis
+          echo ""
+          echo "🧪 ENVIRONMENT DIAGNOSIS SUMMARY:"
+          if echo "$INVALID_FD_OUTPUT" | grep -q "No file digest algorithm specified"; then
+            echo "🚨 CRITICAL FINDING: signtool.exe is NOT parsing the /fd parameter at all!"
+            echo "🚨 This suggests a fundamental Windows SDK environment or compatibility issue"
+            echo "🚨 Possible causes:"
+            echo "   - Windows SDK 10.0.22621.0 has breaking changes in parameter parsing"
+            echo "   - GitHub Actions Windows environment has restricted signtool execution"
+            echo "   - Missing Windows SDK dependencies or environment setup"
+            echo "   - signtool.exe execution context is sandboxed or restricted"
+          elif echo "$INVALID_FD_OUTPUT" | grep -q "invalid\|unknown\|unsupported"; then
+            echo "✅ PARAMETER RECOGNIZED: /fd parameter is being parsed but values rejected"
+            echo "✅ This suggests the issue is with algorithm names or certificate context"
+          else
+            echo "🤔 MIXED RESULTS: Need to analyze specific error patterns"
+          fi
+          
           # Now test with the actual large file
           echo ""
           echo "Testing signtool with actual executable..."
