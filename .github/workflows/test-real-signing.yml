@@ -717,9 +717,54 @@ jobs:
                                 timeout 60 ./jre/bin/jarsigner.exe -storetype Windows-MY -tsa http://timestamp.digicert.com test.jar "$CERTUM_CERTIFICATE_SHA1" 2>&1 | head -15 || echo "Jarsigner certificate test completed"
                               fi
                               
-                              # Try to sign with certificate discovery
+                              # Try to sign with certificate discovery using different approaches
                               echo "Attempting jarsigner certificate store enumeration..."
-                              timeout 60 ./jre/bin/jarsigner.exe -keystore NONE -storetype Windows-MY -list 2>&1 | head -20 || echo "Jarsigner certificate list completed"
+                              timeout 60 ./jre/bin/jarsigner.exe -keystore NONE -storetype Windows-MY test.jar -list 2>&1 | head -20 || echo "Jarsigner list attempt 1 completed"
+                              
+                              # Try alternative jarsigner approaches for certificate discovery
+                              echo "Trying alternative jarsigner certificate access methods..."
+                              timeout 60 ./jre/bin/jarsigner.exe -storetype Windows-MY test.jar 2>&1 | head -20 || echo "Jarsigner storetype test completed"
+                              
+                              # Try to use jarsigner with different certificate store access
+                              echo "Testing Windows certificate store integration with Java..."
+                              timeout 60 ./jre/bin/java.exe -Djava.security.debug=certpath -Djava.security.debug=access -version 2>&1 | head -10 || echo "Java certificate debug completed"
+                              
+                              # Try to trigger certificate loading through Java security provider
+                              echo "Attempting to trigger certificate loading via Java security providers..."
+                              
+                              # Create enhanced Java program using echo method
+                              echo 'import java.security.KeyStore;' > TriggerCertLoad.java
+                              echo 'import java.security.Provider;' >> TriggerCertLoad.java
+                              echo 'import java.security.Security;' >> TriggerCertLoad.java
+                              echo '' >> TriggerCertLoad.java
+                              echo 'public class TriggerCertLoad {' >> TriggerCertLoad.java
+                              echo '    public static void main(String[] args) {' >> TriggerCertLoad.java
+                              echo '        try {' >> TriggerCertLoad.java
+                              echo '            System.out.println("=== Java Security Provider Certificate Loading ===");' >> TriggerCertLoad.java
+                              echo '            Provider[] providers = Security.getProviders();' >> TriggerCertLoad.java
+                              echo '            System.out.println("Available security providers: " + providers.length);' >> TriggerCertLoad.java
+                              echo '            String[] storeTypes = {"Windows-MY", "Windows-ROOT", "Windows-CA"};' >> TriggerCertLoad.java
+                              echo '            for (String storeType : storeTypes) {' >> TriggerCertLoad.java
+                              echo '                try {' >> TriggerCertLoad.java
+                              echo '                    System.out.println("Accessing " + storeType + " certificate store...");' >> TriggerCertLoad.java
+                              echo '                    KeyStore ks = KeyStore.getInstance(storeType);' >> TriggerCertLoad.java
+                              echo '                    ks.load(null, null);' >> TriggerCertLoad.java
+                              echo '                    System.out.println(storeType + " store loaded, certificates: " + ks.size());' >> TriggerCertLoad.java
+                              echo '                } catch (Exception e) {' >> TriggerCertLoad.java
+                              echo '                    System.out.println("Error accessing " + storeType + ": " + e.getMessage());' >> TriggerCertLoad.java
+                              echo '                }' >> TriggerCertLoad.java
+                              echo '            }' >> TriggerCertLoad.java
+                              echo '        } catch (Exception e) {' >> TriggerCertLoad.java
+                              echo '            System.out.println("Certificate loading error: " + e.getMessage());' >> TriggerCertLoad.java
+                              echo '        }' >> TriggerCertLoad.java
+                              echo '    }' >> TriggerCertLoad.java
+                              echo '}' >> TriggerCertLoad.java
+                              
+                              # Compile and run the enhanced certificate loading program
+                              if timeout 30 ./jre/bin/javac.exe TriggerCertLoad.java 2>&1; then
+                                echo "Running enhanced certificate loading program..."
+                                timeout 60 ./jre/bin/java.exe TriggerCertLoad 2>&1 | head -30 || echo "Enhanced certificate loading completed"
+                              fi
                             fi
                           fi
                         fi
@@ -828,7 +873,7 @@ jobs:
                           \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store(\$storeName, \$location)
                           \$store.Open('ReadWrite')
                           \$certCount = \$store.Certificates.Count
-                          Write-Host \"Store \$location\\\\\$storeName: \$certCount certificates\"
+                          Write-Host \"Store \$location\\\\\$storeName has \$certCount certificates\"
                           \$store.Close()
                         } catch {
                           Write-Host \"Could not access \$location\\\\\$storeName store\"
