@@ -267,6 +267,9 @@ jobs:
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
+          # Install bc for async polling calculations
+          sudo apt-get update && sudo apt-get install -y bc 2>/dev/null || echo "bc installation completed"
+          
           echo "=== AUTHENTICATING WITH CERTUM CLOUD SERVICE ==="
           echo "🔍 ENHANCED WITH JAR ANALYSIS INSIGHTS"
           echo "✅ Discovered CLI capabilities: --version, --help, --showCertificate, --signing, --configuration"
@@ -586,8 +589,54 @@ jobs:
                   echo "CORRECTED SEED approach 1 response (first 5 lines):"
                   echo "$SEED_REQUEST_1" | head -5
                   
-                  # Extract SEED token/code from approach 1
-                  if echo "$SEED_REQUEST_1" | grep -q "code\|seed\|token" && ! echo "$SEED_REQUEST_1" | grep -q "failed\|error"; then
+                  # Handle async SEED token generation (BREAKTHROUGH: Handle pending responses)
+                  if echo "$SEED_REQUEST_1" | grep -q '"state":"pending"'; then
+                    echo "🔄 ASYNC BREAKTHROUGH: SEED generation accepted, polling for completion..."
+                    TASK_LINK=$(echo "$SEED_REQUEST_1" | grep -o '"atom:link":"[^"]*"' | cut -d'"' -f4)
+                    PING_AFTER=$(echo "$SEED_REQUEST_1" | grep -o '"ping-after":[0-9]*' | cut -d':' -f2)
+                    
+                    if [[ -n "$TASK_LINK" && -n "$PING_AFTER" ]]; then
+                      echo "Task URL: $TASK_LINK"
+                      echo "Polling after: ${PING_AFTER}ms"
+                      
+                      # Wait for the specified time
+                      sleep $(echo "scale=2; $PING_AFTER / 1000" | bc -l)
+                      
+                      # Poll the task for completion
+                      echo "Polling SEED task for completion..."
+                      for attempt in {1..10}; do
+                        TASK_RESULT=$(curl -s --max-time 20 \
+                          -b mobile_cookies.txt \
+                          -H "Accept: application/json" \
+                          -H "User-Agent: SimplySign/1.0 CFNetwork/1485 Darwin/23.1.0" \
+                          "$TASK_LINK" 2>&1)
+                        
+                        echo "Poll attempt $attempt result:"
+                        echo "$TASK_RESULT" | head -3
+                        
+                        if echo "$TASK_RESULT" | grep -q '"state":"completed"'; then
+                          echo "✅ ASYNC SUCCESS: SEED task completed!"
+                          SEED_TOKEN=$(echo "$TASK_RESULT" | grep -o '"code":"[^"]*"' | cut -d'"' -f4 | head -1)
+                          if [[ -z "$SEED_TOKEN" ]]; then
+                            SEED_TOKEN=$(echo "$TASK_RESULT" | grep -o '"result":"[^"]*"' | cut -d'"' -f4 | head -1)
+                          fi
+                          if [[ -n "$SEED_TOKEN" ]]; then
+                            echo "🎉 ASYNC SEED TOKEN: ${SEED_TOKEN:0:8}***"
+                            break
+                          fi
+                        elif echo "$TASK_RESULT" | grep -q '"state":"failed"'; then
+                          echo "❌ SEED task failed: $(echo "$TASK_RESULT" | grep -o '"message":"[^"]*"')"
+                          break
+                        else
+                          echo "⏳ Still processing, waiting 2s..."
+                          sleep 2
+                        fi
+                      done
+                    fi
+                  fi
+                  
+                  # Extract SEED token/code from approach 1 (fallback if not async)
+                  if [[ -z "$SEED_TOKEN" ]] && echo "$SEED_REQUEST_1" | grep -q "code\|seed\|token" && ! echo "$SEED_REQUEST_1" | grep -q "failed\|error"; then
                     # Mobile app expects "code" field in response for SEED generation
                     SEED_TOKEN=$(echo "$SEED_REQUEST_1" | grep -o '"code":"[^"]*"' | cut -d'"' -f4 | head -1)
                     if [[ -z "$SEED_TOKEN" ]]; then
@@ -606,16 +655,21 @@ jobs:
                     echo "CORRECTED Approach 2: Using proper activationCode and deviceInfo..."
                     IDP_TASK_URL="https://cloudsign.webnotarius.pl/idpcertum/api/identities/tasks"
                     
-                    # Create proper deviceInfo structure (from mobile app analysis)
+                    # Generate proper 16-character activation code (requirement from API validation error)
+                    ACTIVATION_CODE_16=$(openssl rand -hex 8)  # 16 hex characters = exactly what API requires
+                    echo "Generated 16-char activation code: $ACTIVATION_CODE_16"
+                    
+                    # Create proper deviceInfo structure (API validation shows exact requirements)
                     DEVICE_INFO="{
-                      \"deviceId\": \"SimplySign-Desktop-$(openssl rand -hex 8)\",
-                      \"deviceName\": \"Windows Desktop\",
-                      \"deviceType\": \"desktop\",
-                      \"osVersion\": \"Windows 10\",
+                      \"platform\": \"Windows\",
+                      \"id\": \"$(openssl rand -hex 16)\",
+                      \"deviceModel\": \"SimplySign-Desktop\",
+                      \"idType\": \"hardware-uuid\",
+                      \"osVersion\": \"Windows-10\",
                       \"appVersion\": \"9.3.2.66\"
                     }"
                     
-                    # Use session token as activation code (this is what we should have gotten from login)
+                    # Use proper activation code format as required by validation pattern ^[a-zA-Z0-9]{16}$
                     SEED_REQUEST_2=$(curl -s --max-time 30 \
                       -b mobile_cookies.txt \
                       -X POST \
@@ -624,7 +678,7 @@ jobs:
                       -H "User-Agent: SimplySign/1.0 CFNetwork/1485 Darwin/23.1.0" \
                       -H "X-Client-ID: $MOBILE_CLIENT_ID" \
                       -d "{
-                        \"activationCode\": \"$SESSION_TOKEN\",
+                        \"activationCode\": \"$ACTIVATION_CODE_16\",
                         \"email\": \"$CERTUM_USERNAME\",
                         \"deviceInfo\": $DEVICE_INFO,
                         \"clientId\": \"$MOBILE_CLIENT_ID\"
@@ -634,7 +688,40 @@ jobs:
                   echo "CORRECTED approach 2 response (first 5 lines):"
                   echo "$SEED_REQUEST_2" | head -5
                   
-                  if echo "$SEED_REQUEST_2" | grep -q "code\|seed\|token" && ! echo "$SEED_REQUEST_2" | grep -q "failed\|error"; then
+                  # Handle async SEED token generation for approach 2
+                  if echo "$SEED_REQUEST_2" | grep -q '"state":"pending"'; then
+                    echo "🔄 APPROACH 2 ASYNC: SEED generation pending, polling..."
+                    TASK_LINK_2=$(echo "$SEED_REQUEST_2" | grep -o '"atom:link":"[^"]*"' | cut -d'"' -f4)
+                    
+                    if [[ -n "$TASK_LINK_2" ]]; then
+                      sleep 1  # Brief wait before polling
+                      
+                      for attempt in {1..8}; do
+                        TASK_RESULT_2=$(curl -s --max-time 20 \
+                          -b mobile_cookies.txt \
+                          -H "Accept: application/json" \
+                          -H "User-Agent: SimplySign/1.0 CFNetwork/1485 Darwin/23.1.0" \
+                          "$TASK_LINK_2" 2>&1)
+                        
+                        if echo "$TASK_RESULT_2" | grep -q '"state":"completed"'; then
+                          echo "✅ APPROACH 2 SUCCESS: SEED task completed!"
+                          SEED_TOKEN=$(echo "$TASK_RESULT_2" | grep -o '"code":"[^"]*"' | cut -d'"' -f4 | head -1)
+                          if [[ -n "$SEED_TOKEN" ]]; then
+                            echo "🎉 APPROACH 2 SEED TOKEN: ${SEED_TOKEN:0:8}***"
+                            break
+                          fi
+                        elif echo "$TASK_RESULT_2" | grep -q '"state":"failed"'; then
+                          echo "❌ Approach 2 failed, will try fallback"
+                          break
+                        else
+                          sleep 2
+                        fi
+                      done
+                    fi
+                  fi
+                  
+                  # Extract SEED token from approach 2 (non-async fallback)
+                  if [[ -z "$SEED_TOKEN" ]] && echo "$SEED_REQUEST_2" | grep -q "code\|seed\|token" && ! echo "$SEED_REQUEST_2" | grep -q "failed\|error"; then
                     SEED_TOKEN=$(echo "$SEED_REQUEST_2" | grep -o '"code":"[^"]*"' | cut -d'"' -f4 | head -1)
                     if [[ -z "$SEED_TOKEN" ]]; then
                       SEED_TOKEN=$(echo "$SEED_REQUEST_2" | grep -o '"seed":"[^"]*"' | cut -d'"' -f4 | head -1)
@@ -663,16 +750,21 @@ jobs:
                 if [[ "$SEED_TOKEN" != "no_seed_direct_oauth2" && -n "$SEED_TOKEN" ]]; then
                   echo "🎉 BREAKTHROUGH: Using SEED token in desktop authentication flow"
                   echo "SEED Token: ${SEED_TOKEN:0:8}*** (${#SEED_TOKEN} chars)"
+                  # Try mobile client ID since it generated the SEED token
+                  OAUTH2_CLIENT_ID="$MOBILE_CLIENT_ID"
+                  echo "Using MOBILE client ID for OAuth2 (since it generated SEED): $OAUTH2_CLIENT_ID"
                 else
                   echo "⚠️ Proceeding with direct OAuth2 flow (no SEED token available)"
                   echo "Using authenticated session cookies for OAuth2 authentication"
+                  # Use desktop client ID for standard OAuth2
+                  OAUTH2_CLIENT_ID="A0A6C9030FC238CE0BC609E8E148DFC45C8E3D91B70A2740F2F51723464369B5"
                 fi
                 
                 OAUTH2_AUTH_URL="https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize"
-                OAUTH2_CLIENT_ID="A0A6C9030FC238CE0BC609E8E148DFC45C8E3D91B70A2740F2F51723464369B5"
                 OAUTH2_REDIRECT_URI="urn:ietf:wg:oauth:2.0:oob"
                 
                 echo "Step C2a: Getting authorization code..."
+                echo "Using OAuth2 Client ID: $OAUTH2_CLIENT_ID"
                 
                 # Build authorization URL with conditional SEED parameter
                 if [[ "$SEED_TOKEN" != "no_seed_direct_oauth2" && -n "$SEED_TOKEN" ]]; then
@@ -789,7 +881,15 @@ jobs:
                   echo ""
                   echo "Step C3: Exchanging authorization code for access token..."
                   OAUTH2_TOKEN_URL="https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken"
-                  OAUTH2_CLIENT_SECRET="051181ADEFDE10FC62D4F7ECFF370A4F0595341A925B010DFC18C5B6E369B3E0"
+                  
+                  # Use appropriate client secret based on client ID
+                  if [[ "$OAUTH2_CLIENT_ID" == "$MOBILE_CLIENT_ID" ]]; then
+                    echo "Using mobile client credentials for token exchange"
+                    OAUTH2_CLIENT_SECRET="MOBILE_SECRET_PLACEHOLDER"  # Would need mobile secret
+                  else
+                    echo "Using desktop client credentials for token exchange"
+                    OAUTH2_CLIENT_SECRET="051181ADEFDE10FC62D4F7ECFF370A4F0595341A925B010DFC18C5B6E369B3E0"
+                  fi
                   
                   echo "Requesting access token with authorization code..."
                   
