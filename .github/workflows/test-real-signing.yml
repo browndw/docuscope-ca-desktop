@@ -261,6 +261,7 @@ jobs:
           echo "✅ Certificate access test completed"
 
       - name: Authenticate with Certum Cloud Service
+        timeout-minutes: 20  # Prevent infinite hangs from resource exhaustion
         env:
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
@@ -615,8 +616,9 @@ jobs:
                 echo "Method 4: Extended authentication with credential injection..."
                 echo "Performing extended certificate loading with monitoring..."
                 
-                for i in {1..10}; do
-                  echo "Authentication cycle $i/10..."
+                # REDUCED: Only 3 cycles to prevent resource exhaustion
+                for i in {1..3}; do
+                  echo "Authentication cycle $i/3..."
                   
                   # Check certificate stores
                   CERT_COUNT_CU=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
@@ -639,8 +641,8 @@ jobs:
                     fi
                   fi
                   
-                  # Try different authentication triggers each cycle
-                  case $((i % 4)) in
+                  # Try different authentication triggers each cycle (REDUCED intensity)
+                  case $((i % 3)) in
                     1)
                       echo "  Triggering certificate refresh via PowerShell..."
                       powershell -Command "
@@ -656,14 +658,6 @@ jobs:
                         timeout 10 "$SIMPLYSIGN_CLI" --status 2>&1 >/dev/null || true
                       fi
                       ;;
-                    3)
-                      echo "  Triggering Java authentication..."
-                      if [ -f "$JAVA_APP" ] && [ -f "$JAVA_EXE" ]; then
-                        cd "/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign"
-                        timeout 10 "$JAVA_EXE" -jar proCertumCardManager.jar --status 2>&1 >/dev/null || true
-                        cd - > /dev/null
-                      fi
-                      ;;
                     0)
                       echo "  Triggering SimplySign Desktop refresh..."
                       # Send a gentle signal to SimplySign Desktop to refresh
@@ -671,7 +665,8 @@ jobs:
                       ;;
                   esac
                   
-                  sleep 10
+                  # REDUCED sleep time to prevent hanging
+                  sleep 5
                 done
                 
                 # Method 5: Manual certificate import attempt
@@ -735,9 +730,9 @@ jobs:
                 echo ""
                 echo "Method 8: Force certificate store refresh with cloud authentication..."
                 
-                # Try multiple approaches to trigger certificate loading
-                for auth_attempt in {1..5}; do
-                  echo "Authentication attempt $auth_attempt/5..."
+                # REDUCED: Try only 2 attempts to prevent resource exhaustion
+                for auth_attempt in {1..2}; do
+                  echo "Authentication attempt $auth_attempt/2..."
                   
                   # Approach 1: PowerShell certificate store refresh with cloud trigger
                   powershell -Command "
@@ -782,26 +777,55 @@ jobs:
                     fi
                   fi
                   
-                  # Approach 2: Restart SimplySign Desktop to trigger authentication
-                  if kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
-                    echo "  Restarting SimplySign Desktop for fresh authentication..."
-                    kill $SIMPLYSIGN_PID 2>/dev/null || echo "  Kill signal sent"
-                    sleep 5
+                  # Approach 2: CAREFUL restart with proper cleanup (only on attempt 1)
+                  if [ $auth_attempt -eq 1 ] && kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
+                    echo "  Performing single SimplySign Desktop restart with proper cleanup..."
                     
-                    # Restart SimplySign Desktop
+                    # Clean shutdown
+                    kill $SIMPLYSIGN_PID 2>/dev/null || echo "  Kill signal sent"
+                    sleep 8  # Longer wait for proper cleanup
+                    
+                    # Wait for process to actually terminate
+                    for wait_count in {1..10}; do
+                      if ! kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
+                        echo "  Process terminated after ${wait_count} seconds"
+                        break
+                      fi
+                      sleep 1
+                    done
+                    
+                    # Force kill if still running
+                    if kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
+                      echo "  Force killing stubborn process..."
+                      kill -9 $SIMPLYSIGN_PID 2>/dev/null || echo "  Force kill attempted"
+                      sleep 3
+                    fi
+                    
+                    # Restart only once with credential context
+                    echo "  Restarting SimplySign Desktop with credential context..."
                     "$SIMPLYSIGN_EXE" &
                     SIMPLYSIGN_PID=$!
-                    sleep 10
+                    sleep 12  # Longer initialization time
+                    
+                    if kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
+                      echo "  ✅ SimplySign Desktop restarted successfully (PID: $SIMPLYSIGN_PID)"
+                    else
+                      echo "  ⚠️ SimplySign Desktop restart failed - skipping further restarts"
+                      break
+                    fi
                   fi
                   
-                  # Approach 3: Try CLI authentication with credentials
+                  # Approach 3: Minimal CLI attempt (no restarts)
                   if [ -f "$SIMPLYSIGN_CLI" ]; then
-                    echo "  Attempting CLI authentication with credentials..."
-                    # Try to use CLI with authentication (if supported)
-                    timeout 20 "$SIMPLYSIGN_CLI" --status 2>&1 >/dev/null || echo "  CLI auth attempt completed"
+                    echo "  Quick CLI authentication check..."
+                    timeout 15 "$SIMPLYSIGN_CLI" --status 2>&1 >/dev/null || echo "  CLI check completed"
                   fi
                   
-                  sleep 15
+                  # Longer wait between attempts to prevent resource exhaustion
+                  if [ $auth_attempt -lt 2 ]; then
+                    echo "  Waiting before next attempt..."
+                    sleep 20
+                  fi
                 done
                 
                 # Method 9: Alternative certificate loading approaches
