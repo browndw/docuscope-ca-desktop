@@ -440,9 +440,9 @@ jobs:
                   fi
                 done
                 
-                # Method 6: Try to establish Certum cloud connection
+                # Method 6: Direct SimplySign Desktop credential injection
                 echo ""
-                echo "Method 6: Certum cloud connection attempt..."
+                echo "Method 6: Direct credential-based authentication..."
                 echo "Username: $CERTUM_USERNAME"
                 echo "Password length: ${#CERTUM_PASSWORD}"
                 echo "Certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
@@ -450,6 +450,288 @@ jobs:
                 # Try to ping Certum services to ensure connectivity
                 echo "Testing connectivity to Certum services..."
                 curl -s --max-time 10 -I https://www.certum.eu/ | head -1 || echo "Certum website connectivity test completed"
+                
+                # Method 7: Interactive SimplySign Desktop authentication simulation
+                echo ""
+                echo "Method 7: Interactive authentication simulation..."
+                echo "Attempting to simulate interactive login to trigger certificate loading..."
+                
+                # Find SimplySign Desktop configuration directory
+                SIMPLYSIGN_CONFIG_DIR="/c/Users/$USER/AppData/Roaming/Certum/SimplySign Desktop"
+                SIMPLYSIGN_LOCAL_DIR="/c/Users/$USER/AppData/Local/Certum"
+                
+                echo "SimplySign config directories:"
+                echo "  Roaming: $SIMPLYSIGN_CONFIG_DIR"
+                echo "  Local: $SIMPLYSIGN_LOCAL_DIR"
+                
+                # Create config directories if they don't exist
+                mkdir -p "$SIMPLYSIGN_CONFIG_DIR" || echo "Config dir creation failed"
+                mkdir -p "$SIMPLYSIGN_LOCAL_DIR" || echo "Local dir creation failed"
+                
+                # Try to create a basic config file to trigger authentication
+                if [[ -n "$CERTUM_USERNAME" ]]; then
+                  echo "Creating basic configuration file..."
+                  echo "username=$CERTUM_USERNAME" > "$SIMPLYSIGN_CONFIG_DIR/config.tmp"
+                  echo "Basic config file created"
+                fi
+                
+                # Method 8: Force certificate store refresh and cloud authentication
+                echo ""
+                echo "Method 8: Force certificate store refresh with cloud authentication..."
+                
+                # Try multiple approaches to trigger certificate loading
+                for auth_attempt in {1..5}; do
+                  echo "Authentication attempt $auth_attempt/5..."
+                  
+                  # Approach 1: PowerShell certificate store refresh with cloud trigger
+                  powershell -Command "
+                    try {
+                      Write-Host 'Refreshing certificate stores with cloud authentication trigger...'
+                      
+                      # Clear and refresh certificate stores
+                      \$currentUserStore = New-Object System.Security.Cryptography.X509Certificates.X509Store('My', 'CurrentUser')
+                      \$currentUserStore.Open('ReadWrite')
+                      \$currentUserStore.Close()
+                      
+                      \$localMachineStore = New-Object System.Security.Cryptography.X509Certificates.X509Store('My', 'LocalMachine')
+                      \$localMachineStore.Open('ReadOnly')
+                      \$localMachineStore.Close()
+                      
+                      # Force certificate discovery
+                      Get-ChildItem -Path 'Cert:\\CurrentUser\\My' -Recurse -Force | Out-Null
+                      Get-ChildItem -Path 'Cert:\\LocalMachine\\My' -Recurse -Force | Out-Null
+                      
+                      # Try to access certificate stores that might trigger cloud authentication
+                      Get-ChildItem -Path 'Cert:\\CurrentUser\\Root' -Force | Out-Null
+                      Get-ChildItem -Path 'Cert:\\CurrentUser\\CA' -Force | Out-Null
+                      
+                      Write-Host 'Certificate store refresh completed'
+                      
+                    } catch {
+                      Write-Host 'Certificate refresh error:' \$_.Exception.Message
+                    }
+                  " >/dev/null 2>&1
+                  
+                  # Check if certificate appeared
+                  if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+                    TARGET_CHECK=$(powershell -Command "
+                      \$cert1 = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
+                      \$cert2 = Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
+                      if (\$cert1 -or \$cert2) { 'FOUND' } else { 'NOT_FOUND' }
+                    " 2>/dev/null || echo "NOT_FOUND")
+                    
+                    if [ "$TARGET_CHECK" = "FOUND" ]; then
+                      echo "🎉 TARGET CERTIFICATE FOUND! Authentication successful."
+                      break
+                    fi
+                  fi
+                  
+                  # Approach 2: Restart SimplySign Desktop to trigger authentication
+                  if kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
+                    echo "  Restarting SimplySign Desktop for fresh authentication..."
+                    kill $SIMPLYSIGN_PID 2>/dev/null || echo "  Kill signal sent"
+                    sleep 5
+                    
+                    # Restart SimplySign Desktop
+                    "$SIMPLYSIGN_EXE" &
+                    SIMPLYSIGN_PID=$!
+                    sleep 10
+                  fi
+                  
+                  # Approach 3: Try CLI authentication with credentials
+                  if [ -f "$SIMPLYSIGN_CLI" ]; then
+                    echo "  Attempting CLI authentication with credentials..."
+                    # Try to use CLI with authentication (if supported)
+                    timeout 20 "$SIMPLYSIGN_CLI" --status 2>&1 >/dev/null || echo "  CLI auth attempt completed"
+                  fi
+                  
+                  sleep 15
+                done
+                
+                # Method 9: Alternative certificate loading approaches
+                echo ""
+                echo "Method 9: Alternative certificate loading approaches..."
+                
+                # Check if there are any .p12 or .pfx files we can work with
+                echo "Looking for certificate files in system..."
+                find "/c/ProgramData" -name "*.p12" -o -name "*.pfx" 2>/dev/null | head -3 || echo "No certificate files found in ProgramData"
+                find "/c/Program Files/Certum" -name "*.p12" -o -name "*.pfx" 2>/dev/null | head -3 || echo "No certificate files found in Certum directory"
+                
+                # Try to use Windows credential manager
+                echo "Checking Windows Credential Manager..."
+                powershell -Command "
+                  try {
+                    \$creds = cmdkey /list | Select-String -Pattern 'certum|Certum'
+                    if (\$creds) {
+                      Write-Host 'Found Certum-related credentials in Windows Credential Manager'
+                      \$creds
+                    } else {
+                      Write-Host 'No Certum credentials found in Windows Credential Manager'
+                    }
+                  } catch {
+                    Write-Host 'Could not access Windows Credential Manager'
+                  }
+                " 2>/dev/null || echo "Credential manager check completed"
+                
+                # Method 10: Dedicated Certum cloud authentication
+                echo ""
+                echo "Method 10: Dedicated Certum cloud certificate loading..."
+                echo "🔐 FOCUS: Loading Certum cloud certificate into Windows certificate stores"
+                
+                # Try to find Certum-specific authentication methods
+                echo "Looking for Certum SmartSign CLI tools..."
+                CERTUM_SMARTSIGN_CLI="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/proCertumCardManager.exe"
+                CERTUM_SMARTSIGN_DIR="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign"
+                
+                if [ -d "$CERTUM_SMARTSIGN_DIR" ]; then
+                  echo "✅ Found Certum SmartSign directory: $CERTUM_SMARTSIGN_DIR"
+                  echo "Directory contents:"
+                  ls -la "$CERTUM_SMARTSIGN_DIR" | head -10
+                  
+                  # Try different CLI approaches for cloud authentication
+                  cd "$CERTUM_SMARTSIGN_DIR"
+                  
+                  # Method 10a: Try proCertumCardManager with credentials
+                  if [ -f "proCertumCardManager.exe" ]; then
+                    echo ""
+                    echo "Method 10a: proCertumCardManager cloud authentication..."
+                    echo "Attempting to authenticate with Certum cloud using CLI..."
+                    
+                    # Try various CLI commands for cloud authentication
+                    echo "Trying: proCertumCardManager.exe --version"
+                    timeout 20 ./proCertumCardManager.exe --version 2>&1 | head -5 || echo "Version check completed"
+                    
+                    echo "Trying: proCertumCardManager.exe --list"
+                    timeout 30 ./proCertumCardManager.exe --list 2>&1 | head -10 || echo "List command completed"
+                    
+                    echo "Trying: proCertumCardManager.exe --login"
+                    timeout 30 ./proCertumCardManager.exe --login 2>&1 | head -10 || echo "Login command completed"
+                    
+                    # Try with username if available
+                    if [[ -n "$CERTUM_USERNAME" ]]; then
+                      echo "Trying: proCertumCardManager.exe --login --user $CERTUM_USERNAME"
+                      timeout 30 ./proCertumCardManager.exe --login --user "$CERTUM_USERNAME" 2>&1 | head -10 || echo "User login completed"
+                    fi
+                  fi
+                  
+                  # Method 10b: Try Java-based authentication with credentials
+                  if [ -f "proCertumCardManager.jar" ] && [ -f "jre/bin/java.exe" ]; then
+                    echo ""
+                    echo "Method 10b: Java-based cloud authentication..."
+                    
+                    # Set Java environment
+                    export JAVA_HOME="$(pwd)/jre"
+                    export PATH="$JAVA_HOME/bin:$PATH"
+                    
+                    echo "Java version check:"
+                    timeout 10 ./jre/bin/java.exe -version 2>&1 | head -3 || echo "Java version check completed"
+                    
+                    # Try Java application with cloud authentication
+                    echo "Attempting Java-based Certum cloud authentication..."
+                    timeout 60 ./jre/bin/java.exe -jar proCertumCardManager.jar --help 2>&1 | head -15 || echo "Java help completed"
+                    
+                    # Try to trigger cloud authentication
+                    timeout 60 ./jre/bin/java.exe -jar proCertumCardManager.jar --list-certificates 2>&1 | head -20 || echo "Java certificate list completed"
+                    
+                    if [[ -n "$CERTUM_USERNAME" ]]; then
+                      echo "Trying Java cloud login with username..."
+                      timeout 60 ./jre/bin/java.exe -jar proCertumCardManager.jar --login --username "$CERTUM_USERNAME" 2>&1 | head -15 || echo "Java cloud login completed"
+                    fi
+                  fi
+                  
+                  cd - > /dev/null
+                else
+                  echo "⚠️ Certum SmartSign directory not found"
+                fi
+                
+                # Method 11: Windows certificate store injection
+                echo ""
+                echo "Method 11: Direct certificate store manipulation..."
+                echo "Attempting to manually load Certum certificate into Windows stores..."
+                
+                # Try to use PowerShell to interact with certificate stores more aggressively
+                powershell -Command "
+                  try {
+                    Write-Host 'Attempting aggressive certificate store refresh...'
+                    
+                    # Clear certificate caches
+                    \$env:CERTLM_REFRESH = '1'
+                    
+                    # Try to refresh all certificate stores
+                    \$stores = @('My', 'Root', 'CA', 'Trust', 'Disallowed')
+                    \$locations = @('CurrentUser', 'LocalMachine')
+                    
+                    foreach (\$location in \$locations) {
+                      foreach (\$storeName in \$stores) {
+                        try {
+                          \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store(\$storeName, \$location)
+                          \$store.Open('ReadWrite')
+                          \$certCount = \$store.Certificates.Count
+                          Write-Host \"Store \$location\\\$storeName: \$certCount certificates\"
+                          \$store.Close()
+                        } catch {
+                          Write-Host \"Could not access \$location\\\$storeName store\"
+                        }
+                      }
+                    }
+                    
+                    # Try to trigger certificate provider refresh
+                    [System.Security.Cryptography.X509Certificates.X509Store]::CurrentUser
+                    [System.Security.Cryptography.X509Certificates.X509Store]::LocalMachine
+                    
+                    Write-Host 'Certificate store refresh completed'
+                    
+                  } catch {
+                    Write-Host 'Certificate store manipulation error:' \$_.Exception.Message
+                  }
+                "
+                
+                # Method 12: SimplySign Desktop service approach
+                echo ""
+                echo "Method 12: SimplySign Desktop service configuration..."
+                echo "Checking if SimplySign Desktop can run as a service for cloud authentication..."
+                
+                # Check Windows services for any Certum-related services
+                echo "Checking for Certum-related Windows services..."
+                powershell -Command "
+                  try {
+                    \$certumServices = Get-Service | Where-Object { \$_.DisplayName -like '*Certum*' -or \$_.ServiceName -like '*Certum*' }
+                    if (\$certumServices) {
+                      Write-Host 'Found Certum services:'
+                      \$certumServices | Format-Table Name, DisplayName, Status
+                    } else {
+                      Write-Host 'No Certum services found'
+                    }
+                    
+                    # Also check for any code signing related services
+                    \$codeSignServices = Get-Service | Where-Object { \$_.DisplayName -like '*Sign*' -or \$_.DisplayName -like '*Certificate*' }
+                    if (\$codeSignServices) {
+                      Write-Host 'Found signing-related services:'
+                      \$codeSignServices | Format-Table Name, DisplayName, Status | Select-Object -First 5
+                    }
+                  } catch {
+                    Write-Host 'Service enumeration error:' \$_.Exception.Message
+                  }
+                " 2>/dev/null || echo "Service check completed"
+                
+                # Check if SimplySign Desktop left any configuration for cloud authentication
+                echo ""
+                echo "Checking SimplySign Desktop cloud configuration..."
+                SIMPLYSIGN_CONFIG_LOCATIONS=(
+                  "/c/Users/$USER/AppData/Local/Certum"
+                  "/c/Users/$USER/AppData/Roaming/Certum"
+                  "/c/ProgramData/Certum"
+                  "/c/Program Files/Certum/SimplySign Desktop/config"
+                  "/c/Program Files/Certum/SimplySign Desktop/data"
+                )
+                
+                for config_location in "${SIMPLYSIGN_CONFIG_LOCATIONS[@]}"; do
+                  if [ -d "$config_location" ]; then
+                    echo "Found config directory: $config_location"
+                    # Look for configuration files
+                    find "$config_location" -name "*.config" -o -name "*.xml" -o -name "*.json" -o -name "*.properties" 2>/dev/null | head -3 || echo "  (no config files found)"
+                  fi
+                done
                 
                 # Final certificate check
                 echo ""
