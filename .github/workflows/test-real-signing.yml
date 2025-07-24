@@ -464,7 +464,7 @@ jobs:
                       try {
                         if (Test-Path \$regPath) {
                           \$items = Get-ChildItem \$regPath -ErrorAction SilentlyContinue
-                          Write-Host \"Registry path \$regPath: \$(\$items.Count) items\"
+                          Write-Host \"Registry path \${regPath} has \$(\$items.Count) items\"
                         }
                       } catch {
                         # Skip inaccessible registry keys
