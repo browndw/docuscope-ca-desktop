@@ -8,10 +8,6 @@ on:
         required: false
         default: 'true'
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   build-and-test-signing:
     runs-on: windows-latest
