@@ -2,11 +2,11 @@ name: Test Real Code Signing
 
 on:
   workflow_dispatch:
-  # Trigger after python binary build completes
-  workflow_run:
-    workflows: ["Build Python Binary"]
-    types: [completed]
-    branches: [main]
+    inputs:
+      test_only:
+        description: 'Test Real Code Signing'
+        required: false
+        default: 'true'
 
 defaults:
   run:
