@@ -693,19 +693,55 @@ jobs:
                 echo "Authorization page response (first 5 lines):"
                 echo "$AUTH_PAGE_RESPONSE" | head -5
                 
-                # Step C2b: Submit credentials to authorization endpoint
+                # Step C2b: CORRECTED OAuth2 Authorization Flow
                 echo ""
-                echo "Step C2b: Submitting credentials to OAuth2 authorization..."
+                echo "Step C2b: CORRECTED OAuth2 Authorization Flow..."
                 
-                LOGIN_ENDPOINT="https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize"
+                # First, extract any CSRF tokens or form data from the authorization page
+                CSRF_TOKEN=""
+                FORM_ACTION=""
+                if echo "$AUTH_PAGE_RESPONSE" | grep -q "csrf\|_csrf\|authenticity_token"; then
+                  CSRF_TOKEN=$(echo "$AUTH_PAGE_RESPONSE" | grep -o 'name="[^"]*csrf[^"]*" value="[^"]*"' | cut -d'"' -f4 | head -1)
+                  echo "Extracted CSRF token: ${CSRF_TOKEN:0:20}..."
+                fi
                 
-                # Build login data with conditional SEED parameter
-                if [[ "$SEED_TOKEN" != "no_seed_direct_oauth2" && -n "$SEED_TOKEN" ]]; then
-                  echo "Submitting login WITH SEED token..."
-                  LOGIN_DATA="username=$CERTUM_USERNAME&password=$CERTUM_PASSWORD&seed_token=$SEED_TOKEN&response_type=code&client_id=$OAUTH2_CLIENT_ID&redirect_uri=$OAUTH2_REDIRECT_URI&scope=profile"
+                # Look for the correct login form action
+                if echo "$AUTH_PAGE_RESPONSE" | grep -q 'action="[^"]*"'; then
+                  FORM_ACTION=$(echo "$AUTH_PAGE_RESPONSE" | grep -o 'action="[^"]*"' | cut -d'"' -f2 | head -1)
+                  if [[ "$FORM_ACTION" =~ ^/ ]]; then
+                    FORM_ACTION="https://cloudsign.webnotarius.pl$FORM_ACTION"
+                  fi
+                  echo "Found form action: $FORM_ACTION"
                 else
-                  echo "Submitting login WITHOUT SEED token (using session cookies)..."
-                  LOGIN_DATA="username=$CERTUM_USERNAME&password=$CERTUM_PASSWORD&response_type=code&client_id=$OAUTH2_CLIENT_ID&redirect_uri=$OAUTH2_REDIRECT_URI&scope=profile"
+                  FORM_ACTION="https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize"
+                fi
+                
+                # Try to get the CAS login page directly (since we're getting redirected there)
+                echo "Getting CAS login page for proper form submission..."
+                CAS_LOGIN_RESPONSE=$(curl -s --max-time 30 \
+                  -b desktop_cookies.txt \
+                  -c desktop_cookies.txt \
+                  -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+                  "https://cloudsign.webnotarius.pl/cas/login?service=https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize%3Fclient_id%3D$OAUTH2_CLIENT_ID%26redirect_uri%3D$OAUTH2_REDIRECT_URI%26response_type%3Dcode%26scope%3Dprofile" 2>&1)
+                
+                echo "CAS login page response (first 5 lines):"
+                echo "$CAS_LOGIN_RESPONSE" | head -5
+                
+                # Extract execution token from CAS login form
+                EXECUTION_TOKEN=""
+                if echo "$CAS_LOGIN_RESPONSE" | grep -q "execution"; then
+                  EXECUTION_TOKEN=$(echo "$CAS_LOGIN_RESPONSE" | grep -o 'name="execution" value="[^"]*"' | cut -d'"' -f4 | head -1)
+                  echo "Extracted CAS execution token: ${EXECUTION_TOKEN:0:20}..."
+                fi
+                
+                # Submit credentials to CAS login with proper OAuth2 service parameter
+                echo "Submitting credentials to CAS with OAuth2 service parameter..."
+                CAS_SERVICE_URL="https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize?client_id=$OAUTH2_CLIENT_ID&redirect_uri=$OAUTH2_REDIRECT_URI&response_type=code&scope=profile"
+                
+                # Build CAS login data
+                CAS_LOGIN_DATA="username=$CERTUM_USERNAME&password=$CERTUM_PASSWORD&execution=$EXECUTION_TOKEN&_eventId=submit&geolocation="
+                if [[ "$SEED_TOKEN" != "no_seed_direct_oauth2" && -n "$SEED_TOKEN" ]]; then
+                  CAS_LOGIN_DATA="$CAS_LOGIN_DATA&seed_token=$SEED_TOKEN"
                 fi
                 
                 LOGIN_RESPONSE=$(curl -s --max-time 30 \
@@ -715,9 +751,10 @@ jobs:
                   -H "Content-Type: application/x-www-form-urlencoded" \
                   -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
                   -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-                  -d "$LOGIN_DATA" \
+                  -H "Referer: https://cloudsign.webnotarius.pl/cas/login" \
+                  -d "$CAS_LOGIN_DATA" \
                   -L \
-                  "$LOGIN_ENDPOINT" 2>&1)
+                  "https://cloudsign.webnotarius.pl/cas/login?service=$(echo "$CAS_SERVICE_URL" | sed 's/&/%26/g' | sed 's/?/%3F/g')" 2>&1)
                 
                 echo "OAuth2 login response (first 10 lines):"
                 echo "$LOGIN_RESPONSE" | head -10
@@ -839,63 +876,85 @@ jobs:
                 else
                   echo "❌ No authorization code obtained"
                   echo "Cannot proceed with OAuth2 token exchange"
+                  echo ""
+                  echo "🔄 FALLBACK: Trying Resource Owner Password Credentials Flow..."
+                  
+                  # Fallback: Try resource owner password credentials directly
+                  OAUTH2_TOKEN_URL="https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken"
+                  OAUTH2_CLIENT_SECRET="051181ADEFDE10FC62D4F7ECFF370A4F0595341A925B010DFC18C5B6E369B3E0"
+                  
+                  echo "Attempting direct password grant with OAuth2 credentials..."
+                  TOKEN_RESPONSE=$(curl -s --max-time 30 \
+                    -X POST \
+                    -H "Content-Type: application/x-www-form-urlencoded" \
+                    -H "Accept: application/json" \
+                    -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+                    -d "grant_type=password" \
+                    -d "client_id=$OAUTH2_CLIENT_ID" \
+                    -d "client_secret=$OAUTH2_CLIENT_SECRET" \
+                    -d "username=$CERTUM_USERNAME" \
+                    -d "password=$CERTUM_PASSWORD" \
+                    -d "scope=profile" \
+                    "$OAUTH2_TOKEN_URL" 2>&1)
+                  
+                  echo "Resource owner password credentials response (first 10 lines):"
+                  echo "$TOKEN_RESPONSE" | head -10
+                  
+                  # Check if we got an access token from fallback
+                  if echo "$TOKEN_RESPONSE" | grep -q "access_token"; then
+                    echo "🎉 FALLBACK SUCCESS! Got access token from password credentials flow!"
+                    
+                    ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+                    if [[ -n "$ACCESS_TOKEN" ]]; then
+                      echo "✅ Extracted access token from fallback (length: ${#ACCESS_TOKEN})"
+                      
+                      # Try to get certificates with fallback token
+                      echo "Requesting certificates with fallback OAuth2 token..."
+                      CERT_URL="https://cloudsign.webnotarius.pl/certificates/tasks"
+                      
+                      CERT_RESPONSE=$(curl -s --max-time 45 \
+                        -H "Authorization: Bearer $ACCESS_TOKEN" \
+                        -H "Content-Type: application/json" \
+                        -H "Accept: application/json" \
+                        "$CERT_URL" 2>&1)
+                      
+                      echo "Certificate response from fallback (first 15 lines):"
+                      echo "$CERT_RESPONSE" | head -15
+                      
+                      if echo "$CERT_RESPONSE" | grep -q "certificate\|cert\|x509"; then
+                        echo "🎉 ULTIMATE FALLBACK SUCCESS! Retrieved certificate data!"
+                        echo "🔑 Resource owner password credentials flow working!"
+                      else
+                        echo "⚠️ Fallback certificate response received but may need further processing"
+                      fi
+                    fi
+                  else
+                    echo "❌ Fallback authentication also failed"
+                    echo "Trying alternative OAuth2 endpoints..."
+                    
+                    # Try alternative token endpoint
+                    ALT_TOKEN_URL="https://cloudsign.webnotarius.pl/idpcertum/oauth2.0/token"
+                    echo "Trying alternative token endpoint: $ALT_TOKEN_URL"
+                    
+                    ALT_TOKEN_RESPONSE=$(curl -s --max-time 30 \
+                      -X POST \
+                      -H "Content-Type: application/x-www-form-urlencoded" \
+                      -H "Accept: application/json" \
+                      -d "grant_type=password" \
+                      -d "client_id=$OAUTH2_CLIENT_ID" \
+                      -d "client_secret=$OAUTH2_CLIENT_SECRET" \
+                      -d "username=$CERTUM_USERNAME" \
+                      -d "password=$CERTUM_PASSWORD" \
+                      -d "scope=profile" \
+                      "$ALT_TOKEN_URL" 2>&1)
+                    
+                    echo "Alternative endpoint response:"
+                    echo "$ALT_TOKEN_RESPONSE" | head -10
+                  fi
                 fi
                 
                 # Cleanup
                 rm -f desktop_cookies.txt oauth2_response.html 2>/dev/null || true
-                              echo "⚠️ Certificate response received but may need further processing"
-                              echo "This might be the final step - checking certificate installation..."
-                            fi
-                          fi
-                        else
-                          echo "❌ Token exchange failed even with SEED token"
-                          echo "Full SEED token response for debugging:"
-                          echo "$TOKEN_RESPONSE"
-                          
-                          # Check if this is a different error than before
-                          if echo "$TOKEN_RESPONSE" | grep -q "401"; then
-                            echo "🔍 Still getting 401 - SEED token might be expired or invalid format"
-                          elif echo "$TOKEN_RESPONSE" | grep -q "400"; then
-                            echo "🔍 Getting 400 - SEED token parameter might need different format"
-                          else
-                            echo "🔍 Different error pattern - SEED token approach showing progress"
-                          fi
-                        fi
-                      else
-                        echo "❌ No authorization code obtained even with SEED token"
-                        echo "SEED token might be correctly generated but additional parameters needed"
-                      fi
-                      
-                      # Cleanup
-                      rm -f desktop_cookies.txt seed_auth_response.html 2>/dev/null || true
-                    else
-                      echo "❌ Could not generate SEED token"
-                      echo "Falling back to previous OAuth2 approach for comparison..."
-                      
-                      # Fallback: Try resource owner password credentials (for comparison)
-                      echo ""
-                      echo "Fallback: Resource owner password credentials flow..."
-                      OAUTH2_TOKEN_URL="https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken"
-                      OAUTH2_CLIENT_SECRET="051181ADEFDE10FC62D4F7ECFF370A4F0595341A925B010DFC18C5B6E369B3E0"
-                      
-                      TOKEN_RESPONSE=$(curl -s --max-time 30 \
-                        -X POST \
-                        -H "Content-Type: application/x-www-form-urlencoded" \
-                        -H "Accept: application/json" \
-                        -d "grant_type=password" \
-                        -d "client_id=$OAUTH2_CLIENT_ID" \
-                        -d "client_secret=$OAUTH2_CLIENT_SECRET" \
-                        -d "username=$CERTUM_USERNAME" \
-                        -d "password=$CERTUM_PASSWORD" \
-                        -d "scope=profile" \
-                        "$OAUTH2_TOKEN_URL" 2>&1)
-                      
-                      echo "Fallback token response:"
-                      echo "$TOKEN_RESPONSE" | head -10
-                    fi
-                    
-                    # Cleanup mobile and desktop session files
-                    rm -f mobile_cookies.txt desktop_cookies.txt cookies.txt auth_response.html seed_auth_response.html 2>/dev/null || true
                   fi
                   
                   # Method D: Direct certificate loading via registry/PKCS11 (NON-BLOCKING)
