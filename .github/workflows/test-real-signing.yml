@@ -612,12 +612,52 @@ jobs:
                       echo "Trying: proCertumCardManager.exe --login --user $CERTUM_USERNAME"
                       timeout 30 ./proCertumCardManager.exe --login --user "$CERTUM_USERNAME" 2>&1 | head -10 || echo "User login completed"
                     fi
+                  else
+                    echo ""
+                    echo "Method 10a: proCertumCardManager.exe not found - exploring directory..."
+                    echo "🔍 Full SmartSign directory exploration:"
+                    
+                    # Explore all files in SmartSign directory
+                    find . -type f -name "*.exe" 2>/dev/null | head -10 || echo "No .exe files found"
+                    find . -type f -name "*.jar" 2>/dev/null | head -10 || echo "No .jar files found"
+                    find . -type f -name "*.dll" 2>/dev/null | head -10 || echo "No .dll files found"
+                    find . -type f -name "*manager*" -o -name "*card*" -o -name "*certum*" 2>/dev/null | head -10 || echo "No manager/card/certum files found"
+                    
+                    # Try to find any executable that might be related to authentication
+                    echo "Looking for authentication-related executables..."
+                    find . -type f \( -name "*.exe" -o -name "*.bat" -o -name "*.cmd" \) -exec basename {} \; 2>/dev/null | sort | uniq || echo "No executables found"
+                    
+                    # Check if there are any registry or configuration scripts
+                    echo "Checking for configuration scripts..."
+                    ls -la *.bat *.cmd 2>/dev/null | head -5 || echo "No batch files found"
+                    
+                    # Try alternative approaches
+                    echo "🔍 Trying alternative authentication approaches..."
+                    
+                    # Look for any DLL that might be related to authentication
+                    if [ -f "RSContext64.dll" ]; then
+                      echo "Found RSContext64.dll - this might be the authentication library"
+                      echo "Trying to register authentication library..."
+                      
+                      # Try to register the context DLL
+                      if [ -f "RSContextRegister64.bat" ]; then
+                        echo "Running RSContextRegister64.bat..."
+                        timeout 30 cmd.exe /c RSContextRegister64.bat 2>&1 | head -5 || echo "Registration completed"
+                      fi
+                    fi
+                    
+                    # Try to look in parent directories for other tools
+                    echo "🔍 Searching parent SimplySign directory for authentication tools..."
+                    cd "../"
+                    find . -name "*manager*" -o -name "*card*" -o -name "*auth*" -o -name "*login*" 2>/dev/null | head -10 || echo "No authentication tools found in parent directory"
+                    cd "proCertum SmartSign"
                   fi
                   
-                  # Method 10b: Try Java-based authentication with credentials
-                  if [ -f "proCertumCardManager.jar" ] && [ -f "jre/bin/java.exe" ]; then
+                  # Method 10b: Enhanced Java-based authentication with known tools
+                  if [ -f "jre/bin/java.exe" ]; then
                     echo ""
-                    echo "Method 10b: Java-based cloud authentication..."
+                    echo "Method 10b: Enhanced Java-based cloud authentication..."
+                    echo "✅ Java runtime confirmed available from earlier testing"
                     
                     # Set Java environment
                     export JAVA_HOME="$(pwd)/jre"
@@ -626,17 +666,138 @@ jobs:
                     echo "Java version check:"
                     timeout 10 ./jre/bin/java.exe -version 2>&1 | head -3 || echo "Java version check completed"
                     
-                    # Try Java application with cloud authentication
-                    echo "Attempting Java-based Certum cloud authentication..."
-                    timeout 60 ./jre/bin/java.exe -jar proCertumCardManager.jar --help 2>&1 | head -15 || echo "Java help completed"
+                    # Look for any JAR files that might be the authentication component
+                    echo "🔍 Searching for Java authentication components..."
+                    find . -name "*.jar" 2>/dev/null | head -10 || echo "No JAR files found in SmartSign directory"
                     
-                    # Try to trigger cloud authentication
-                    timeout 60 ./jre/bin/java.exe -jar proCertumCardManager.jar --list-certificates 2>&1 | head -20 || echo "Java certificate list completed"
+                    # Check parent directories for JAR files
+                    find .. -name "*.jar" -path "*/Certum/*" 2>/dev/null | head -10 || echo "No JAR files found in parent Certum directories"
                     
-                    if [[ -n "$CERTUM_USERNAME" ]]; then
-                      echo "Trying Java cloud login with username..."
-                      timeout 60 ./jre/bin/java.exe -jar proCertumCardManager.jar --login --username "$CERTUM_USERNAME" 2>&1 | head -15 || echo "Java cloud login completed"
+                    # Try using jarsigner to understand certificate capabilities
+                    echo "Testing jarsigner for certificate store access..."
+                    if [ -f "jre/bin/jarsigner.exe" ]; then
+                      echo "✅ Found jarsigner.exe - testing certificate store access"
+                      echo "📋 This tool was confirmed present in earlier successful testing"
+                      
+                      # Try to list certificates via jarsigner
+                      timeout 30 ./jre/bin/jarsigner.exe -help 2>&1 | head -10 || echo "Jarsigner help completed"
+                      
+                      # Try to access certificate stores through Java
+                      echo "Attempting Java-based certificate store access..."
+                      timeout 60 ./jre/bin/java.exe -version 2>&1 || echo "Java execution test completed"
+                      
+                      # Try to run Java with certificate store access
+                      timeout 60 ./jre/bin/java.exe -Djava.security.debug=certpath -version 2>&1 | head -5 || echo "Java security debug completed"
+                      
+                      # Try to use jarsigner to list Windows certificate stores
+                      echo "🔐 Using jarsigner to access Windows certificate stores..."
+                      
+                      # Create a dummy JAR to test signing capabilities
+                      echo "Creating test JAR for certificate store discovery..."
+                      echo 'public class Test { public static void main(String[] args) { System.out.println("test"); } }' > Test.java
+                      
+                      if [ -f "jre/bin/javac.exe" ]; then
+                        timeout 30 ./jre/bin/javac.exe Test.java 2>&1 || echo "Test compilation completed"
+                        
+                        if [ -f "Test.class" ]; then
+                          # Create a simple JAR
+                          if [ -f "jre/bin/jar.exe" ]; then
+                            timeout 30 ./jre/bin/jar.exe cf test.jar Test.class 2>&1 || echo "JAR creation completed"
+                            
+                            if [ -f "test.jar" ]; then
+                              echo "✅ Created test JAR for certificate discovery"
+                              
+                              # Try to use jarsigner to list available certificates
+                              echo "Attempting to discover certificates via jarsigner..."
+                              timeout 60 ./jre/bin/jarsigner.exe -verify -verbose -certs test.jar 2>&1 | head -10 || echo "Jarsigner verify completed"
+                              
+                              # Try to sign with automatic certificate discovery
+                              if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+                                echo "Attempting to sign test JAR with Certum certificate..."
+                                timeout 60 ./jre/bin/jarsigner.exe -storetype Windows-MY -tsa http://timestamp.digicert.com test.jar "$CERTUM_CERTIFICATE_SHA1" 2>&1 | head -15 || echo "Jarsigner certificate test completed"
+                              fi
+                              
+                              # Try to sign with certificate discovery
+                              echo "Attempting jarsigner certificate store enumeration..."
+                              timeout 60 ./jre/bin/jarsigner.exe -keystore NONE -storetype Windows-MY -list 2>&1 | head -20 || echo "Jarsigner certificate list completed"
+                            fi
+                          fi
+                        fi
+                      fi
                     fi
+                    
+                    # Try alternative Java-based authentication approaches
+                    echo "🔐 Attempting alternative Java authentication methods..."
+                    
+                    # Look for any executable JAR in the directory or parent
+                    JAVA_EXECUTABLE_JARS=(
+                      "proCertumCardManager.jar"
+                      "SimplySign.jar"
+                      "CertumAuth.jar"
+                      "SmartSign.jar"
+                      "../SimplySign.jar"
+                      "../proCertumCardManager.jar"
+                    )
+                    
+                    for jar_file in "${JAVA_EXECUTABLE_JARS[@]}"; do
+                      if [ -f "$jar_file" ]; then
+                        echo "✅ Found Java application: $jar_file"
+                        
+                        # Try to run the JAR
+                        echo "Attempting to run $jar_file..."
+                        timeout 60 ./jre/bin/java.exe -jar "$jar_file" --help 2>&1 | head -15 || echo "JAR help completed"
+                        
+                        # Try authentication-related commands
+                        if [[ -n "$CERTUM_USERNAME" ]]; then
+                          echo "Trying authentication with username..."
+                          timeout 60 ./jre/bin/java.exe -jar "$jar_file" --login --username "$CERTUM_USERNAME" 2>&1 | head -15 || echo "JAR authentication completed"
+                          timeout 60 ./jre/bin/java.exe -jar "$jar_file" --authenticate --user "$CERTUM_USERNAME" 2>&1 | head -15 || echo "JAR authenticate completed"
+                        fi
+                        
+                        # Try certificate listing
+                        timeout 60 ./jre/bin/java.exe -jar "$jar_file" --list-certificates 2>&1 | head -20 || echo "JAR certificate list completed"
+                        timeout 60 ./jre/bin/java.exe -jar "$jar_file" --certificates 2>&1 | head -20 || echo "JAR certificates completed"
+                        break
+                      fi
+                    done
+                    
+                    # Try to access Java certificate stores directly
+                    echo "🔐 Direct Java certificate store access..."
+                    echo "Attempting to access Java certificate stores to trigger Certum authentication..."
+                    
+                    # Create a simple Java program to access certificate stores
+                    echo 'public class CertumAuth {' > CertumAuth.java
+                    echo '    public static void main(String[] args) {' >> CertumAuth.java
+                    echo '        try {' >> CertumAuth.java
+                    echo '            System.out.println("Accessing Java certificate stores...");' >> CertumAuth.java
+                    echo '            java.security.KeyStore ks = java.security.KeyStore.getInstance("Windows-MY");' >> CertumAuth.java
+                    echo '            ks.load(null, null);' >> CertumAuth.java
+                    echo '            System.out.println("Windows-MY store loaded, certificates: " + ks.size());' >> CertumAuth.java
+                    echo '        } catch (Exception e) {' >> CertumAuth.java
+                    echo '            System.out.println("Certificate store access error: " + e.getMessage());' >> CertumAuth.java
+                    echo '        }' >> CertumAuth.java
+                    echo '    }' >> CertumAuth.java
+                    echo '}' >> CertumAuth.java
+                    
+                    # Compile and run the Java certificate access program
+                    if [ -f "jre/bin/javac.exe" ]; then
+                      echo "Compiling Java certificate access program..."
+                      timeout 30 ./jre/bin/javac.exe CertumAuth.java 2>&1 || echo "Java compilation completed"
+                      
+                      if [ -f "CertumAuth.class" ]; then
+                        echo "Running Java certificate access program..."
+                        timeout 60 ./jre/bin/java.exe CertumAuth 2>&1 | head -10 || echo "Java certificate access completed"
+                      fi
+                    fi
+                    
+                  else
+                    echo ""
+                    echo "Method 10b: Java runtime not found - but this contradicts earlier successful test"
+                    echo "🔍 Re-checking Java installation..."
+                    
+                    # Double-check Java installation
+                    find "/c/Program Files/Certum" -name "java.exe" 2>/dev/null | head -5 || echo "No java.exe found"
+                    find "/c/Program Files/Certum" -name "jarsigner.exe" 2>/dev/null | head -5 || echo "No jarsigner.exe found"
                   fi
                   
                   cd - > /dev/null
@@ -667,10 +828,10 @@ jobs:
                           \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store(\$storeName, \$location)
                           \$store.Open('ReadWrite')
                           \$certCount = \$store.Certificates.Count
-                          Write-Host \"Store \$location\\\$storeName: \$certCount certificates\"
+                          Write-Host \"Store \$location\\\\\$storeName: \$certCount certificates\"
                           \$store.Close()
                         } catch {
-                          Write-Host \"Could not access \$location\\\$storeName store\"
+                          Write-Host \"Could not access \$location\\\\\$storeName store\"
                         }
                       }
                     }
