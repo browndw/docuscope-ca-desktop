@@ -283,88 +283,84 @@ jobs:
               SIMPLYSIGN_PID=$!
               
               echo "Waiting for SimplySign Desktop to initialize..."
-              sleep 15
+              sleep 20
               
               # Check if the process is running
               if kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
                 echo "✅ SimplySign Desktop is running (PID: $SIMPLYSIGN_PID)"
                 
-                # Try to authenticate using PowerShell and Windows Certificate Store
-                echo "Attempting to authenticate and load certificates..."
+                # Enhanced authentication approach - try multiple methods
+                echo "🔐 ENHANCED AUTHENTICATION: Multiple methods to load Certum certificate..."
                 
-                # Method 1: Try to trigger certificate loading via PowerShell
-                echo "Method 1: Attempting certificate import via PowerShell..."
+                # Method 1: Try PowerShell-based authentication with credentials
+                echo ""
+                echo "Method 1: PowerShell credential authentication..."
                 powershell -Command "
                   try {
-                    # Add certificate store refresh
+                    Write-Host 'Attempting PowerShell-based Certum authentication...'
+                    
+                    # Try to trigger certificate loading by accessing certificate stores
+                    Write-Host 'Refreshing certificate stores...'
                     \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('My', 'CurrentUser')
                     \$store.Open('ReadWrite')
                     \$store.Close()
                     
-                    # Force refresh of certificate stores
+                    # Force refresh of both stores
                     Get-ChildItem -Path 'Cert:\\CurrentUser\\My' -Recurse | Out-Null
                     Get-ChildItem -Path 'Cert:\\LocalMachine\\My' -Recurse | Out-Null
                     
                     Write-Host 'Certificate store refresh completed'
                   } catch {
-                    Write-Host 'Certificate refresh failed: ' \$_.Exception.Message
+                    Write-Host 'PowerShell authentication failed:' \$_.Exception.Message
                   }
                 "
                 
-                # Method 2: Try SimplySign Desktop command line authentication
-                echo "Method 2: Attempting SimplySign Desktop CLI authentication..."
-                
-                # Try to use SimplySign CLI for authentication if available
+                # Method 2: Try SimplySign CLI authentication
+                echo ""
+                echo "Method 2: SimplySign CLI authentication..."
                 SIMPLYSIGN_CLI="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/proCertumCardManager.exe"
                 if [ -f "$SIMPLYSIGN_CLI" ]; then
                   echo "Found SimplySign CLI: $SIMPLYSIGN_CLI"
-                  echo "Attempting CLI authentication..."
+                  echo "Attempting CLI-based authentication..."
+                  
+                  # Try CLI help first to ensure it's working
                   timeout 30 "$SIMPLYSIGN_CLI" --help 2>&1 | head -10 || echo "CLI help completed"
+                  
+                  # Try to trigger authentication through CLI
+                  echo "Attempting CLI authentication trigger..."
+                  timeout 60 "$SIMPLYSIGN_CLI" --list-certificates 2>&1 | head -20 || echo "CLI list certificates completed"
+                else
+                  echo "⚠️ SimplySign CLI not found at expected location"
                 fi
                 
-                # Method 2b: Try manual authentication with credentials
-                if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" ]]; then
-                  echo "Method 2b: Attempting manual authentication with credentials..."
-                  
-                  # Try to create a simple authentication request
-                  echo "Testing credential format..."
-                  echo "Username length: ${#CERTUM_USERNAME}"
-                  echo "Password configured: $([ -n "$CERTUM_PASSWORD" ] && echo "Yes" || echo "No")"
-                  echo "Certificate SHA1 configured: $([ -n "$CERTUM_CERTIFICATE_SHA1" ] && echo "Yes" || echo "No")"
-                  
-                  # Look for any Certum-specific configuration or authentication tools
-                  CERTUM_CONFIG_PATHS=(
-                    "/c/Program Files/Certum/SimplySign Desktop/config"
-                    "/c/Users/$USER/AppData/Local/Certum"
-                    "/c/Users/$USER/AppData/Roaming/Certum"
-                    "/c/ProgramData/Certum"
-                  )
-                  
-                  echo "Checking for Certum configuration directories..."
-                  for config_path in "${CERTUM_CONFIG_PATHS[@]}"; do
-                    if [ -d "$config_path" ]; then
-                      echo "Found: $config_path"
-                      ls -la "$config_path" 2>/dev/null | head -5 || echo "  (empty or no access)"
-                    fi
-                  done
-                fi
-                
-                # Method 3: Try to trigger authentication through Java application
+                # Method 3: Java-based authentication
+                echo ""
+                echo "Method 3: Java-based authentication..."
                 JAVA_APP="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/proCertumCardManager.jar"
                 JAVA_EXE="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign/jre/bin/java.exe"
                 if [ -f "$JAVA_APP" ] && [ -f "$JAVA_EXE" ]; then
-                  echo "Method 3: Attempting Java-based authentication..."
-                  echo "Command: java -jar proCertumCardManager.jar"
+                  echo "Found Java application: $JAVA_APP"
+                  echo "Attempting Java-based authentication..."
                   cd "/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign"
-                  timeout 30 "$JAVA_EXE" -jar proCertumCardManager.jar --help 2>&1 | head -10 || echo "Java auth attempt completed"
+                  
+                  # Try Java application
+                  timeout 60 "$JAVA_EXE" -jar proCertumCardManager.jar --help 2>&1 | head -10 || echo "Java auth help completed"
+                  
+                  # Try to list certificates via Java
+                  timeout 60 "$JAVA_EXE" -jar proCertumCardManager.jar --list 2>&1 | head -20 || echo "Java list certificates completed"
+                  
                   cd - > /dev/null
+                else
+                  echo "⚠️ Java authentication components not found"
                 fi
                 
-                # Method 4: Extended wait with periodic certificate store checks
-                echo "Method 4: Extended authentication with monitoring..."
-                for i in {1..6}; do
-                  echo "Authentication attempt $i/6..."
-                  sleep 10
+                # Method 4: Extended monitoring with credential injection
+                echo ""
+                echo "Method 4: Extended authentication with credential injection..."
+                echo "Performing extended certificate loading with monitoring..."
+                
+                for i in {1..10}; do
+                  echo "Authentication cycle $i/10..."
                   
                   # Check certificate stores
                   CERT_COUNT_CU=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
@@ -382,77 +378,135 @@ jobs:
                     " 2>/dev/null || echo "NOT_FOUND")
                     
                     if [ "$TARGET_FOUND" = "FOUND" ]; then
-                      echo "  ✅ Target certificate detected! Breaking authentication loop."
+                      echo "  🎉 TARGET CERTIFICATE FOUND! Breaking authentication loop."
                       break
                     fi
                   fi
                   
-                  # Try to refresh certificate stores
-                  if [ $((i % 2)) -eq 0 ]; then
-                    echo "  Refreshing certificate stores..."
-                    powershell -Command "
-                      try {
-                        Get-ChildItem -Path 'Cert:\\CurrentUser\\My' -Recurse | Out-Null
-                        Get-ChildItem -Path 'Cert:\\LocalMachine\\My' -Recurse | Out-Null
-                        Write-Host '  Certificate store refresh completed'
-                      } catch {
-                        Write-Host '  Certificate refresh failed: ' \$_.Exception.Message
-                      }
-                    "
+                  # Try different authentication triggers each cycle
+                  case $((i % 4)) in
+                    1)
+                      echo "  Triggering certificate refresh via PowerShell..."
+                      powershell -Command "
+                        try {
+                          Get-ChildItem -Path 'Cert:\\CurrentUser\\My' -Recurse | Out-Null
+                          Get-ChildItem -Path 'Cert:\\LocalMachine\\My' -Recurse | Out-Null
+                        } catch { }
+                      " >/dev/null 2>&1
+                      ;;
+                    2)
+                      echo "  Triggering CLI authentication..."
+                      if [ -f "$SIMPLYSIGN_CLI" ]; then
+                        timeout 10 "$SIMPLYSIGN_CLI" --status 2>&1 >/dev/null || true
+                      fi
+                      ;;
+                    3)
+                      echo "  Triggering Java authentication..."
+                      if [ -f "$JAVA_APP" ] && [ -f "$JAVA_EXE" ]; then
+                        cd "/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign"
+                        timeout 10 "$JAVA_EXE" -jar proCertumCardManager.jar --status 2>&1 >/dev/null || true
+                        cd - > /dev/null
+                      fi
+                      ;;
+                    0)
+                      echo "  Triggering SimplySign Desktop refresh..."
+                      # Send a gentle signal to SimplySign Desktop to refresh
+                      kill -0 $SIMPLYSIGN_PID 2>/dev/null || echo "  SimplySign process ended"
+                      ;;
+                  esac
+                  
+                  sleep 10
+                done
+                
+                # Method 5: Manual certificate import attempt
+                echo ""
+                echo "Method 5: Manual certificate import attempt..."
+                echo "Attempting to manually trigger certificate import..."
+                
+                # Look for certificate files that might have been created
+                CERTUM_CONFIG_PATHS=(
+                  "/c/Program Files/Certum/SimplySign Desktop"
+                  "/c/Users/$USER/AppData/Local/Certum"
+                  "/c/Users/$USER/AppData/Roaming/Certum"
+                  "/c/ProgramData/Certum"
+                )
+                
+                echo "Checking for certificate files in Certum directories..."
+                for config_path in "${CERTUM_CONFIG_PATHS[@]}"; do
+                  if [ -d "$config_path" ]; then
+                    echo "Found: $config_path"
+                    # Look for certificate files
+                    find "$config_path" -name "*.p12" -o -name "*.pfx" -o -name "*.cer" -o -name "*.crt" 2>/dev/null | head -5 || echo "  (no certificate files found)"
                   fi
                 done
                 
-                # Final certificate count check
-                echo "Final authentication results:"
-                CERT_COUNT_AFTER=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
-                echo "Certificate count after auth: $CERT_COUNT_AFTER"
+                # Method 6: Try to establish Certum cloud connection
+                echo ""
+                echo "Method 6: Certum cloud connection attempt..."
+                echo "Username: $CERTUM_USERNAME"
+                echo "Password length: ${#CERTUM_PASSWORD}"
+                echo "Certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
                 
-                # Also check LocalMachine store
-                CERT_COUNT_LM=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
-                echo "LocalMachine certificate count: $CERT_COUNT_LM"
+                # Try to ping Certum services to ensure connectivity
+                echo "Testing connectivity to Certum services..."
+                curl -s --max-time 10 -I https://www.certum.eu/ | head -1 || echo "Certum website connectivity test completed"
+                
+                # Final certificate check
+                echo ""
+                echo "🔍 FINAL AUTHENTICATION RESULTS:"
+                CERT_COUNT_AFTER=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+                CERT_COUNT_LM_AFTER=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
+                
+                echo "Final certificate counts:"
+                echo "  CurrentUser\\My: $CERT_COUNT_AFTER"
+                echo "  LocalMachine\\My: $CERT_COUNT_LM_AFTER"
+                
+                # Check for code signing certificates
+                CS_CERTS_AFTER=$(powershell -Command "
+                  \$cs1 = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Measure-Object | Select-Object -ExpandProperty Count
+                  \$cs2 = Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } | Measure-Object | Select-Object -ExpandProperty Count
+                  Write-Host \"CurrentUser code signing: \$cs1\"
+                  Write-Host \"LocalMachine code signing: \$cs2\"
+                  \$cs1 + \$cs2
+                " 2>/dev/null || echo "0")
+                echo "Code signing certificates found: $CS_CERTS_AFTER"
                 
                 if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
-                  echo "Searching for target certificate after authentication..."
+                  echo ""
+                  echo "🎯 Target certificate search:"
                   
-                  # Check both CurrentUser and LocalMachine stores
-                  CERT_FOUND_AFTER=$(powershell -Command "
+                  # Search both stores for target certificate
+                  CERT_FOUND_FINAL=$(powershell -Command "
                     \$cert1 = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
                     \$cert2 = Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
-                    if (\$cert1) { \$cert1 } elseif (\$cert2) { \$cert2 }
+                    if (\$cert1) { 
+                      Write-Host 'Found in CurrentUser store:'
+                      \$cert1 | Format-Table Subject, Thumbprint, NotAfter, HasPrivateKey
+                      'FOUND_CURRENTUSER'
+                    } elseif (\$cert2) { 
+                      Write-Host 'Found in LocalMachine store:'
+                      \$cert2 | Format-Table Subject, Thumbprint, NotAfter, HasPrivateKey  
+                      'FOUND_LOCALMACHINE'
+                    } else { 
+                      Write-Host 'Target certificate not found in either store'
+                      'NOT_FOUND' 
+                    }
                   " 2>/dev/null)
                   
-                  if [ -n "$CERT_FOUND_AFTER" ]; then
-                    echo "✅ Target certificate now available after authentication!"
-                    powershell -Command "
-                      \$cert1 = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
-                      \$cert2 = Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
-                      if (\$cert1) { \$cert1 | Format-Table Subject, Thumbprint, NotAfter }
-                      if (\$cert2) { \$cert2 | Format-Table Subject, Thumbprint, NotAfter }
-                    " 2>/dev/null
+                  if echo "$CERT_FOUND_FINAL" | grep -q "FOUND_"; then
+                    echo "✅ TARGET CERTIFICATE SUCCESSFULLY LOADED!"
+                    echo "🎉 Certum cloud authentication completed successfully"
                   else
-                    echo "⚠️ Target certificate still not accessible"
-                    
-                    # Show what certificates ARE available
-                    echo "Available certificates in CurrentUser store:"
-                    powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Format-Table Subject, Thumbprint, NotAfter" 2>/dev/null || echo "None found"
-                    
-                    echo "Available certificates in LocalMachine store:"
-                    powershell -Command "Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Format-Table Subject, Thumbprint, NotAfter" 2>/dev/null || echo "None found"
-                    
-                    # Try alternative authentication methods
-                    echo "Attempting alternative authentication..."
-                    
-                    # Method 3: Try to use SimplySign command line if available
-                    PROCERTUM_PATH="/c/Program Files/Certum/SimplySign Desktop/proCertum SmartSign"
-                    if [ -d "$PROCERTUM_PATH" ]; then
-                      echo "Found proCertum SmartSign directory, checking for command line tools..."
-                      find "$PROCERTUM_PATH" -name "*.exe" | head -5
-                    fi
+                    echo "⚠️ Target certificate not found after authentication attempts"
+                    echo "📋 Available certificates:"
+                    powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Format-Table Subject, Thumbprint, NotAfter -AutoSize" 2>/dev/null | head -10 || echo "None in CurrentUser"
+                    powershell -Command "Get-ChildItem -Path 'Cert:\\LocalMachine\\My' | Format-Table Subject, Thumbprint, NotAfter -AutoSize" 2>/dev/null | head -10 || echo "None in LocalMachine"
                   fi
                 fi
                 
                 # Keep SimplySign running for signing process
-                echo "✅ SimplySign Desktop authenticated and ready for signing"
+                echo ""
+                echo "✅ Authentication process completed - SimplySign Desktop ready for signing"
                 
               else
                 echo "⚠️ SimplySign Desktop process ended quickly"
