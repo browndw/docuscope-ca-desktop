@@ -39,19 +39,31 @@ echo "✅ SimplySign Desktop started (PID: $SIMPLYSIGN_PID)"
 echo "Waiting for SimplySign Desktop to initialize..."
 sleep 20
 
-# Test CLI capabilities (based on your successful output)
+# Test CLI capabilities (simplified from working approach)
 echo "Testing CLI capabilities..."
-timeout 10 "$SIMPLYSIGN_EXE" --version 2>&1 | head -5 || echo "Version check completed"
-timeout 10 "$SIMPLYSIGN_EXE" --help 2>&1 | head -10 || echo "Help check completed"
+timeout 30 "$SIMPLYSIGN_EXE" --version 2>&1 | head -10 || echo "Version check completed"
+timeout 30 "$SIMPLYSIGN_EXE" --help 2>&1 | head -20 || echo "Help check completed"
 
-# Test certificate listing
+# Test certificate listing (from working approach)
 echo "Testing certificate listing..."
-timeout 15 "$SIMPLYSIGN_EXE" --showCertificate 2>&1 | head -10 || echo "Certificate listing completed"
+timeout 60 "$SIMPLYSIGN_EXE" --showCertificate 2>&1 | head -20 || echo "Certificate listing completed"
 
-# Simple credential injection via Windows Credential Manager
+# Enhanced credential injection (matching working approach)
 echo "Injecting credentials into Windows Credential Manager..."
-cmdkey /add:"certum.eu" /user:"$CERTUM_USERNAME" /pass:"$CERTUM_PASSWORD" 2>&1 || echo "Credential injection attempted"
-cmdkey /add:"cloud.certum.eu" /user:"$CERTUM_USERNAME" /pass:"$CERTUM_PASSWORD" 2>&1 || echo "Cloud credential injection attempted"
+CERTUM_TARGETS=(
+  "certum.eu"
+  "cloud.certum.eu" 
+  "api.certum.eu"
+  "SimplySign"
+  "Certum"
+  "CertumCA"
+  "simplysign.certum.eu"
+  "*.certum.eu"
+)
+
+for target in "${CERTUM_TARGETS[@]}"; do
+  cmdkey /add:"$target" /user:"$CERTUM_USERNAME" /pass:"$CERTUM_PASSWORD" 2>&1 || echo "Credential add attempt completed for $target"
+done
 
 # Check certificate stores after authentication attempt
 echo "Checking certificate stores after authentication..."
@@ -62,7 +74,8 @@ else
   check_certificate_store ""
 fi
 
-# Find signtool
+# Find signtool (with improved search after SDK installation)
+echo "Searching for signtool.exe..."
 if find_signtool; then
   echo "✅ signtool.exe available for testing"
 else
