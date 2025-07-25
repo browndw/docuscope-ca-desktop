@@ -1,0 +1,109 @@
+name: "Signing Pipeline - Main Coordinator"
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_from_step:
+        description: 'Start from step (1-5)'
+        required: false
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+      skip_build_cache:
+        description: 'Skip build cache in Step 1'
+        required: false
+        default: false
+        type: boolean
+  # Also trigger from the original events
+  workflow_run:
+    workflows: ["Build Python Binary"]
+    types: [completed]
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  coordinator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Trigger Signing Pipeline
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const startStep = '${{ inputs.start_from_step }}' || '1';
+            const skipCache = ${{ inputs.skip_build_cache }} || false;
+            
+            console.log(`Starting signing pipeline from step ${startStep}`);
+            
+            // Determine which workflow to trigger
+            const workflows = {
+              '1': 'signing-step-1-build.yml',
+              '2': 'signing-step-2-certificates.yml', 
+              '3': 'signing-step-3-authentication.yml',
+              '4': 'signing-step-4-checksum.yml',
+              '5': 'signing-step-5-final.yml'
+            };
+            
+            const workflowFile = workflows[startStep];
+            if (!workflowFile) {
+              throw new Error(`Invalid start step: ${startStep}`);
+            }
+            
+            // Build inputs based on step
+            let inputs = {};
+            
+            if (startStep === '1') {
+              inputs = {
+                'skip_cache': skipCache.toString()
+              };
+            } else if (startStep === '2') {
+              // For testing step 2 without step 1
+              inputs = {
+                'binary-artifact': 'test-binary-artifact',
+                'binary-size': '50000000'
+              };
+            } else if (startStep === '3') {
+              // For testing step 3 without previous steps
+              inputs = {
+                'binary-artifact': 'test-binary-artifact',
+                'simplysign-ready': 'true',
+                'certificates-ready': 'false',
+                'target-cert-found': 'false'
+              };
+            } else if (startStep === '4') {
+              // For testing step 4 without previous steps
+              inputs = {
+                'binary-artifact': 'test-binary-artifact',
+                'auth-successful': 'false',
+                'session-token': 'none'
+              };
+            } else if (startStep === '5') {
+              // For testing step 5 without previous steps
+              inputs = {
+                'binary-artifact': 'test-binary-artifact',
+                'working-algorithm': 'none',
+                'valid-activation-code': 'none',
+                'algorithms-tested': '0'
+              };
+            }
+            
+            console.log(`Triggering ${workflowFile} with inputs:`, inputs);
+            
+            const result = await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: workflowFile,
+              ref: 'main',
+              inputs: inputs
+            });
+            
+            console.log(`✅ Successfully triggered ${workflowFile} from step ${startStep}`);

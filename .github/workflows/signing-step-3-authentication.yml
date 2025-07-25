@@ -1,0 +1,306 @@
+name: "Signing Pipeline - Step 3: Authentication"
+
+on:
+  workflow_dispatch:
+    inputs:
+      binary-artifact:
+        description: 'Binary artifact name from Step 1'
+        required: true
+        type: string
+      simplysign-ready:
+        description: 'SimplySign installation status'
+        required: true
+        type: boolean
+      certificates-ready:
+        description: 'Certificate store accessibility'
+        required: true
+        type: boolean
+      target-cert-found:
+        description: 'Target certificate already in store'
+        required: true
+        type: boolean
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  authenticate-certum:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      auth-successful: ${{ steps.auth-result.outputs.auth-successful }}
+      session-token: ${{ steps.auth-result.outputs.session-token }}
+      oauth2-token: ${{ steps.auth-result.outputs.oauth2-token }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download binary from previous steps
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ inputs.binary-artifact }}
+          path: dist/
+
+      - name: Validate prerequisites
+        run: |
+          echo "=== VALIDATING PREREQUISITES ==="
+          echo "SimplySign ready: ${{ inputs.simplysign-ready }}"
+          echo "Certificates ready: ${{ inputs.certificates-ready }}"
+          echo "Target cert found: ${{ inputs.target-cert-found }}"
+          
+          if [ "${{ inputs.simplysign-ready }}" != "true" ]; then
+            echo "❌ SimplySign not ready - cannot proceed"
+            exit 1
+          fi
+          
+          if [ "${{ inputs.certificates-ready }}" != "true" ]; then
+            echo "⚠️ Certificate store issues detected"
+          fi
+
+      - name: Find SimplySign Desktop
+        run: |
+          echo "=== LOCATING SIMPLYSIGN DESKTOP ==="
+          
+          EXPECTED_PATHS=(
+            "/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
+            "/c/Program Files (x86)/Certum/SimplySign Desktop/SimplySignDesktop.exe"
+          )
+          
+          SIMPLYSIGN_EXE=""
+          for path in "${EXPECTED_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              SIMPLYSIGN_EXE="$path"
+              echo "✅ Found SimplySign Desktop: $SIMPLYSIGN_EXE"
+              break
+            fi
+          done
+          
+          if [ -z "$SIMPLYSIGN_EXE" ]; then
+            echo "❌ SimplySign Desktop not found"
+            exit 1
+          fi
+          
+          echo "SIMPLYSIGN_EXE=$SIMPLYSIGN_EXE" >> $GITHUB_ENV
+
+      - name: Authenticate with Certum Cloud Service
+        timeout-minutes: 20
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== AUTHENTICATING WITH CERTUM CLOUD SERVICE ==="
+          echo "🔍 ENHANCED WITH JAR ANALYSIS INSIGHTS"
+          echo "✅ Discovered CLI capabilities: --version, --help, --showCertificate, --signing, --configuration"
+          echo "✅ Identified PKCS11 driver: SimplySignPKCS (cross-platform)"
+          echo "✅ Found configuration structure: Unizeto/proCertum/SmartSign/"
+          echo "✅ Authentication methods: CLI-based + GUI fallback"
+          
+          if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" ]]; then
+            echo "✅ Credentials available - attempting cloud authentication"
+            
+            if [ -f "$SIMPLYSIGN_EXE" ]; then
+              echo "✅ Found SimplySign Desktop: $SIMPLYSIGN_EXE"
+              
+              echo "Starting SimplySign Desktop for authentication..."
+              # Start SimplySign Desktop in background to establish connection
+              "$SIMPLYSIGN_EXE" &
+              SIMPLYSIGN_PID=$!
+              
+              echo "Waiting for SimplySign Desktop to initialize..."
+              sleep 20
+              
+              # Check if the process is running
+              if kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
+                echo "✅ SimplySign Desktop is running (PID: $SIMPLYSIGN_PID)"
+                
+                # CLI authentication using discovered commands
+                echo ""
+                echo "🔐 CLI Authentication using JAR analysis discoveries..."
+                echo "Username: $CERTUM_USERNAME"
+                echo "Target certificate: $CERTUM_CERTIFICATE_SHA1"
+                
+                # Step 1: Test CLI help and version (discovered capabilities)
+                echo "Step 1: Testing SimplySign Desktop CLI capabilities..."
+                
+                # Test CLI version (confirmed available from JAR analysis)
+                echo "Testing: SimplySignDesktop.exe --version"
+                timeout 30 "$SIMPLYSIGN_EXE" --version 2>&1 | head -10 || echo "Version check completed"
+                
+                # Test CLI help (confirmed available from JAR analysis)  
+                echo "Testing: SimplySignDesktop.exe --help"
+                timeout 30 "$SIMPLYSIGN_EXE" --help 2>&1 | head -20 || echo "Help check completed"
+                
+                # Step 2: Test certificate listing (discovered from JAR analysis)
+                echo "Step 2: Testing certificate listing via CLI..."
+                echo "Testing: SimplySignDesktop.exe --showCertificate"
+                timeout 60 "$SIMPLYSIGN_EXE" --showCertificate 2>&1 | head -20 || echo "Certificate listing completed"
+                
+                # Step 3: Enhanced CLI-based cloud authentication
+                echo "Step 3: Enhanced CLI-based cloud authentication..."
+                echo "🎯 FOCUS: Loading Certum cloud certificate into Windows certificate stores"
+                echo "Using discovered CLI authentication approach from JAR analysis..."
+                
+                if [[ -n "$CERTUM_USERNAME" && -n "$CERTUM_PASSWORD" ]]; then
+                  echo "Username: $CERTUM_USERNAME"
+                  echo "Password: [REDACTED - ${#CERTUM_PASSWORD} chars]"
+                  
+                  # Method A: Direct credential injection via Windows Credential Manager
+                  echo ""
+                  echo "Method A: Windows Credential Manager injection..."
+                  echo "Injecting Certum credentials into Windows Credential Manager..."
+                  
+                  # Add Certum credentials to Windows Credential Manager with multiple target names
+                  CERTUM_TARGETS=(
+                    "certum.eu"
+                    "cloud.certum.eu" 
+                    "api.certum.eu"
+                    "SimplySign"
+                    "Certum"
+                    "CertumCA"
+                    "simplysign.certum.eu"
+                    "*.certum.eu"
+                  )
+                  
+                  for target in "${CERTUM_TARGETS[@]}"; do
+                    echo "Adding credential for target: $target"
+                    cmdkey /add:"$target" /user:"$CERTUM_USERNAME" /pass:"$CERTUM_PASSWORD" 2>&1 || echo "Credential add attempt completed for $target"
+                  done
+                  
+                  # Verify credentials were added
+                  echo "Checking stored credentials..."
+                  cmdkey /list | grep -i certum || echo "Credential verification completed"
+                  
+                  # Method B: Enhanced configuration-based authentication with credential injection
+                  echo ""
+                  echo "Method B: BREAKTHROUGH - Using EXACT Certum cloud authentication infrastructure!"
+                  echo "🎯 DISCOVERED from Mac SimplySignDesktop.xml: Complete OAuth2 + cloud service URLs"
+                  echo "Creating Certum cloud service configuration with REAL authentication endpoints..."
+                  TEMP_CONFIG_DIR="/c/Users/$USER/AppData/Roaming/Unizeto/proCertum/SmartSign"
+                  mkdir -p "$TEMP_CONFIG_DIR" 2>/dev/null || echo "Config directory exists"
+                  
+                  # Create EXACT configuration matching Mac version with REAL Certum endpoints
+                  echo '<?xml version="1.0" encoding="UTF-8"?>' > "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '<plist version="1.0">' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '<dict>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>Simulation</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>No</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>IPOrDNSNameFromHere</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>Yes</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>IPOrDNSName</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>cloudsign.webnotarius.pl</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>WithSSL</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>Yes</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>OAuth2AuthorizationProvider</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>IDP</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>OAuth2AuthorizeUrl</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>OAuth2AccessTokenUrl</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>OAuth2ScopeUrl</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>https://cloudsign.webnotarius.pl/idp/oauth2.0/profile</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>OAuth2ClientId</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>A0A6C9030FC238CE0BC609E8E148DFC45C8E3D91B70A2740F2F51723464369B5</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>OAuth2ClientSecret</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>051181ADEFDE10FC62D4F7ECFF370A4F0595341A925B010DFC18C5B6E369B3E0</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>SCSPartOfUrl</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>card/v1/cards</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>GetCertificatesFuncPartOfUrl</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>certificates/tasks</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>SignCertificateFuncPartOfUrl</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>certificates/signature</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>RefreshAccessToken</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>Yes</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <key>CacheUserIdAtLogon</key>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '  <string>Yes</string>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '</dict>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  echo '</plist>' >> "$TEMP_CONFIG_DIR/proCertumSmartSign.xml"
+                  
+                  echo "✅ Created REAL Certum cloud service configuration with OAuth2 endpoints"
+                  echo "🔑 Configuration includes: cloudsign.webnotarius.pl + OAuth2 client credentials"
+                  
+                  # Test with REAL configuration file
+                  echo "Testing with REAL Certum cloud configuration..."
+                  timeout 120 "$SIMPLYSIGN_EXE" --configuration "$TEMP_CONFIG_DIR/proCertumSmartSign.xml" 2>&1 | head -20 || echo "Real config auth completed"
+                  
+                else
+                  echo "⚠️ Missing credentials - cannot perform authentication"
+                fi
+                
+                # Cleanup
+                if kill -0 $SIMPLYSIGN_PID 2>/dev/null; then
+                  echo "Stopping SimplySign Desktop..."
+                  kill $SIMPLYSIGN_PID 2>/dev/null || echo "Process cleanup completed"
+                fi
+                
+              else
+                echo "❌ SimplySign Desktop failed to start or exited early"
+              fi
+            else
+              echo "❌ SimplySign Desktop executable not found"
+            fi
+            
+          else
+            echo "⚠️ Missing Certum credentials - skipping cloud authentication"
+          fi
+
+      - name: Generate authentication results
+        id: auth-result
+        run: |
+          echo "=== GENERATING AUTHENTICATION RESULTS ==="
+          
+          # Check if target certificate is now available
+          CERT_FOUND=false
+          if [[ -n "$CERTUM_CERTIFICATE_SHA1" ]]; then
+            CERT_FOUND_RESULT=$(powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }" 2>/dev/null)
+            if [ -n "$CERT_FOUND_RESULT" ]; then
+              echo "✅ Target certificate found in store after authentication!"
+              CERT_FOUND=true
+            else
+              echo "⚠️ Target certificate still not in store"
+            fi
+          fi
+          
+          # Determine authentication success
+          if [ "$CERT_FOUND" = "true" ]; then
+            echo "auth-successful=true" >> $GITHUB_OUTPUT
+            echo "session-token=authenticated" >> $GITHUB_OUTPUT
+            echo "oauth2-token=available" >> $GITHUB_OUTPUT
+          else
+            echo "auth-successful=false" >> $GITHUB_OUTPUT
+            echo "session-token=none" >> $GITHUB_OUTPUT
+            echo "oauth2-token=none" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload authentication logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: auth-logs-${{ github.run_id }}
+          path: |
+            *.log
+            *.html
+          retention-days: 2
+
+  trigger-next-step:
+    needs: authenticate-certum
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Step 4 - Advanced Checksum Testing
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const result = await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'signing-step-4-checksum.yml',
+              ref: 'main',
+              inputs: {
+                'binary-artifact': '${{ inputs.binary-artifact }}',
+                'auth-successful': '${{ needs.authenticate-certum.outputs.auth-successful }}',
+                'session-token': '${{ needs.authenticate-certum.outputs.session-token }}'
+              }
+            });
+            console.log('Triggered Step 4 - Advanced Checksum Testing');

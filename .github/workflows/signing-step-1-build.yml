@@ -1,0 +1,149 @@
+name: "Signing Pipeline - Step 1: Build"
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_cache:
+        description: 'Skip build cache'
+        required: false
+        default: false
+        type: boolean
+  # Trigger after python binary build completes
+  workflow_run:
+    workflows: ["Build Python Binary"]
+    types: [completed]
+    branches: [main]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-python-binary:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      binary-path: ${{ steps.build-output.outputs.binary-path }}
+      binary-size: ${{ steps.build-output.outputs.binary-size }}
+      build-timestamp: ${{ steps.build-output.outputs.build-timestamp }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11.9"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        if: inputs.skip_cache != true
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-3.11.9-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Cache PyInstaller build
+        if: inputs.skip_cache != true
+        uses: actions/cache@v3
+        with:
+          path: |
+            build/
+            dist/
+          key: pyinstaller-${{ runner.os }}-x86_64-pc-windows-msvc-${{ hashFiles('entrypoint.py', 'entrypoint.spec', 'requirements-deploy.txt') }}
+          restore-keys: |
+            pyinstaller-${{ runner.os }}-x86_64-pc-windows-msvc-
+
+      - name: Install dependencies
+        run: poetry install --no-dev
+
+      - name: Build Python package
+        run: poetry build
+
+      - name: Install deployment requirements
+        run: |
+          poetry run pip install -r requirements-deploy.txt
+
+      - name: Create PyInstaller binary
+        run: |
+          echo "Creating PyInstaller binary..."
+          poetry run pyinstaller entrypoint.spec --noconfirm --clean
+          
+          # Verify binary was created
+          if [ -f "dist/entrypoint.exe" ]; then
+            echo "✅ Binary created successfully"
+            ls -la dist/entrypoint.exe
+          else
+            echo "❌ Binary creation failed"
+            ls -la dist/
+            exit 1
+          fi
+
+      - name: Verify and prepare test binary
+        id: build-output
+        run: |
+          echo "=== VERIFYING BUILT BINARY ==="
+          
+          BINARY_PATH="dist/entrypoint.exe"
+          
+          if [ -f "$BINARY_PATH" ]; then
+            echo "✅ Binary exists: $BINARY_PATH"
+            
+            # Get binary size
+            BINARY_SIZE=$(stat -c%s "$BINARY_PATH" 2>/dev/null || echo "0")
+            echo "Binary size: $BINARY_SIZE bytes"
+            
+            # Get file info
+            file "$BINARY_PATH" 2>/dev/null || echo "File info not available"
+            
+            # Test basic functionality
+            echo "Testing binary execution..."
+            timeout 10 "$BINARY_PATH" --help || echo "Binary help test completed"
+            
+            # Set outputs
+            echo "binary-path=$BINARY_PATH" >> $GITHUB_OUTPUT
+            echo "binary-size=$BINARY_SIZE" >> $GITHUB_OUTPUT
+            echo "build-timestamp=$(date -u +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
+            
+            echo "✅ Binary verification completed"
+          else
+            echo "❌ Binary not found at expected location"
+            echo "Contents of dist/:"
+            ls -la dist/ || echo "dist/ directory not found"
+            exit 1
+          fi
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: unsigned-binary-${{ steps.build-output.outputs.build-timestamp }}
+          path: dist/entrypoint.exe
+          retention-days: 5
+
+  trigger-next-step:
+    needs: build-python-binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Step 2 - Certificate Setup
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const result = await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'signing-step-2-certificates.yml',
+              ref: 'main',
+              inputs: {
+                'binary-artifact': 'unsigned-binary-${{ needs.build-python-binary.outputs.build-timestamp }}',
+                'binary-size': '${{ needs.build-python-binary.outputs.binary-size }}'
+              }
+            });
+            console.log('Triggered Step 2 - Certificate Setup');
