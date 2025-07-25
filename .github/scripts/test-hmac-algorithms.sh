@@ -202,7 +202,7 @@ for algorithm in "${TOTP_ALGORITHMS[@]}"; do
   MOBILE_CLIENT_ID="A5wH574pS74B4WAda3Yy"
   SEED_URL="https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks"
   
-  echo "  Testing with Certum SEED endpoint..."
+  echo "  Testing with Certum SEED endpoint (using correct nested structure)..."
   SEED_RESPONSE=$(curl -s --max-time 15 \
     -X POST \
     -H "Content-Type: application/json" \
@@ -210,7 +210,9 @@ for algorithm in "${TOTP_ALGORITHMS[@]}"; do
     -H "X-Client-ID: $MOBILE_CLIENT_ID" \
     -d "{
       \"email\": \"$CERTUM_USERNAME\",
-      \"activationCode\": \"$ACTIVATION_CODE\"
+      \"seedCodeReq\": {
+        \"code\": \"$ACTIVATION_CODE\"
+      }
     }" \
     "$SEED_URL" 2>&1)
   
