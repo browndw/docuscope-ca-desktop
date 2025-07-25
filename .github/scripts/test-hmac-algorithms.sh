@@ -49,6 +49,9 @@ echo "✅ Endpoint connectivity tests completed"
 echo ""
 echo "Method 2: Windows credential store integration..."
 
+# Temporarily disable exit on error for credential operations
+set +e
+
 # Clear existing credentials (with error handling)
 echo "Clearing existing credentials..."
 EXISTING_CERTUM_CREDS=$(cmdkey /list 2>/dev/null | grep -i certum || echo "No existing Certum credentials found")
@@ -86,10 +89,15 @@ for target in "${CREDENTIAL_TARGETS[@]}"; do
     ((CREDENTIAL_SUCCESS_COUNT++))
   else
     echo "  ⚠️ Could not add credential for $target (may already exist or target invalid)"
+    # Continue processing other credentials instead of failing
   fi
 done
 
 echo "✅ Added $CREDENTIAL_SUCCESS_COUNT out of ${#CREDENTIAL_TARGETS[@]} credentials"
+echo "📝 Note: Credential store errors are non-critical - continuing with TOTP testing..."
+
+# Re-enable exit on error for subsequent operations
+set -euo pipefail
 
 # Method 3: SimplySign Desktop authentication (following working patterns)
 echo ""
