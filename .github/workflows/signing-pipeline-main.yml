@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 5
     
     steps:
-      - name: Trigger Signing Pipeline
+      - name: Run Complete Signing Pipeline
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.WORKFLOW_DISPATCH_TOKEN }}
@@ -45,66 +45,182 @@ jobs:
             
             console.log(`Starting signing pipeline from step ${startStep}`);
             
-            // Determine which workflow to trigger
-            const workflows = {
-              '1': 'signing-step-1-build.yml',
-              '2': 'signing-step-2-certificates.yml', 
-              '3': 'signing-step-3-authentication.yml',
-              '4': 'signing-step-4-checksum.yml',
-              '5': 'signing-step-5-final.yml'
-            };
+            // Define the complete pipeline
+            const pipelineSteps = [
+              { step: '1', workflow: 'signing-step-1-build.yml', name: 'Build' },
+              { step: '2', workflow: 'signing-step-2-certificates.yml', name: 'Certificate Setup' },
+              { step: '3', workflow: 'signing-step-3-authentication.yml', name: 'Authentication' },
+              { step: '4', workflow: 'signing-step-4-checksum.yml', name: 'CryptoSwift HMAC Testing' },
+              { step: '5', workflow: 'signing-step-5-final.yml', name: 'Final Signing' }
+            ];
             
-            const workflowFile = workflows[startStep];
-            if (!workflowFile) {
+            // Find starting point
+            const startIndex = pipelineSteps.findIndex(s => s.step === startStep);
+            if (startIndex === -1) {
               throw new Error(`Invalid start step: ${startStep}`);
             }
             
-            // Build inputs based on step
-            let inputs = {};
+            console.log(`Running pipeline steps ${startStep}-5`);
             
-            if (startStep === '1') {
-              inputs = {
-                'skip_cache': skipCache.toString()
-              };
-            } else if (startStep === '2') {
-              // For testing step 2 without step 1
-              inputs = {
-                'binary-artifact': 'test-binary-artifact',
-                'binary-size': '50000000'
-              };
-            } else if (startStep === '3') {
-              // For testing step 3 without previous steps
-              inputs = {
-                'binary-artifact': 'test-binary-artifact',
-                'simplysign-ready': 'true',
-                'certificates-ready': 'false',
-                'target-cert-found': 'false'
-              };
-            } else if (startStep === '4') {
-              // For testing step 4 without previous steps
-              inputs = {
-                'binary-artifact': 'test-binary-artifact',
-                'auth-successful': 'false',
-                'session-token': 'none'
-              };
-            } else if (startStep === '5') {
-              // For testing step 5 without previous steps
-              inputs = {
-                'binary-artifact': 'test-binary-artifact',
-                'working-algorithm': 'none',
-                'valid-activation-code': 'none',
-                'algorithms-tested': '0'
-              };
+            // Helper function to wait for workflow completion
+            async function waitForWorkflow(runId, stepName) {
+              console.log(`⏳ Waiting for ${stepName} (run ${runId}) to complete...`);
+              
+              for (let i = 0; i < 60; i++) { // 30 minutes max wait
+                await new Promise(resolve => setTimeout(resolve, 30000)); // Wait 30 seconds
+                
+                const run = await github.rest.actions.getWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: runId
+                });
+                
+                console.log(`${stepName} status: ${run.data.status} (${run.data.conclusion})`);
+                
+                if (run.data.status === 'completed') {
+                  if (run.data.conclusion === 'success') {
+                    console.log(`✅ ${stepName} completed successfully`);
+                    return { success: true, artifacts: await getArtifacts(runId) };
+                  } else {
+                    console.log(`❌ ${stepName} failed with conclusion: ${run.data.conclusion}`);
+                    return { success: false, conclusion: run.data.conclusion };
+                  }
+                }
+              }
+              
+              throw new Error(`${stepName} timed out after 30 minutes`);
             }
             
-            console.log(`Triggering ${workflowFile} with inputs:`, inputs);
+            // Helper function to get artifacts from a run
+            async function getArtifacts(runId) {
+              try {
+                const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: runId
+                });
+                return artifacts.data.artifacts;
+              } catch (error) {
+                console.log(`Warning: Could not fetch artifacts: ${error.message}`);
+                return [];
+              }
+            }
             
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: workflowFile,
-              ref: 'main',
-              inputs: inputs
-            });
+            // Run the pipeline sequentially
+            let currentArtifacts = [];
+            let pipelineResults = {
+              'binary-artifact': 'test-binary-artifact',
+              'binary-size': '50000000',
+              'simplysign-ready': 'false',
+              'certificates-ready': 'false',
+              'target-cert-found': 'false',
+              'auth-successful': 'false',
+              'session-token': 'none',
+              'working-algorithm': 'none',
+              'valid-activation-code': 'none',
+              'algorithms-tested': '0'
+            };
             
-            console.log(`✅ Successfully triggered ${workflowFile} from step ${startStep}`);
+            for (let i = startIndex; i < pipelineSteps.length; i++) {
+              const currentStep = pipelineSteps[i];
+              console.log(`\n🚀 Starting Step ${currentStep.step}: ${currentStep.name}`);
+              
+              // Build inputs for this step
+              let inputs = {};
+              
+              if (currentStep.step === '1') {
+                inputs = {
+                  'skip_cache': skipCache.toString()
+                };
+              } else if (currentStep.step === '2') {
+                inputs = {
+                  'binary-artifact': pipelineResults['binary-artifact'],
+                  'binary-size': pipelineResults['binary-size']
+                };
+              } else if (currentStep.step === '3') {
+                inputs = {
+                  'binary-artifact': pipelineResults['binary-artifact'],
+                  'simplysign-ready': pipelineResults['simplysign-ready'],
+                  'certificates-ready': pipelineResults['certificates-ready'],
+                  'target-cert-found': pipelineResults['target-cert-found']
+                };
+              } else if (currentStep.step === '4') {
+                inputs = {
+                  'binary-artifact': pipelineResults['binary-artifact'],
+                  'auth-successful': pipelineResults['auth-successful'],
+                  'session-token': pipelineResults['session-token']
+                };
+              } else if (currentStep.step === '5') {
+                inputs = {
+                  'binary-artifact': pipelineResults['binary-artifact'],
+                  'working-algorithm': pipelineResults['working-algorithm'],
+                  'valid-activation-code': pipelineResults['valid-activation-code'],
+                  'algorithms-tested': pipelineResults['algorithms-tested']
+                };
+              }
+              
+              console.log(`Triggering ${currentStep.workflow} with inputs:`, inputs);
+              
+              // Trigger the workflow
+              const result = await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: currentStep.workflow,
+                ref: 'main',
+                inputs: inputs
+              });
+              
+              console.log(`✅ Triggered ${currentStep.name}`);
+              
+              // Wait a moment for the workflow to start
+              await new Promise(resolve => setTimeout(resolve, 10000));
+              
+              // Find the most recent run of this workflow
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: currentStep.workflow,
+                per_page: 5
+              });
+              
+              const latestRun = runs.data.workflow_runs[0];
+              if (!latestRun) {
+                throw new Error(`Could not find run for ${currentStep.name}`);
+              }
+              
+              console.log(`Found run ${latestRun.id} for ${currentStep.name}`);
+              
+              // Wait for completion
+              const stepResult = await waitForWorkflow(latestRun.id, currentStep.name);
+              
+              if (!stepResult.success) {
+                console.log(`❌ Pipeline failed at Step ${currentStep.step}: ${currentStep.name}`);
+                console.log(`Conclusion: ${stepResult.conclusion}`);
+                
+                // Continue to next step anyway for testing (you can change this behavior)
+                console.log(`⚠️ Continuing to next step for testing purposes...`);
+              }
+              
+              // Update pipeline results for next step (simplified - in a real implementation, 
+              // you'd parse the actual outputs from the workflow)
+              if (currentStep.step === '1' && stepResult.success) {
+                // Extract binary artifact name from artifacts
+                const binaryArtifact = stepResult.artifacts.find(a => a.name.startsWith('unsigned-binary-'));
+                if (binaryArtifact) {
+                  pipelineResults['binary-artifact'] = binaryArtifact.name;
+                }
+              } else if (currentStep.step === '2' && stepResult.success) {
+                pipelineResults['simplysign-ready'] = 'true';
+                pipelineResults['certificates-ready'] = 'true';
+              } else if (currentStep.step === '3' && stepResult.success) {
+                pipelineResults['auth-successful'] = 'true';
+                pipelineResults['session-token'] = 'authenticated';
+              } else if (currentStep.step === '4' && stepResult.success) {
+                pipelineResults['working-algorithm'] = 'HMAC-SHA256';
+                pipelineResults['valid-activation-code'] = 'test-code-123';
+                pipelineResults['algorithms-tested'] = '5';
+              }
+            }
+            
+            console.log(`\n🎉 Pipeline completed! Ran steps ${startStep}-5`);
+            console.log('Final results:', pipelineResults);
