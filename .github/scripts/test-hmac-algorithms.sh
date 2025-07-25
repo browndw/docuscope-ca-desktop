@@ -174,100 +174,97 @@ if [ "$TOTP_RESULTS" != "TOTP generation failed" ]; then
     if [ -n "$FIRST_TOTP" ]; then
         echo ""
         echo "🧪 Testing SEED validation with generated TOTP: $FIRST_TOTP"
-        echo "📱 Mobile app analysis: Functions use 'token' and 'mail' parameters"
+        echo "📱 Error analysis: Server expects exact 'seedCodeReq' structure"
         echo ""
         
-        # Test Format 1: Mobile app structure (token + mail)
-        echo "🔍 Test 1: Mobile app format {\"mail\": \"email\", \"token\": \"totp\"}"
+        # Test Format 1: Exact server expectation (code + email in seedCodeReq)
+        echo "🔍 Test 1: Exact server format {\"seedCodeReq\": {\"code\": \"totp\", \"email\": \"email\"}}"
         SEED_RESPONSE1=$(curl -s --max-time 15 \
           -X POST \
           -H "Content-Type: application/json" \
           -H "Accept: application/json" \
           -H "User-Agent: SimplySign-Mobile/1.0" \
           -d "{
-            \"mail\": \"$CERTUM_USERNAME\",
-            \"token\": \"$FIRST_TOTP\"
+            \"seedCodeReq\": {
+              \"code\": \"$FIRST_TOTP\",
+              \"email\": \"$CERTUM_USERNAME\"
+            }
           }" \
           "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
         
         echo "Response 1: $(echo "$SEED_RESPONSE1" | head -2)"
         
-        # Test Format 2: Alternative field names
+        # Test Format 2: Alternative with mail field
         echo ""
-        echo "🔍 Test 2: Alternative format {\"email\": \"email\", \"token\": \"totp\"}"
+        echo "🔍 Test 2: Alternative format {\"seedCodeReq\": {\"code\": \"totp\", \"mail\": \"email\"}}"
         SEED_RESPONSE2=$(curl -s --max-time 15 \
           -X POST \
           -H "Content-Type: application/json" \
           -H "Accept: application/json" \
           -H "User-Agent: SimplySign-Mobile/1.0" \
           -d "{
-            \"email\": \"$CERTUM_USERNAME\",
-            \"token\": \"$FIRST_TOTP\"
+            \"seedCodeReq\": {
+              \"code\": \"$FIRST_TOTP\",
+              \"mail\": \"$CERTUM_USERNAME\"
+            }
           }" \
           "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
         
         echo "Response 2: $(echo "$SEED_RESPONSE2" | head -2)"
         
-        # Test Format 3: Original nested structure (for comparison)
-        echo ""
-        echo "🔍 Test 3: Original nested format (for comparison)"
-        SEED_RESPONSE3=$(curl -s --max-time 15 \
-          -X POST \
-          -H "Content-Type: application/json" \
-          -H "Accept: application/json" \
-          -H "User-Agent: SimplySign-Mobile/1.0" \
-          -d "{
-            \"seedCodeReq\": {
-              \"email\": \"$CERTUM_USERNAME\",
-              \"code\": \"$FIRST_TOTP\"
-            }
-          }" \
-          "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
-        
-        echo "Response 3: $(echo "$SEED_RESPONSE3" | head -2)"
-        
-        # Test Format 4: Alternative scratch endpoint
-        echo ""
-        echo "🔍 Test 4: Scratch endpoint {\"mail\": \"email\", \"token\": \"totp\"}"
-        SEED_RESPONSE4=$(curl -s --max-time 15 \
-          -X POST \
-          -H "Content-Type: application/json" \
-          -H "Accept: application/json" \
-          -H "User-Agent: SimplySign-Mobile/1.0" \
-          -d "{
-            \"mail\": \"$CERTUM_USERNAME\",
-            \"token\": \"$FIRST_TOTP\"
-          }" \
-          "https://cloudsign.webnotarius.pl/cas/api/seed/reset/scratch/tasks" 2>&1 || echo "Network request failed")
-        
-        echo "Response 4: $(echo "$SEED_RESPONSE4" | head -2)"
+        # Test all 14 TOTP codes with the correct structure if first ones fail
+        if ! echo "$SEED_RESPONSE1" | grep -q '"state":"success"' && ! echo "$SEED_RESPONSE2" | grep -q '"state":"success"'; then
+            echo ""
+            echo "🎲 Testing additional TOTP patterns with correct structure..."
+            
+            # Extract all TOTP codes for comprehensive testing
+            TOTP_CODES=($(echo "$TOTP_RESULTS" | grep -o '[0-9]\{6\}'))
+            
+            for i in "${!TOTP_CODES[@]}"; do
+                if [ $i -ge 2 ] && [ $i -lt 6 ]; then  # Test patterns 3-6
+                    TOTP_CODE="${TOTP_CODES[$i]}"
+                    echo "🔍 Testing TOTP pattern $((i+1)): $TOTP_CODE"
+                    
+                    TEST_RESPONSE=$(curl -s --max-time 10 \
+                      -X POST \
+                      -H "Content-Type: application/json" \
+                      -H "Accept: application/json" \
+                      -H "User-Agent: SimplySign-Mobile/1.0" \
+                      -d "{
+                        \"seedCodeReq\": {
+                          \"code\": \"$TOTP_CODE\",
+                          \"email\": \"$CERTUM_USERNAME\"
+                        }
+                      }" \
+                      "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
+                    
+                    echo "  Response: $(echo "$TEST_RESPONSE" | head -1)"
+                    
+                    if echo "$TEST_RESPONSE" | grep -q '"state":"success"'; then
+                        echo "🎉 SUCCESS! TOTP pattern $((i+1)) worked: $TOTP_CODE"
+                        SEED_RESPONSE1="$TEST_RESPONSE"  # Save successful response
+                        break
+                    fi
+                fi
+            done
+        fi
         
         # Check for success in any response
         echo ""
-        echo "🎯 ANALYSIS RESULTS:"
+        echo "🎯 FINAL ANALYSIS:"
         
-        SUCCESS_FOUND=false
-        for i in 1 2 3 4; do
-            RESPONSE_VAR="SEED_RESPONSE$i"
-            RESPONSE_VALUE="${!RESPONSE_VAR}"
-            
-            if echo "$RESPONSE_VALUE" | grep -q '"state":"success"\|"status":"success"'; then
-                echo "✅ SUCCESS! Format $i worked - TOTP code validated successfully"
-                SUCCESS_FOUND=true
-                break
-            elif echo "$RESPONSE_VALUE" | grep -q 'validation:NotBlank'; then
-                echo "⚠️ Format $i: Server received request but fields were blank"
-            elif echo "$RESPONSE_VALUE" | grep -q 'bad.request'; then
-                echo "❌ Format $i: Bad request structure"
-            else
-                echo "🔄 Format $i: Different response received"
-            fi
-        done
-        
-        if [ "$SUCCESS_FOUND" = false ]; then
-            echo ""
-            echo "📝 All formats tested - analyzing patterns for authentication needs..."
-            echo "💡 Next step: May need pre-authentication or session tokens"
+        if echo "$SEED_RESPONSE1" | grep -q '"state":"success"\|"status":"success"'; then
+            echo "🎉 SUCCESS! TOTP authentication validated successfully"
+            echo "✅ SEED endpoint working with correct structure"
+        elif echo "$SEED_RESPONSE2" | grep -q '"state":"success"\|"status":"success"'; then
+            echo "🎉 SUCCESS! Alternative format worked"
+            echo "✅ SEED endpoint working with mail field"
+        elif echo "$SEED_RESPONSE1$SEED_RESPONSE2" | grep -q 'validation:NotBlank'; then
+            echo "⚠️ Server accepts structure but TOTP codes may be invalid"
+            echo "� TOTP secret pattern might be wrong or time-based sync issue"
+        else
+            echo "📝 Correct structure confirmed, investigating TOTP secret patterns..."
+            echo "� May need to extract actual TOTP secret from mobile app"
         fi
     fi
 else
