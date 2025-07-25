@@ -8,22 +8,7 @@ on:
         required: true
         type: string
       working-algorithm:
-        descriptio      - name: Upload final signed binary
-        if: steps.signing-results.outputs.signing-successful == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: signed-binary-final-${{ github.run_id }}
-          path: ${{ steps.signing-results.outputs.signed-binary-path }}
-          retention-days: 7
-
-      - name: Upload pipeline summary
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-summary-${{ github.run_id }}
-          path: |
-            *.log
-          retention-days: 5ksum algorithm from Step 4'
+        description: 'Working checksum algorithm from Step 4'
         required: false
         type: string
         default: 'none'
@@ -77,6 +62,7 @@ jobs:
           fi
 
       - name: Test Code Signing
+        id: code-signing
         env:
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
@@ -173,25 +159,30 @@ jobs:
                 echo "$VERIFY_RESULT"
                 
                 # Save successful signing info
-                echo "SIGNING_SUCCESSFUL=true" >> $GITHUB_ENV
-                echo "SIGNED_BINARY_PATH=$SIGNED_BINARY" >> $GITHUB_ENV
+                echo "signing-successful=true" >> $GITHUB_OUTPUT
+                echo "signed-binary-path=$SIGNED_BINARY" >> $GITHUB_OUTPUT
+                SIGNING_SUCCESSFUL=true
+                SIGNED_BINARY_PATH="$SIGNED_BINARY"
                 
               else
                 echo "❌ Code signing failed"
                 echo "Will try alternative signing methods..."
-                echo "SIGNING_SUCCESSFUL=false" >> $GITHUB_ENV
+                echo "signing-successful=false" >> $GITHUB_OUTPUT
+                SIGNING_SUCCESSFUL=false
               fi
               
             else
               echo "❌ Target certificate not found in store"
               echo "Available certificates do not include target SHA1"
-              echo "SIGNING_SUCCESSFUL=false" >> $GITHUB_ENV
+              echo "signing-successful=false" >> $GITHUB_OUTPUT
+              SIGNING_SUCCESSFUL=false
             fi
             
           else
             echo "⚠️ No target certificate SHA1 provided"
             echo "Cannot attempt specific certificate signing"
-            echo "SIGNING_SUCCESSFUL=false" >> $GITHUB_ENV
+            echo "signing-successful=false" >> $GITHUB_OUTPUT
+            SIGNING_SUCCESSFUL=false
           fi
           
           # Alternative: Try signing with any available certificate
@@ -215,8 +206,10 @@ jobs:
               
               if [ $ALT_SIGN_EXIT_CODE -eq 0 ]; then
                 echo "✅ ALTERNATIVE SIGNING SUCCESSFUL!"
-                echo "SIGNING_SUCCESSFUL=true" >> $GITHUB_ENV
-                echo "SIGNED_BINARY_PATH=$ALTERNATIVE_SIGNED" >> $GITHUB_ENV
+                echo "signing-successful=true" >> $GITHUB_OUTPUT
+                echo "signed-binary-path=$ALTERNATIVE_SIGNED" >> $GITHUB_OUTPUT
+                SIGNING_SUCCESSFUL=true
+                SIGNED_BINARY_PATH="$ALTERNATIVE_SIGNED"
               else
                 echo "❌ Alternative signing also failed"
               fi
@@ -228,13 +221,17 @@ jobs:
         run: |
           echo "=== GENERATING FINAL RESULTS ==="
           
-          if [ "${SIGNING_SUCCESSFUL:-false}" = "true" ]; then
+          # Get results from the code-signing step
+          SIGNING_SUCCESS="${{ steps.code-signing.outputs.signing-successful }}"
+          SIGNED_BINARY="${{ steps.code-signing.outputs.signed-binary-path }}"
+          
+          if [ "$SIGNING_SUCCESS" = "true" ]; then
             echo "signing-successful=true" >> $GITHUB_OUTPUT
-            echo "signed-binary-path=${SIGNED_BINARY_PATH:-none}" >> $GITHUB_OUTPUT
+            echo "signed-binary-path=$SIGNED_BINARY" >> $GITHUB_OUTPUT
             
             echo "🎉 SIGNING PIPELINE SUCCESSFUL!"
             echo "✅ Binary signed successfully"
-            echo "📁 Signed binary: ${SIGNED_BINARY_PATH:-none}"
+            echo "📁 Signed binary: $SIGNED_BINARY"
             
             if [ "${{ inputs.working-algorithm }}" != "none" ]; then
               echo "🔬 Checksum algorithm: ${{ inputs.working-algorithm }}"
@@ -264,14 +261,14 @@ jobs:
           else
             echo "  └─ ❌ No working algorithm found"
           fi
-          echo "📝 Signing: ${SIGNING_SUCCESSFUL:-false}"
+          echo "📝 Signing: $SIGNING_SUCCESS"
 
       - name: Upload final signed binary
-        if: env.SIGNING_SUCCESSFUL == 'true'
+        if: steps.signing-results.outputs.signing-successful == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: signed-binary-final-${{ github.run_id }}
-          path: ${{ env.SIGNED_BINARY_PATH }}
+          path: ${{ steps.signing-results.outputs.signed-binary-path }}
           retention-days: 7
 
       - name: Upload pipeline summary
