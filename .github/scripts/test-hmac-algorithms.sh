@@ -174,43 +174,119 @@ if [ "$TOTP_RESULTS" != "TOTP generation failed" ]; then
     if [ -n "$FIRST_TOTP" ]; then
         echo ""
         echo "🧪 Testing SEED validation with generated TOTP: $FIRST_TOTP"
-        echo "📱 Error analysis: Server expects exact 'seedCodeReq' structure"
+        echo "� DEBUG: Server consistently reports blank fields - investigating JSON parsing"
         echo ""
         
-        # Test Format 1: Exact server expectation (code + email in seedCodeReq)
-        echo "🔍 Test 1: Exact server format {\"seedCodeReq\": {\"code\": \"totp\", \"email\": \"email\"}}"
-        SEED_RESPONSE1=$(curl -s --max-time 15 \
+        # Create proper JSON payload for debugging
+        JSON_PAYLOAD=$(cat << EOF
+{
+  "seedCodeReq": {
+    "code": "$FIRST_TOTP",
+    "email": "$CERTUM_USERNAME"
+  }
+}
+EOF
+        )
+        
+        echo "🔍 DEBUG: JSON payload being sent:"
+        echo "$JSON_PAYLOAD"
+        echo ""
+        
+        # Test Format 1: Exact server format with verbose debugging
+        echo "🔍 Test 1: Debugging JSON parsing issue"
+        SEED_RESPONSE1=$(curl -v --max-time 15 \
           -X POST \
-          -H "Content-Type: application/json" \
+          -H "Content-Type: application/json; charset=utf-8" \
           -H "Accept: application/json" \
           -H "User-Agent: SimplySign-Mobile/1.0" \
-          -d "{
-            \"seedCodeReq\": {
-              \"code\": \"$FIRST_TOTP\",
-              \"email\": \"$CERTUM_USERNAME\"
-            }
-          }" \
-          "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
+          --data-raw "$JSON_PAYLOAD" \
+          "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1)
         
-        echo "Response 1: $(echo "$SEED_RESPONSE1" | head -2)"
-        
-        # Test Format 2: Alternative with mail field
+        echo "Full Response 1: $SEED_RESPONSE1"
         echo ""
-        echo "🔍 Test 2: Alternative format {\"seedCodeReq\": {\"code\": \"totp\", \"mail\": \"email\"}}"
+        
+        # Test Format 2: Try form data instead of JSON
+        echo "🔍 Test 2: Form-encoded data (alternative approach)"
         SEED_RESPONSE2=$(curl -s --max-time 15 \
           -X POST \
-          -H "Content-Type: application/json" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
           -H "Accept: application/json" \
           -H "User-Agent: SimplySign-Mobile/1.0" \
-          -d "{
-            \"seedCodeReq\": {
-              \"code\": \"$FIRST_TOTP\",
-              \"mail\": \"$CERTUM_USERNAME\"
-            }
-          }" \
+          --data-urlencode "seedCodeReq.code=$FIRST_TOTP" \
+          --data-urlencode "seedCodeReq.email=$CERTUM_USERNAME" \
           "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
         
         echo "Response 2: $(echo "$SEED_RESPONSE2" | head -2)"
+        echo ""
+        
+        # Test Format 3: Simple flat JSON structure 
+        echo "🔍 Test 3: Flat JSON structure"
+        SIMPLE_JSON=$(cat << EOF
+{
+  "code": "$FIRST_TOTP",
+  "email": "$CERTUM_USERNAME"
+}
+EOF
+        )
+        
+        SEED_RESPONSE3=$(curl -s --max-time 15 \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -H "User-Agent: SimplySign-Mobile/1.0" \
+          --data-raw "$SIMPLE_JSON" \
+          "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
+        
+        echo "Response 3: $(echo "$SEED_RESPONSE3" | head -2)"
+        echo ""
+        
+        # Test Format 4: Check if authentication is required first
+        echo "🔍 Test 4: Check if pre-authentication needed"
+        AUTH_CHECK=$(curl -s --max-time 10 \
+          -X GET \
+          -H "Accept: application/json" \
+          -H "User-Agent: SimplySign-Mobile/1.0" \
+          "https://cloudsign.webnotarius.pl/cas/oauth2.0/accessToken" 2>&1 || echo "Auth endpoint check failed")
+        
+        echo "Auth endpoint response: $(echo "$AUTH_CHECK" | head -2)"
+        echo ""
+        
+        # Test Format 5: Try with minimal JSON escaping
+        echo "🔍 Test 5: Minimal JSON with basic curl"
+        SEED_RESPONSE5=$(curl -s --max-time 15 \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -d '{"seedCodeReq":{"code":"'$FIRST_TOTP'","email":"'$CERTUM_USERNAME'"}}' \
+          "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
+        
+        echo "Response 5: $(echo "$SEED_RESPONSE5" | head -2)"
+        echo ""
+        
+        # Analyze all responses
+        echo "🎯 COMPREHENSIVE ANALYSIS:"
+        echo "   • Test 1 (Verbose): $(echo "$SEED_RESPONSE1" | grep -o '"detail":"[^"]*"' | head -1)"
+        echo "   • Test 2 (Form Data): $(echo "$SEED_RESPONSE2" | grep -o '"detail":"[^"]*"' | head -1)"  
+        echo "   • Test 3 (Flat JSON): $(echo "$SEED_RESPONSE3" | grep -o '"detail":"[^"]*"' | head -1)"
+        echo "   • Test 4 (Auth Check): $(echo "$AUTH_CHECK" | head -1)"
+        echo "   • Test 5 (Minimal): $(echo "$SEED_RESPONSE5" | grep -o '"detail":"[^"]*"' | head -1)"
+        echo ""
+        
+        # Check for any successful authentication
+        for i in 1 2 3 5; do
+            RESPONSE_VAR="SEED_RESPONSE$i"
+            RESPONSE_VALUE="${!RESPONSE_VAR}"
+            
+            if echo "$RESPONSE_VALUE" | grep -q '"state":"success"'; then
+                echo "🎉 SUCCESS! Test $i worked - TOTP authentication successful!"
+                break
+            fi
+        done
+        
+        echo "💡 DEBUGGING CONCLUSION:"
+        echo "   → Server consistently reports blank fields despite correct JSON"
+        echo "   → This suggests authentication/session requirement before SEED calls"
+        echo "   → Mobile app likely authenticates first, then sends TOTP codes"
         
         # Test all 14 TOTP codes with the correct structure if first ones fail
         if ! echo "$SEED_RESPONSE1" | grep -q '"state":"success"' && ! echo "$SEED_RESPONSE2" | grep -q '"state":"success"'; then
