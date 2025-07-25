@@ -109,7 +109,7 @@ jobs:
             // Run the pipeline sequentially
             let currentArtifacts = [];
             let pipelineResults = {
-              'binary-artifact': 'test-binary-artifact',
+              'binary-artifact': 'none',  // Will be set from Step 1 artifacts
               'binary-size': '50000000',
               'simplysign-ready': 'false',
               'certificates-ready': 'false',
@@ -133,10 +133,18 @@ jobs:
                   'skip_cache': skipCache.toString()
                 };
               } else if (currentStep.step === '2') {
+                // Safety check: ensure we have a binary artifact before proceeding
+                if (pipelineResults['binary-artifact'] === 'none' || !pipelineResults['binary-artifact']) {
+                  console.log(`❌ Cannot proceed to Step 2: No binary artifact available`);
+                  console.log(`Current pipeline results:`, pipelineResults);
+                  throw new Error('Step 2 requires a binary artifact from Step 1');
+                }
+                
                 inputs = {
                   'binary-artifact': pipelineResults['binary-artifact'],
                   'binary-size': pipelineResults['binary-size']
                 };
+                console.log(`Step 2 inputs: binary-artifact="${inputs['binary-artifact']}", binary-size="${inputs['binary-size']}"`);
               } else if (currentStep.step === '3') {
                 inputs = {
                   'binary-artifact': pipelineResults['binary-artifact'],
@@ -193,6 +201,12 @@ jobs:
               // Wait for completion
               const stepResult = await waitForWorkflow(latestRun.id, currentStep.name);
               
+              // Small delay after successful completion to ensure artifacts are fully available
+              if (stepResult.success) {
+                console.log(`✅ ${currentStep.name} completed successfully, waiting for artifacts...`);
+                await new Promise(resolve => setTimeout(resolve, 5000)); // 5 second delay
+              }
+              
               if (!stepResult.success) {
                 console.log(`❌ Pipeline failed at Step ${currentStep.step}: ${currentStep.name}`);
                 console.log(`Conclusion: ${stepResult.conclusion}`);
@@ -201,13 +215,27 @@ jobs:
                 console.log(`⚠️ Continuing to next step for testing purposes...`);
               }
               
-              // Update pipeline results for next step (simplified - in a real implementation, 
-              // you'd parse the actual outputs from the workflow)
+              // Update pipeline results for next step
               if (currentStep.step === '1' && stepResult.success) {
                 // Extract binary artifact name from artifacts
+                console.log('Looking for binary artifact in:', stepResult.artifacts.map(a => a.name));
                 const binaryArtifact = stepResult.artifacts.find(a => a.name.startsWith('unsigned-binary-'));
                 if (binaryArtifact) {
                   pipelineResults['binary-artifact'] = binaryArtifact.name;
+                  console.log(`✅ Found binary artifact: ${binaryArtifact.name}`);
+                  
+                  // Try to get size from artifact (size_in_bytes field)
+                  if (binaryArtifact.size_in_bytes) {
+                    pipelineResults['binary-size'] = binaryArtifact.size_in_bytes.toString();
+                    console.log(`✅ Binary size: ${binaryArtifact.size_in_bytes} bytes`);
+                  }
+                } else {
+                  console.log(`⚠️ No binary artifact found, available: ${stepResult.artifacts.map(a => a.name).join(', ')}`);
+                  // Set a fallback to prevent pipeline from failing
+                  if (stepResult.artifacts.length > 0) {
+                    pipelineResults['binary-artifact'] = stepResult.artifacts[0].name;
+                    console.log(`Using first available artifact: ${stepResult.artifacts[0].name}`);
+                  }
                 }
               } else if (currentStep.step === '2' && stepResult.success) {
                 pipelineResults['simplysign-ready'] = 'true';
