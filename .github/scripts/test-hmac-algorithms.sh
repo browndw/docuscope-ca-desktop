@@ -8,12 +8,14 @@
 set -euo pipefail
 
 echo "=== Testing Real Certum Authentication Methods ==="
-echo "🎯 Based on mobile SimplySign app analysis:"
+echo "🎯 Based on mobile app analysis + desktop executable analysis:"
+echo "   • OAuth2 flow: virtucard.unizeto.pl/cas/oauth2.0/ (desktop pattern)"
 echo "   • TOTP algorithm: SHA1/SHA256/SHA512 with HMAC"
 echo "   • Time step: 30 seconds"
 echo "   • Digits: 8-digit activation codes"
 echo "   • Mobile client ID: A5wH574pS74B4WAda3Yy"
-echo "   • SEED endpoint: /cas/api/seed/code/tasks"
+echo "   • Authentication: OAuth2 Bearer token → SEED endpoint"
+echo "   • API sequence: accessToken → Bearer auth → seed/code/tasks"
 
 # Check if we have certificate credentials
 if [ -z "${CERTUM_USERNAME:-}" ] || [ -z "${CERTUM_PASSWORD:-}" ]; then
@@ -198,16 +200,73 @@ for algorithm in "${TOTP_ALGORITHMS[@]}"; do
   
   echo "  Generated code: $ACTIVATION_CODE"
   
-  # Test with the mobile client endpoint (from Config.plist analysis)
+  # Step 1: Get OAuth2 access token first (based on desktop executable analysis)
+  echo "  Step 1: Getting OAuth2 access token (virtucard.unizeto.pl)..."
+  
+  # Use the correct OAuth2 endpoints discovered in desktop executable
+  OAUTH2_BASE_URL="https://virtucard.unizeto.pl/cas/oauth2.0"
   MOBILE_CLIENT_ID="A5wH574pS74B4WAda3Yy"
+  OAUTH2_CLIENT_SECRET="051181ADEFDE10FC62D4F7ECFF370A4F0595341A925B010DFC18C5B6E369B3E0"
+  
+  # Direct password grant (Resource Owner Password Credentials flow)
+  TOKEN_RESPONSE=$(curl -s --max-time 30 \
+    -X POST \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -H "Accept: application/json" \
+    -H "User-Agent: SimplySign/1.0" \
+    -d "grant_type=password" \
+    -d "client_id=$MOBILE_CLIENT_ID" \
+    -d "client_secret=$OAUTH2_CLIENT_SECRET" \
+    -d "username=$CERTUM_USERNAME" \
+    -d "password=$CERTUM_PASSWORD" \
+    -d "scope=profile" \
+    "$OAUTH2_BASE_URL/accessToken" 2>&1)
+  
+  echo "  OAuth2 token response: $(echo "$TOKEN_RESPONSE" | head -2)"
+  
+  # Extract access token
+  ACCESS_TOKEN=""
+  if echo "$TOKEN_RESPONSE" | grep -q "access_token"; then
+    ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+    echo "  ✅ Got OAuth2 access token (length: ${#ACCESS_TOKEN})"
+  else
+    echo "  ❌ Failed to get OAuth2 access token from virtucard.unizeto.pl"
+    echo "  🔄 Trying fallback: cloudsign.webnotarius.pl OAuth2..."
+    
+    # Fallback to cloudsign OAuth2 endpoint
+    FALLBACK_TOKEN_RESPONSE=$(curl -s --max-time 30 \
+      -X POST \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      -H "Accept: application/json" \
+      -H "User-Agent: SimplySign/1.0" \
+      -d "grant_type=password" \
+      -d "client_id=$MOBILE_CLIENT_ID" \
+      -d "client_secret=$OAUTH2_CLIENT_SECRET" \
+      -d "username=$CERTUM_USERNAME" \
+      -d "password=$CERTUM_PASSWORD" \
+      -d "scope=profile" \
+      "https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken" 2>&1)
+    
+    if echo "$FALLBACK_TOKEN_RESPONSE" | grep -q "access_token"; then
+      ACCESS_TOKEN=$(echo "$FALLBACK_TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+      echo "  ✅ Got fallback OAuth2 access token (length: ${#ACCESS_TOKEN})"
+    else
+      echo "  ❌ Both OAuth2 endpoints failed"
+      continue
+    fi
+  fi
+  
+  # Step 2: Use access token to call SEED endpoint with proper authentication
+  echo "  Step 2: Calling SEED endpoint with OAuth2 Bearer token..."
   SEED_URL="https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks"
   
-  echo "  Testing with Certum SEED endpoint (using correct nested structure)..."
   SEED_RESPONSE=$(curl -s --max-time 15 \
     -X POST \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
     -H "X-Client-ID: $MOBILE_CLIENT_ID" \
+    -H "User-Agent: SimplySign/1.0" \
     -d "{
       \"email\": \"$CERTUM_USERNAME\",
       \"seedCodeReq\": {
