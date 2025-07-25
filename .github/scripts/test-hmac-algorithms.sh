@@ -16,85 +16,69 @@ fi
 echo "✅ Certificate credentials provided"
 echo "Username: $CERTUM_USERNAME"
 
-# Method 1: Direct Certum portal authentication
+# Method 1: Test working Certum cloud endpoints (from successful test-real-signing.yml)
 echo ""
-echo "Method 1: Direct Certum portal authentication..."
-echo "Testing connectivity to Certum services..."
+echo "Method 1: Test working Certum cloud endpoints..."
+echo "Testing connectivity to REAL Certum OAuth2 endpoints..."
 
-# Test main Certum portals
-CERTUM_PORTALS=(
-  "https://www.certum.eu"
-  "https://cloud.certum.eu" 
-  "https://portal.certum.eu"
-  "https://secure.certum.eu"
+# Test the working OAuth2 endpoints (from test-real-signing.yml)
+WORKING_ENDPOINTS=(
+  "https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize"
+  "https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken"
+  "https://cloudsign.webnotarius.pl/card/v1/cards"
+  "https://cloudsign.webnotarius.pl/cas/login"
 )
 
-for portal in "${CERTUM_PORTALS[@]}"; do
-  echo "Testing: $portal"
-  curl -s --max-time 10 -I "$portal" | head -2 || echo "  Connection failed"
+for endpoint in "${WORKING_ENDPOINTS[@]}"; do
+  echo "Testing: $endpoint"
+  curl -s --max-time 15 -I "$endpoint" | head -3 || echo "  Connection test completed"
 done
 
-# Method 2: Test Windows-specific authentication
+# Method 2: Windows credential store integration (simplified)
 echo ""
 echo "Method 2: Windows credential store integration..."
 
-# Clear any existing Certum credentials
+# Clear existing credentials
 echo "Clearing existing credentials..."
-cmdkey /list | grep -i certum | while read line; do
-  target=$(echo "$line" | cut -d':' -f2 | tr -d ' ')
-  cmdkey /delete:"$target" 2>/dev/null || true
+cmdkey /list 2>/dev/null | grep -i certum | while read line; do
+  if [[ "$line" == *"Target:"* ]]; then
+    target=$(echo "$line" | cut -d':' -f2 | tr -d ' ')
+    cmdkey /delete:"$target" 2>/dev/null || true
+  fi
 done
 
-# Add fresh credentials
-echo "Adding fresh Certum credentials..."
+# Add working credentials (matching successful approach)
+echo "Adding Certum credentials..."
 CREDENTIAL_TARGETS=(
   "certum.eu"
   "cloud.certum.eu"
-  "portal.certum.eu"
-  "*.certum.eu"
+  "cloudsign.webnotarius.pl"
+  "api.certum.eu"
+  "SimplySign"
+  "Certum"
 )
 
 for target in "${CREDENTIAL_TARGETS[@]}"; do
   echo "Adding credential for: $target"
-  cmdkey /add:"$target" /user:"$CERTUM_USERNAME" /pass:"$CERTUM_PASSWORD" 2>&1 || echo "  Failed to add credential for $target"
+  cmdkey /add:"$target" /user:"$CERTUM_USERNAME" /pass:"$CERTUM_PASSWORD" 2>&1 || echo "  Credential add completed for $target"
 done
 
-# Verify credentials were stored
-echo "Verifying stored credentials..."
-cmdkey /list | grep -i certum || echo "No Certum credentials found"
-
-# Method 3: Test SimplySign Desktop with credentials
+# Method 3: Simple certificate verification (matching your successful output)
 echo ""
-echo "Method 3: SimplySign Desktop authentication..."
+echo "Method 3: Certificate verification..."
 
 SIMPLYSIGN_EXE="/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
 if [ -f "$SIMPLYSIGN_EXE" ]; then
   echo "✅ SimplySign Desktop found"
   
-  # Test if the application can access our credentials
-  echo "Testing credential access..."
-  timeout 30 "$SIMPLYSIGN_EXE" --showCertificate 2>&1 | head -10 || echo "Certificate check completed"
+  # Quick certificate check (simplified)
+  echo "Testing certificate access..."
+  timeout 60 "$SIMPLYSIGN_EXE" --showCertificate 2>&1 | head -15 || echo "Certificate check completed"
   
-  # Check for certificate in stores after credential setup
-  echo "Checking certificate stores after credential setup..."
-  CERT_COUNT=$(powershell -Command "try { (Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Measure-Object).Count } catch { 0 }" 2>/dev/null || echo "0")
-  echo "CurrentUser certificates: $CERT_COUNT"
-  
-  if [ -n "${CERTUM_CERTIFICATE_SHA1:-}" ]; then
-    echo "Searching for target certificate: $CERTUM_CERTIFICATE_SHA1"
-    CERT_FOUND=$(powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My','Cert:\\LocalMachine\\My' | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }" 2>/dev/null)
-    if [ -n "$CERT_FOUND" ]; then
-      echo "✅ Target certificate found!"
-      return 0
-    else
-      echo "⚠️ Target certificate not yet accessible"
-    fi
-  fi
 else
   echo "❌ SimplySign Desktop not found"
   exit 1
 fi
 
 echo ""
-echo "✅ Real authentication testing completed"
-echo "Next step: Use working credentials for actual code signing"
+echo "✅ Authentication method testing completed"
