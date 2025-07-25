@@ -30,7 +30,8 @@ fi
 echo "✅ Binary to sign: $BINARY_PATH"
 echo "✅ Certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
 
-# Find signtool
+# Find signtool (avoiding problematic SDK versions)
+echo "🔧 Finding working signtool.exe (avoiding 10.0.22621.0 due to /fd parameter regression)"
 if ! find_signtool; then
   echo "❌ signtool.exe not found"
   exit 1
