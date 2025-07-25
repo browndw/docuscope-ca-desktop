@@ -561,8 +561,10 @@ jobs:
           # Check if SimplySign is properly installed
           if [ -n "$SIMPLYSIGN_EXE" ] && [ -f "$SIMPLYSIGN_EXE" ]; then
             echo "simplysign-installed=true" >> $GITHUB_OUTPUT
+            echo "simplysign-path=$SIMPLYSIGN_EXE" >> $GITHUB_OUTPUT
           else
             echo "simplysign-installed=false" >> $GITHUB_OUTPUT
+            echo "simplysign-path=" >> $GITHUB_OUTPUT
           fi
           
           # Check certificate accessibility
@@ -617,30 +619,91 @@ jobs:
 
       - name: Find SimplySign Desktop
         run: |
-          echo "=== FINDING SIMPLYSIGN DESKTOP ==="
+          echo "=== ENHANCED SIMPLYSIGN DESKTOP DISCOVERY ==="
+          echo "Using improved search logic to locate SimplySign installation from Step 2"
           
-          EXPECTED_PATHS=(
-            "/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
-            "/c/Program Files (x86)/Certum/SimplySign Desktop/SimplySignDesktop.exe"
-          )
-          
-          SIMPLYSIGN_EXE=""
-          for path in "${EXPECTED_PATHS[@]}"; do
-            if [ -f "$path" ]; then
-              SIMPLYSIGN_EXE="$path"
-              echo "✅ Found SimplySign Desktop: $SIMPLYSIGN_EXE"
-              break
+          # Method 1: Check if path was inherited from previous step
+          if [ -n "${SIMPLYSIGN_EXE}" ] && [ -f "${SIMPLYSIGN_EXE}" ]; then
+            echo "✅ Using SimplySign path from previous step: $SIMPLYSIGN_EXE"
+          else
+            echo "Environment variable not inherited, using fallback discovery methods..."
+            
+            # Method 2: Try saved path from Step 2 outputs
+            SAVED_PATH="${{ needs.setup-certificates.outputs.simplysign-path }}"
+            if [ -n "$SAVED_PATH" ] && [ -f "$SAVED_PATH" ]; then
+              echo "✅ Using SimplySign path from Step 2 outputs: $SAVED_PATH"
+              SIMPLYSIGN_EXE="$SAVED_PATH"
+            else
+              echo "No saved path available, using comprehensive search..."
+              
+              # Method 3: Enhanced search logic (matching Step 2's successful approach)
+              EXPECTED_PATHS=(
+                "/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
+                "/c/Program Files (x86)/Certum/SimplySign Desktop/SimplySignDesktop.exe"
+                "/c/Program Files/Certum/SimplySign/SimplySignDesktop.exe"
+                "/c/Program Files (x86)/Certum/SimplySign/SimplySignDesktop.exe"
+              )
+              
+              echo "Checking expected installation paths..."
+              SIMPLYSIGN_EXE=""
+              for path in "${EXPECTED_PATHS[@]}"; do
+                echo "Checking: $path"
+                if [ -f "$path" ]; then
+                  SIMPLYSIGN_EXE="$path"
+                  echo "✅ Found SimplySign Desktop: $SIMPLYSIGN_EXE"
+                  break
+                fi
+              done
+              
+              # Method 4: Broader search if not found in expected paths
+              if [ -z "$SIMPLYSIGN_EXE" ]; then
+                echo "Not found in expected paths, searching broadly..."
+                FOUND_PATHS=$(find /c/Program* -name "SimplySignDesktop.exe" 2>/dev/null | head -3)
+                if [ -n "$FOUND_PATHS" ]; then
+                  echo "Found SimplySign executables:"
+                  echo "$FOUND_PATHS"
+                  SIMPLYSIGN_EXE=$(echo "$FOUND_PATHS" | head -1)
+                  echo "✅ Using: $SIMPLYSIGN_EXE"
+                fi
+              fi
+              
+              # Method 5: Registry-based detection as final fallback
+              if [ -z "$SIMPLYSIGN_EXE" ]; then
+                echo "Trying registry-based detection..."
+                REG_INSTALL_PATH=$(powershell -Command "Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' | Where-Object {\$_.DisplayName -like '*SimplySign*'} | Select-Object -ExpandProperty InstallLocation -First 1" 2>/dev/null)
+                
+                if [ -n "$REG_INSTALL_PATH" ]; then
+                  # Convert Windows path to Unix-style path
+                  REG_PATH_UNIX=$(echo "$REG_INSTALL_PATH" | sed 's|C:\\|/c/|g' | sed 's|\\|/|g')
+                  POTENTIAL_EXE="$REG_PATH_UNIX/SimplySignDesktop.exe"
+                  if [ -f "$POTENTIAL_EXE" ]; then
+                    echo "✅ Found via registry: $POTENTIAL_EXE"
+                    SIMPLYSIGN_EXE="$POTENTIAL_EXE"
+                  fi
+                fi
+              fi
             fi
-          done
+          fi
           
+          # Final validation
           if [ -z "$SIMPLYSIGN_EXE" ]; then
-            echo "❌ SimplySign Desktop not found"
-            echo "Searching for installation..."
+            echo "❌ SimplySign Desktop not found after comprehensive search"
+            echo "This indicates Step 2 installation may have failed or paths are inaccessible"
+            echo ""
+            echo "=== Debugging Information ==="
+            echo "Step 2 outputs available:"
+            echo "  simplysign-installed: ${{ needs.setup-certificates.outputs.simplysign-installed }}"
+            echo "  simplysign-path: ${{ needs.setup-certificates.outputs.simplysign-path }}"
+            echo ""
+            echo "Searching for any Certum installations..."
+            find /c/Program* -name "*Certum*" -type d 2>/dev/null | head -10 || echo "No Certum directories found"
             find /c/Program* -name "*SimplySign*" 2>/dev/null | head -10 || echo "No SimplySign files found"
             exit 1
           fi
           
+          # Success - save for authentication step
           echo "SIMPLYSIGN_EXE=$SIMPLYSIGN_EXE" >> $GITHUB_ENV
+          echo "✅ SimplySign Desktop located successfully: $SIMPLYSIGN_EXE"
 
       - name: Authenticate with Certum Cloud Service
         timeout-minutes: 20
