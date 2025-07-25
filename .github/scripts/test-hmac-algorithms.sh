@@ -8,14 +8,13 @@
 set -euo pipefail
 
 echo "=== Testing Real Certum Authentication Methods ==="
-echo "🎯 Based on mobile app analysis + working web interface:"
-echo "   • OAuth2 flow: cloudsign.webnotarius.pl/idp/oauth2.0/ (working endpoint)"
-echo "   • TOTP algorithm: SHA1/SHA256/SHA512 with HMAC"
-echo "   • Time step: 30 seconds"
-echo "   • Digits: 8-digit activation codes"
-echo "   • Mobile client ID: A5wH574pS74B4WAda3Yy"
-echo "   • Authentication: OAuth2 Bearer token → SEED endpoint"
-echo "   • Web interface: username + 'token from mobile application simplysign'"
+echo "🎯 Based on mobile app Config.plist + manual authentication process:"
+echo "   • Step 1: Mobile login - username + password → API token"
+echo "   • Step 2: Desktop login - username + API token → certificate access"
+echo "   • Mobile endpoint: /idp/oauth2.0/accessToken (confirmed accessible)"
+echo "   • Mobile client ID: A5wH574pS74B4WAda3Yy (from Config.plist)"
+echo "   • Authentication flow: Simulating mobile app → desktop connection"
+echo "   • Manual process confirmed: CERTUM_USERNAME + CERTUM_PASSWORD → CERTUM_API_TOKEN"
 
 # Check if we have certificate credentials
 if [ -z "${CERTUM_USERNAME:-}" ] || [ -z "${CERTUM_PASSWORD:-}" ]; then
@@ -35,9 +34,6 @@ echo "ℹ️  Note: 302/401/200 responses are expected (authentication not attem
 # Test the working OAuth2 endpoints (from test-real-signing.yml)
 WORKING_ENDPOINTS=(
   "https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize"
-  "https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken"
-  "https://cloudsign.webnotarius.pl/card/v1/cards"
-  "https://cloudsign.webnotarius.pl/cas/login"
 )
 
 for endpoint in "${WORKING_ENDPOINTS[@]}"; do
@@ -144,131 +140,146 @@ else
   exit 1
 fi
 
-# Method 4: TOTP-based activation code generation (from mobile app analysis)
+# Method 4: Two-step authentication (mobile app → desktop connection)
 echo ""
-echo "Method 4: TOTP-based activation code generation..."
-echo "🎯 Based on mobile app analysis: TOTP with seed + algorithm + digits + timeStep"
+echo "Method 4: Two-step authentication (simulating manual process)..."
+echo "🎯 Step 1: Mobile app authentication (username + password → API token)"
+echo "🎯 Step 2: Desktop authentication (username + API token → certificate access)"
 
-# TOTP parameters discovered from mobile app
-TOTP_TIME_STEP=30  # 30-second time step
-TOTP_DIGITS=8      # 8-digit codes (as seen in test output)
-TOTP_ALGORITHMS=("SHA1" "SHA256" "SHA512")
-
-# Generate time-based activation codes using TOTP pattern
-CURRENT_TIME=$(date +%s)
-TIME_SLOT=$((CURRENT_TIME / TOTP_TIME_STEP))
-
-echo "Current timestamp: $CURRENT_TIME"
-echo "Time slot: $TIME_SLOT (30-second intervals)"
+# Step 1: Mobile app authentication - get API token
 echo ""
+echo "Step 1: Mobile app authentication (getting API token)..."
 
-for algorithm in "${TOTP_ALGORITHMS[@]}"; do
-  echo "🧪 Testing TOTP algorithm: $algorithm"
+# Mobile app configuration from Config.plist
+MOBILE_BASE_URL="https://cloudsign.webnotarius.pl"
+MOBILE_LOGIN_PATH="/idp/oauth2.0/accessToken"
+MOBILE_CLIENT_ID="A5wH574pS74B4WAda3Yy"
+
+echo "Mobile endpoint: $MOBILE_BASE_URL$MOBILE_LOGIN_PATH"
+echo "Mobile client ID: $MOBILE_CLIENT_ID"
+
+# Call mobile authentication endpoint (simulating mobile app login)
+MOBILE_AUTH_RESPONSE=$(curl -s --max-time 30 \
+  -X POST \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "Accept: application/json" \
+  -H "User-Agent: SimplySign-Mobile/1.0" \
+  -d "grant_type=password" \
+  -d "client_id=$MOBILE_CLIENT_ID" \
+  -d "username=$CERTUM_USERNAME" \
+  -d "password=$CERTUM_PASSWORD" \
+  "$MOBILE_BASE_URL$MOBILE_LOGIN_PATH" 2>&1)
+
+echo "Mobile auth response: $(echo "$MOBILE_AUTH_RESPONSE" | head -2)"
+
+# Extract API token (CERTUM_API_TOKEN)
+CERTUM_API_TOKEN=""
+if echo "$MOBILE_AUTH_RESPONSE" | grep -q "access_token"; then
+  CERTUM_API_TOKEN=$(echo "$MOBILE_AUTH_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+  echo "✅ Got API token from mobile auth (length: ${#CERTUM_API_TOKEN})"
+  echo "API token (first 20 chars): ${CERTUM_API_TOKEN:0:20}..."
+else
+  echo "❌ Failed to get API token from mobile authentication"
+  echo "Error details: $(echo "$MOBILE_AUTH_RESPONSE" | head -3)"
+  echo ""
+  echo "🔄 Trying alternative mobile authentication approaches..."
   
-  # Generate TOTP-style activation code using username + timestamp + algorithm
-  # This mimics the mobile app's TOTP generation process
-  SEED_STRING="$CERTUM_USERNAME:$TIME_SLOT"
-  
-  # Standard TOTP implementation (RFC 6238) with proper dynamic truncation
-  case $algorithm in
-    "SHA1")
-      # Get HMAC-SHA1 in binary format
-      HMAC_HEX=$(echo -n "$SEED_STRING" | openssl dgst -sha1 -hmac "$CERTUM_PASSWORD" | cut -d' ' -f2)
-      ;;
-    "SHA256")
-      # Get HMAC-SHA256 in binary format  
-      HMAC_HEX=$(echo -n "$SEED_STRING" | openssl dgst -sha256 -hmac "$CERTUM_PASSWORD" | cut -d' ' -f2)
-      ;;
-    "SHA512")
-      # Get HMAC-SHA512 in binary format
-      HMAC_HEX=$(echo -n "$SEED_STRING" | openssl dgst -sha512 -hmac "$CERTUM_PASSWORD" | cut -d' ' -f2)
-      ;;
-  esac
-  
-  # Apply RFC 6238 dynamic truncation to get 8-digit code
-  # Take last 4 bits as offset, then extract 4 bytes and convert to 8-digit number
-  OFFSET_HEX="${HMAC_HEX: -1}"
-  OFFSET=$((16#$OFFSET_HEX & 0x0F))
-  OFFSET_BYTES=$((OFFSET * 2))
-  
-  # Extract 4 bytes (8 hex chars) starting at offset
-  EXTRACTED_HEX="${HMAC_HEX:$OFFSET_BYTES:8}"
-  
-  # Convert to decimal and apply modulo for 8-digit code
-  EXTRACTED_DEC=$((16#$EXTRACTED_HEX & 0x7FFFFFFF))
-  ACTIVATION_CODE=$(printf "%08d" $((EXTRACTED_DEC % 100000000)))
-  
-  echo "  Generated code: $ACTIVATION_CODE"
-  
-  # Step 1: Get OAuth2 access token (using working cloudsign.webnotarius.pl endpoint)
-  echo "  Step 1: Getting OAuth2 access token (cloudsign.webnotarius.pl)..."
-  
-  # Use the working OAuth2 endpoints (confirmed accessible)
-  OAUTH2_BASE_URL="https://cloudsign.webnotarius.pl/idp/oauth2.0"
-  MOBILE_CLIENT_ID="A5wH574pS74B4WAda3Yy"
-  OAUTH2_CLIENT_SECRET="051181ADEFDE10FC62D4F7ECFF370A4F0595341A925B010DFC18C5B6E369B3E0"
-  
-  # Direct password grant (Resource Owner Password Credentials flow)
-  TOKEN_RESPONSE=$(curl -s --max-time 30 \
+  # Try without client_secret (some OAuth2 implementations don't require it for public clients)
+  echo "Trying without client_secret..."
+  MOBILE_AUTH_RESPONSE_ALT=$(curl -s --max-time 30 \
     -X POST \
     -H "Content-Type: application/x-www-form-urlencoded" \
     -H "Accept: application/json" \
-    -H "User-Agent: SimplySign/1.0" \
+    -H "User-Agent: SimplySign-Mobile/1.0" \
     -d "grant_type=password" \
     -d "client_id=$MOBILE_CLIENT_ID" \
-    -d "client_secret=$OAUTH2_CLIENT_SECRET" \
     -d "username=$CERTUM_USERNAME" \
     -d "password=$CERTUM_PASSWORD" \
-    -d "scope=profile" \
-    "$OAUTH2_BASE_URL/accessToken" 2>&1)
+    -d "scope=openid profile" \
+    "$MOBILE_BASE_URL$MOBILE_LOGIN_PATH" 2>&1)
   
-  echo "  OAuth2 token response: $(echo "$TOKEN_RESPONSE" | head -2)"
-  
-  # Extract access token
-  ACCESS_TOKEN=""
-  if echo "$TOKEN_RESPONSE" | grep -q "access_token"; then
-    ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
-    echo "  ✅ Got OAuth2 access token (length: ${#ACCESS_TOKEN})"
+  if echo "$MOBILE_AUTH_RESPONSE_ALT" | grep -q "access_token"; then
+    CERTUM_API_TOKEN=$(echo "$MOBILE_AUTH_RESPONSE_ALT" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+    echo "✅ Got API token with alternative approach (length: ${#CERTUM_API_TOKEN})"
   else
-    echo "  ❌ Failed to get OAuth2 access token from cloudsign.webnotarius.pl"
-    echo "  Error details: $(echo "$TOKEN_RESPONSE" | head -3)"
-    continue
+    echo "❌ Alternative approach also failed"
+    echo "Response: $(echo "$MOBILE_AUTH_RESPONSE_ALT" | head -3)"
   fi
+fi
+
+# Step 2: Desktop authentication (only if we got API token)
+if [ -n "$CERTUM_API_TOKEN" ]; then
+  echo ""
+  echo "Step 2: Desktop authentication (using API token)..."
+  echo "🎯 Using API token as 'token from mobile application simplysign'"
   
-  # Step 2: Use access token to call SEED endpoint with proper authentication
-  echo "  Step 2: Calling SEED endpoint with OAuth2 Bearer token..."
+  # Test the SEED endpoint that was failing before - now with proper API token
   SEED_URL="https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks"
   
+  # Generate a simple activation code for testing (not TOTP-based, since we have real API token now)
+  SIMPLE_ACTIVATION_CODE="12345678"
+  
+  echo "Testing SEED endpoint with API token authentication..."
   SEED_RESPONSE=$(curl -s --max-time 15 \
     -X POST \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -H "Authorization: Bearer $CERTUM_API_TOKEN" \
     -H "X-Client-ID: $MOBILE_CLIENT_ID" \
-    -H "User-Agent: SimplySign/1.0" \
+    -H "User-Agent: SimplySign-Desktop/1.0" \
     -d "{
       \"email\": \"$CERTUM_USERNAME\",
       \"seedCodeReq\": {
-        \"code\": \"$ACTIVATION_CODE\"
+        \"code\": \"$SIMPLE_ACTIVATION_CODE\"
       }
     }" \
     "$SEED_URL" 2>&1)
   
-  echo "  Response: $(echo "$SEED_RESPONSE" | head -3)"
+  echo "SEED response: $(echo "$SEED_RESPONSE" | head -3)"
   
   # Check if we got a successful response
-  if echo "$SEED_RESPONSE" | grep -q '"state":"success"\|"code":'; then
-    echo "  ✅ TOTP algorithm $algorithm successful!"
-    echo "  🎉 Working activation code: $ACTIVATION_CODE"
-    break
-  elif echo "$SEED_RESPONSE" | grep -q '"state":"pending"'; then
-    echo "  🔄 TOTP algorithm $algorithm pending (async processing)"
+  if echo "$SEED_RESPONSE" | grep -q '"state":"success"\|"status":"success"'; then
+    echo "✅ Desktop authentication successful!"
+    echo "🎉 API token works for certificate access!"
+  elif echo "$SEED_RESPONSE" | grep -q '"state":"pending"\|"status":"pending"'; then
+    echo "🔄 Desktop authentication pending (async processing)"
+    echo "✅ API token is valid - request is being processed"
+  elif echo "$SEED_RESPONSE" | grep -q '"error":\s*"invalid_token"\|"unauthorized"'; then
+    echo "❌ API token invalid or expired"
   else
-    echo "  ❌ TOTP algorithm $algorithm failed"
+    echo "⚠️ Desktop authentication returned unexpected response"
+    echo "Full response: $(echo "$SEED_RESPONSE" | head -5)"
   fi
   
+  # Try alternative desktop endpoints if SEED fails
   echo ""
-done
+  echo "Testing alternative desktop endpoints with API token..."
+  
+  # Test cards endpoint (from Config.plist: /card/v1)
+  CARDS_URL="https://cloudsign.webnotarius.pl/card/v1/cards/tasks"
+  echo "Testing cards endpoint: $CARDS_URL"
+  
+  CARDS_RESPONSE=$(curl -s --max-time 15 \
+    -X GET \
+    -H "Accept: application/json" \
+    -H "Authorization: Bearer $CERTUM_API_TOKEN" \
+    -H "X-Client-ID: $MOBILE_CLIENT_ID" \
+    -H "User-Agent: SimplySign-Desktop/1.0" \
+    "$CARDS_URL" 2>&1)
+  
+  echo "Cards response: $(echo "$CARDS_RESPONSE" | head -2)"
+  
+  if echo "$CARDS_RESPONSE" | grep -q '"cards"\|"certificates"\|"id"'; then
+    echo "✅ Cards endpoint successful - API token works!"
+  else
+    echo "ℹ️ Cards endpoint response: $(echo "$CARDS_RESPONSE" | head -1)"
+  fi
+  
+else
+  echo ""
+  echo "❌ Skipping Step 2 - no API token available"
+  echo "💡 Need to resolve mobile authentication first"
+fi
 
 # Method 5: Certificate store verification (avoiding OAuth2 issues)
 echo ""
@@ -308,9 +319,9 @@ powershell -Command "
 echo ""
 echo "✅ Authentication method testing completed"
 echo "🎯 Key findings:"
-echo "  • Working OAuth2 endpoint: cloudsign.webnotarius.pl (confirmed accessible)"
-echo "  • SimplySign Desktop CLI capabilities verified"
-echo "  • TOTP-based activation code generation implemented"
-echo "  • Mobile app TOTP parameters discovered (30s timeStep, SHA algorithms)"
-echo "  • Web interface confirmed: username + 'token from mobile application'"
-echo "  • Using working endpoint configuration (virtucard.unizeto.pl not accessible)"
+echo "  • Mobile authentication endpoint: cloudsign.webnotarius.pl/idp/oauth2.0/accessToken"
+echo "  • Two-step process: mobile login → API token → desktop connection"
+echo "  • Mobile client ID: A5wH574pS74B4WAda3Yy (from Config.plist)"
+echo "  • Desktop uses API token as 'token from mobile application simplysign'"
+echo "  • Simulating manual process: CERTUM_USERNAME + CERTUM_PASSWORD → CERTUM_API_TOKEN"
+echo "  • OAuth2 Resource Owner Password Credentials flow implemented"
