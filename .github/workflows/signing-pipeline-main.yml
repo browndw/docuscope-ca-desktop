@@ -32,7 +32,7 @@ defaults:
 jobs:
   coordinator:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 60
     
     steps:
       - name: Run Complete Signing Pipeline
