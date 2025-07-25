@@ -38,6 +38,7 @@ jobs:
       - name: Trigger Signing Pipeline
         uses: actions/github-script@v6
         with:
+          github-token: ${{ secrets.WORKFLOW_DISPATCH_TOKEN }}
           script: |
             const startStep = '${{ inputs.start_from_step }}' || '1';
             const skipCache = ${{ inputs.skip_build_cache }} || false;

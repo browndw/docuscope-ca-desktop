@@ -128,22 +128,4 @@ jobs:
           path: dist/entrypoint.exe
           retention-days: 5
 
-  trigger-next-step:
-    needs: build-python-binary
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Step 2 - Certificate Setup
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'signing-step-2-certificates.yml',
-              ref: 'main',
-              inputs: {
-                'binary-artifact': 'unsigned-binary-${{ needs.build-python-binary.outputs.build-timestamp }}',
-                'binary-size': '${{ needs.build-python-binary.outputs.binary-size }}'
-              }
-            });
-            console.log('Triggered Step 2 - Certificate Setup');
+  # Note: Manual workflow - use signing-pipeline-main.yml to coordinate steps

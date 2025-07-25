@@ -346,24 +346,4 @@ jobs:
             *.log
           retention-days: 2
 
-  trigger-next-step:
-    needs: test-checksum-algorithms
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Step 5 - Final Signing
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'signing-step-5-final.yml',
-              ref: 'main',
-              inputs: {
-                'binary-artifact': '${{ inputs.binary-artifact }}',
-                'working-algorithm': '${{ needs.test-checksum-algorithms.outputs.working-algorithm }}',
-                'valid-activation-code': '${{ needs.test-checksum-algorithms.outputs.valid-activation-code }}',
-                'algorithms-tested': '${{ needs.test-checksum-algorithms.outputs.algorithms-tested }}'
-              }
-            });
-            console.log('Triggered Step 5 - Final Signing');
+  # Note: Manual workflow - use signing-pipeline-main.yml to coordinate steps

@@ -284,23 +284,4 @@ jobs:
             *.html
           retention-days: 2
 
-  trigger-next-step:
-    needs: authenticate-certum
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Step 4 - Advanced Checksum Testing
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'signing-step-4-checksum.yml',
-              ref: 'main',
-              inputs: {
-                'binary-artifact': '${{ inputs.binary-artifact }}',
-                'auth-successful': '${{ needs.authenticate-certum.outputs.auth-successful }}',
-                'session-token': '${{ needs.authenticate-certum.outputs.session-token }}'
-              }
-            });
-            console.log('Triggered Step 4 - Advanced Checksum Testing');
+  # Note: Manual workflow - use signing-pipeline-main.yml to coordinate steps

@@ -216,24 +216,4 @@ jobs:
             install.log
           retention-days: 2
 
-  trigger-next-step:
-    needs: setup-certificates
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Step 3 - Authentication
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'signing-step-3-authentication.yml',
-              ref: 'main',
-              inputs: {
-                'binary-artifact': '${{ inputs.binary-artifact }}',
-                'simplysign-ready': '${{ needs.setup-certificates.outputs.simplysign-installed }}',
-                'certificates-ready': '${{ needs.setup-certificates.outputs.certificates-accessible }}',
-                'target-cert-found': '${{ needs.setup-certificates.outputs.target-cert-found }}'
-              }
-            });
-            console.log('Triggered Step 3 - Authentication');
+  # Note: Manual workflow - use signing-pipeline-main.yml to coordinate steps
