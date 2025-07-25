@@ -267,9 +267,6 @@ jobs:
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
-          # Install bc for async polling calculations
-          sudo apt-get update && sudo apt-get install -y bc 2>/dev/null || echo "bc installation completed"
-          
           echo "=== AUTHENTICATING WITH CERTUM CLOUD SERVICE ==="
           echo "🔍 ENHANCED WITH JAR ANALYSIS INSIGHTS"
           echo "✅ Discovered CLI capabilities: --version, --help, --showCertificate, --signing, --configuration"
@@ -599,8 +596,19 @@ jobs:
                       echo "Task URL: $TASK_LINK"
                       echo "Polling after: ${PING_AFTER}ms"
                       
-                      # Wait for the specified time
-                      sleep $(echo "scale=2; $PING_AFTER / 1000" | bc -l)
+                      # Wait for the specified time (Windows-compatible calculation)
+                      echo "🔧 WINDOWS FIX: Using PowerShell for time calculation instead of bc"
+                      SLEEP_SECONDS=$(powershell -Command "[math]::Round($PING_AFTER / 1000, 2)" 2>/dev/null)
+                      
+                      # Fallback if PowerShell calculation fails
+                      if [[ -z "$SLEEP_SECONDS" || "$SLEEP_SECONDS" == "0" ]]; then
+                        SLEEP_SECONDS="0.25"  # 250ms default fallback
+                        echo "⚠️ Using default sleep time: ${SLEEP_SECONDS}s"
+                      else
+                        echo "✅ Calculated sleep time: ${SLEEP_SECONDS}s"
+                      fi
+                      
+                      sleep $SLEEP_SECONDS
                       
                       # Poll the task for completion
                       echo "Polling SEED task for completion..."
