@@ -8,7 +8,22 @@ on:
         required: true
         type: string
       working-algorithm:
-        description: 'Working checksum algorithm from Step 4'
+        descriptio      - name: Upload final signed binary
+        if: steps.signing-results.outputs.signing-successful == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-binary-final-${{ github.run_id }}
+          path: ${{ steps.signing-results.outputs.signed-binary-path }}
+          retention-days: 7
+
+      - name: Upload pipeline summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-summary-${{ github.run_id }}
+          path: |
+            *.log
+          retention-days: 5ksum algorithm from Step 4'
         required: false
         type: string
         default: 'none'
@@ -40,7 +55,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download binary from previous steps
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.binary-artifact }}
           path: dist/
@@ -253,7 +268,7 @@ jobs:
 
       - name: Upload final signed binary
         if: env.SIGNING_SUCCESSFUL == 'true'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: signed-binary-final-${{ github.run_id }}
           path: ${{ env.SIGNED_BINARY_PATH }}
@@ -261,7 +276,7 @@ jobs:
 
       - name: Upload pipeline summary
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: pipeline-summary-${{ github.run_id }}
           path: |
