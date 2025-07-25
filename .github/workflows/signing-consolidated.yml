@@ -315,25 +315,158 @@ jobs:
             exit 1
           fi
           
-          # Install SimplySign Desktop silently
-          echo "Installing SimplySign Desktop..."
-          msiexec //i "$INSTALLER_FILE" //quiet //norestart //l* install.log
-          INSTALL_EXIT_CODE=$?
+          # Enhanced MSI Installation with proper Windows Installer service management
+          CERTUM_INSTALLER="$INSTALLER_FILE"
+          INSTALLER_TYPE="MSI"
+          
+          if [[ "$INSTALLER_TYPE" == "MSI" ]]; then
+            echo "🎯 MSI INSTALLER DETECTED - Using msiexec for proper silent install!"
+            echo ""
+            
+            # CRITICAL: Enhanced Windows Installer service management
+            echo "=== Enhanced Windows Installer Service Setup ==="
+            echo "Checking Windows Installer service status..."
+            powershell -Command "Get-Service -Name 'msiserver' | Format-Table Name, Status, StartType" || echo "Could not check Windows Installer service"
+            
+            # Force stop and restart the service to ensure clean state
+            echo "Restarting Windows Installer service for clean state..."
+            powershell -Command "Stop-Service -Name 'msiserver' -Force -ErrorAction SilentlyContinue" || echo "Service may not have been running"
+            sleep 2
+            powershell -Command "Start-Service -Name 'msiserver' -ErrorAction SilentlyContinue" || echo "Could not start service"
+            
+            # Wait longer for service to fully initialize
+            sleep 5
+            
+            echo "Verifying Windows Installer service is now running..."
+            powershell -Command "Get-Service -Name 'msiserver' | Format-Table Name, Status, StartType" || echo "Could not verify service status"
+            
+            # Check if we have administrator privileges
+            echo ""
+            echo "=== Checking Administrator Privileges ==="
+            if powershell -Command "([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')" 2>/dev/null | grep -q "True"; then
+              echo "✅ Running with administrator privileges"
+              ADMIN_RIGHTS=true
+            else
+              echo "⚠️ Not running with administrator privileges"
+              ADMIN_RIGHTS=false
+            fi
+            
+            # Check MSI file integrity first
+            echo ""
+            echo "=== MSI File Integrity Check ==="
+            echo "MSI file size: $(stat -c%s "$CERTUM_INSTALLER" 2>/dev/null || stat -f%z "$CERTUM_INSTALLER" 2>/dev/null) bytes"
+            echo "MSI file permissions: $(ls -la "$CERTUM_INSTALLER")"
+            
+            # Try to validate the MSI package
+            echo "Validating MSI package structure..."
+            if powershell -Command "try { \$msi = [System.IO.Path]::GetFullPath('$CERTUM_INSTALLER'); Get-WindowsInstallerProperty -Path \$msi -ErrorAction Stop | Select-Object -First 3 } catch { Write-Output 'MSI validation failed' }" 2>/dev/null; then
+              echo "✅ MSI package appears valid"
+            else
+              echo "⚠️ MSI package validation failed or not accessible"
+            fi
+            
+            echo ""
+            echo "Method 1: Enhanced MSI installation with admin privileges"
+            echo "Full command: msiexec /i \"$CERTUM_INSTALLER\" /quiet /norestart /l*v install.log ALLUSERS=1 REBOOT=ReallySuppress"
+            
+            # Enhanced installation with better error handling
+            if [ "$ADMIN_RIGHTS" = true ]; then
+              # Run with explicit admin context
+              echo "Running MSI installation with administrator privileges..."
+              powershell -Command "Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', '\"$CERTUM_INSTALLER\"', '/quiet', '/norestart', '/l*v', 'install.log', 'ALLUSERS=1', 'REBOOT=ReallySuppress' -Wait -NoNewWindow -PassThru" &
+              INSTALL_PID=$!
+            else
+              echo "Running MSI installation without explicit admin elevation..."
+              timeout 300 msiexec /i "$CERTUM_INSTALLER" /quiet /norestart /l*v install.log ALLUSERS=1 REBOOT=ReallySuppress &
+              INSTALL_PID=$!
+            fi
+            
+            # Enhanced monitoring with better logging
+            echo "Monitoring installation progress..."
+            INSTALL_START_TIME=$(date +%s)
+            sleep 10
+            
+            # Check if msiexec process is actually running
+            if kill -0 $INSTALL_PID 2>/dev/null; then
+              echo "MSI installation process is running (PID: $INSTALL_PID)"
+              
+              # Monitor for up to 5 minutes with periodic status updates
+              for i in {1..30}; do
+                sleep 10
+                CURRENT_TIME=$(date +%s)
+                ELAPSED=$((CURRENT_TIME - INSTALL_START_TIME))
+                
+                if kill -0 $INSTALL_PID 2>/dev/null; then
+                  echo "Installation still running after ${ELAPSED} seconds..."
+                  
+                  # Check if any log file is being written
+                  if [ -f "install.log" ]; then
+                    LOG_SIZE=$(stat -c%s "install.log" 2>/dev/null || stat -f%z "install.log" 2>/dev/null || echo 0)
+                    echo "  Log file size: $LOG_SIZE bytes"
+                  fi
+                  
+                  # Check Windows Installer service status
+                  if ! powershell -Command "Get-Service -Name 'msiserver' -ErrorAction SilentlyContinue | Where-Object {\$_.Status -eq 'Running'}" >/dev/null 2>&1; then
+                    echo "❌ Windows Installer service stopped during installation!"
+                    echo "Attempting to restart service..."
+                    powershell -Command "Start-Service -Name 'msiserver' -ErrorAction SilentlyContinue" || echo "Could not restart service"
+                    sleep 2
+                  fi
+                else
+                  echo "MSI installation completed after ${ELAPSED} seconds"
+                  break
+                fi
+              done
+              
+              # Wait for process to complete and get exit code
+              wait $INSTALL_PID
+              INSTALL_EXIT_CODE=$?
+            else
+              echo "❌ MSI installation process failed to start"
+              INSTALL_EXIT_CODE=1
+            fi
+          fi
           
           echo "Installation exit code: $INSTALL_EXIT_CODE"
           
-          # Wait for installation to complete
-          echo "Waiting for installation to complete..."
-          sleep 30
+          # Enhanced post-installation verification
+          echo ""
+          echo "=== Post-Installation Verification ==="
           
-          # Verify installation
+          # Wait additional time for installation to fully complete
+          echo "Waiting for installation to fully complete..."
+          sleep 15
+          
+          # Check installation log for insights
+          if [ -f "install.log" ]; then
+            echo "Installation log size: $(stat -c%s "install.log" 2>/dev/null || stat -f%z "install.log" 2>/dev/null || echo "0") bytes"
+            echo "Installation log (last 10 lines):"
+            tail -10 install.log || echo "Cannot read install log"
+            
+            # Check for installation success/failure patterns
+            if grep -q "Installation completed successfully" install.log 2>/dev/null; then
+              echo "✅ Log indicates successful installation"
+            elif grep -q "Installation failed" install.log 2>/dev/null; then
+              echo "❌ Log indicates installation failure"
+            elif grep -q "Product: SimplySign Desktop" install.log 2>/dev/null; then
+              echo "✅ SimplySign Desktop product detected in log"
+            fi
+          else
+            echo "⚠️ No installation log found"
+          fi
+          
+          # Enhanced path verification with broader search
           EXPECTED_PATHS=(
             "/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
             "/c/Program Files (x86)/Certum/SimplySign Desktop/SimplySignDesktop.exe"
+            "/c/Program Files/Certum/SimplySign/SimplySignDesktop.exe"
+            "/c/Program Files (x86)/Certum/SimplySign/SimplySignDesktop.exe"
           )
           
+          echo "Searching for SimplySign Desktop executable..."
           SIMPLYSIGN_EXE=""
           for path in "${EXPECTED_PATHS[@]}"; do
+            echo "Checking: $path"
             if [ -f "$path" ]; then
               SIMPLYSIGN_EXE="$path"
               echo "✅ Found SimplySign Desktop: $SIMPLYSIGN_EXE"
@@ -341,16 +474,38 @@ jobs:
             fi
           done
           
+          # If not found in expected paths, do a broader search
+          if [ -z "$SIMPLYSIGN_EXE" ]; then
+            echo "Not found in expected paths, searching broadly..."
+            FOUND_PATHS=$(find /c/Program* -name "SimplySignDesktop.exe" 2>/dev/null | head -3)
+            if [ -n "$FOUND_PATHS" ]; then
+              echo "Found SimplySign executables:"
+              echo "$FOUND_PATHS"
+              SIMPLYSIGN_EXE=$(echo "$FOUND_PATHS" | head -1)
+              echo "✅ Using: $SIMPLYSIGN_EXE"
+            fi
+          fi
+          
           if [ -z "$SIMPLYSIGN_EXE" ]; then
             echo "❌ SimplySign Desktop not found after installation"
-            echo "Installation log (last 10 lines):"
-            tail -10 install.log || echo "Cannot read install log"
+            echo "Searching all Certum installations..."
+            find /c/Program* -name "*Certum*" -type d 2>/dev/null | head -10 || echo "No Certum directories found"
+            find /c/Program* -name "*SimplySign*" 2>/dev/null | head -10 || echo "No SimplySign files found"
             exit 1
           fi
           
-          # Test SimplySign Desktop
-          echo "Testing SimplySign Desktop installation..."
-          "$SIMPLYSIGN_EXE" --version 2>&1 | head -5 || echo "Version check completed"
+          # Verify executable functionality
+          echo ""
+          echo "=== Testing SimplySign Desktop Functionality ==="
+          echo "Executable path: $SIMPLYSIGN_EXE"
+          echo "Executable size: $(stat -c%s "$SIMPLYSIGN_EXE" 2>/dev/null || stat -f%z "$SIMPLYSIGN_EXE" 2>/dev/null || echo "unknown") bytes"
+          echo "Testing basic functionality..."
+          
+          # Test version command with timeout
+          timeout 30 "$SIMPLYSIGN_EXE" --version 2>&1 | head -5 || echo "Version check completed (may have timed out)"
+          
+          # Test help command
+          timeout 15 "$SIMPLYSIGN_EXE" --help 2>&1 | head -5 || echo "Help check completed"
           
           # Save path for next steps
           echo "SIMPLYSIGN_EXE=$SIMPLYSIGN_EXE" >> $GITHUB_ENV
