@@ -63,7 +63,7 @@ jobs:
             pyinstaller-${{ runner.os }}-x86_64-pc-windows-msvc-
 
       - name: Install dependencies
-        run: poetry install --no-dev
+        run: poetry install --without=dev
 
       - name: Build Python package
         run: poetry build
