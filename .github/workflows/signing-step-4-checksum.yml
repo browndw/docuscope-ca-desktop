@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download binary from previous steps
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.binary-artifact }}
           path: dist/
@@ -339,7 +339,7 @@ jobs:
           fi
 
       - name: Upload checksum test results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: checksum-results-${{ github.run_id }}
           path: |
