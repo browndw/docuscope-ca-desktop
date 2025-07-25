@@ -486,16 +486,31 @@ jobs:
                   
                   # Step 3: Extract session information from successful login
                   SESSION_TOKEN=""
+                  # Improved session token extraction from multiple sources
                   if echo "$MOBILE_AUTH_RESPONSE" | grep -q "ticket\|JSESSIONID\|TGT\|ST-"; then
-                    # Look for CAS service ticket
-                    SESSION_TOKEN=$(echo "$MOBILE_AUTH_RESPONSE" | grep -o 'ticket=[^&"]*' | cut -d'=' -f2 | head -1)
+                    # Look for CAS service ticket (most reliable)
+                    SESSION_TOKEN=$(echo "$MOBILE_AUTH_RESPONSE" | grep -o 'ticket=[A-Za-z0-9_-]\{10,\}' | cut -d'=' -f2 | head -1)
                     if [[ -z "$SESSION_TOKEN" ]]; then
-                      # Look for Tomcat session ID
-                      SESSION_TOKEN=$(echo "$MOBILE_AUTH_RESPONSE" | grep -o 'JSESSIONID=[^;]*' | cut -d'=' -f2 | head -1)
+                      # Look for CAS TGT (Ticket Granting Ticket)
+                      SESSION_TOKEN=$(echo "$MOBILE_AUTH_RESPONSE" | grep -o 'TGT-[A-Za-z0-9_-]\{10,\}' | head -1)
                     fi
                     if [[ -z "$SESSION_TOKEN" ]]; then
-                      # Look for any token-like string in cookies
-                      SESSION_TOKEN=$(cat mobile_cookies.txt 2>/dev/null | grep -o '[A-Za-z0-9]\{20,\}' | head -1)
+                      # Look for CAS ST (Service Ticket)
+                      SESSION_TOKEN=$(echo "$MOBILE_AUTH_RESPONSE" | grep -o 'ST-[A-Za-z0-9_-]\{10,\}' | head -1)
+                    fi
+                    if [[ -z "$SESSION_TOKEN" ]]; then
+                      # Look for Tomcat session ID
+                      SESSION_TOKEN=$(echo "$MOBILE_AUTH_RESPONSE" | grep -o 'JSESSIONID=[A-Za-z0-9_-]\{10,\}' | cut -d'=' -f2 | head -1)
+                    fi
+                    if [[ -z "$SESSION_TOKEN" ]]; then
+                      # Check cookies file for session tokens
+                      if [[ -f mobile_cookies.txt ]]; then
+                        SESSION_TOKEN=$(grep -o 'JSESSIONID[[:space:]]*[A-Za-z0-9_-]\{10,\}' mobile_cookies.txt | awk '{print $2}' | head -1)
+                        if [[ -z "$SESSION_TOKEN" ]]; then
+                          # Look for any substantial alphanumeric token in cookies
+                          SESSION_TOKEN=$(grep -o '[A-Za-z0-9]\{20,\}' mobile_cookies.txt | head -1)
+                        fi
+                      fi
                     fi
                   fi
                   
@@ -540,13 +555,15 @@ jobs:
                   echo "Activation response (first 5 lines):"
                   echo "$ACTIVATION_RESPONSE" | head -5
                   
-                  # Extract activation code if present
+                  # Improved activation code extraction with better error handling
                   ACTIVATION_CODE=""
                   if echo "$ACTIVATION_RESPONSE" | grep -q "code\|activationCode"; then
                     ACTIVATION_CODE=$(echo "$ACTIVATION_RESPONSE" | grep -o '"code":"[^"]*"' | cut -d'"' -f4 | head -1)
                     if [[ -z "$ACTIVATION_CODE" ]]; then
                       ACTIVATION_CODE=$(echo "$ACTIVATION_RESPONSE" | grep -o '"activationCode":"[^"]*"' | cut -d'"' -f4 | head -1)
                     fi
+                  elif echo "$ACTIVATION_RESPONSE" | grep -q "error\|404\|401"; then
+                    echo "⚠️ Activation API returned error, will proceed to checksum algorithm testing"
                   fi
                   
                   if [[ -n "$ACTIVATION_CODE" ]]; then
@@ -658,8 +675,14 @@ jobs:
                     fi
                   fi
                   
+                  # MANDATORY CHECKSUM ALGORITHM TESTING (Always execute)
+                  echo ""
+                  echo "🔬 MANDATORY: Advanced Checksum Algorithm Testing..."
+                  echo "🎯 Testing all 5 discovered checksum algorithms regardless of previous results"
+                  echo "This ensures we discover the correct algorithm even if other auth steps failed"
+                  
                   # CORRECTED Approach 2: Use proper activationCode and deviceInfo for IDP endpoint
-                  if [[ -z "$SEED_TOKEN" ]]; then
+                  if [[ -z "$SEED_TOKEN" ]] || [[ "$SEED_TOKEN" == "no_seed_direct_oauth2" ]]; then
                     echo "CORRECTED Approach 2: Using proper activationCode with CHECKSUM validation..."
                     IDP_TASK_URL="https://cloudsign.webnotarius.pl/idpcertum/api/identities/tasks"
                     
@@ -1085,6 +1108,9 @@ jobs:
                   CAS_LOGIN_DATA="$CAS_LOGIN_DATA&seed_token=$SEED_TOKEN"
                 fi
                 
+                # Fix OAuth2 service URL encoding (was double-encoding)
+                ENCODED_SERVICE_URL=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$CAS_SERVICE_URL', safe=''))" 2>/dev/null || echo "$CAS_SERVICE_URL")
+                
                 LOGIN_RESPONSE=$(curl -s --max-time 30 \
                   -b desktop_cookies.txt \
                   -c desktop_cookies.txt \
@@ -1095,7 +1121,7 @@ jobs:
                   -H "Referer: https://cloudsign.webnotarius.pl/cas/login" \
                   -d "$CAS_LOGIN_DATA" \
                   -L \
-                  "https://cloudsign.webnotarius.pl/cas/login?service=$(echo "$CAS_SERVICE_URL" | sed 's/&/%26/g' | sed 's/?/%3F/g')" 2>&1)
+                  "https://cloudsign.webnotarius.pl/cas/login?service=$ENCODED_SERVICE_URL" 2>&1)
                 
                 echo "OAuth2 login response (first 10 lines):"
                 echo "$LOGIN_RESPONSE" | head -10
@@ -1105,20 +1131,27 @@ jobs:
                 echo "Step C2c: Extracting authorization code from OAuth2 response..."
                 
                 AUTH_CODE=""
+                # Improved authorization code detection patterns
                 if echo "$LOGIN_RESPONSE" | grep -q "code="; then
-                  AUTH_CODE=$(echo "$LOGIN_RESPONSE" | grep -o 'code=[^&"]*' | cut -d'=' -f2 | head -1)
-                  echo "✅ Extracted authorization code: ${AUTH_CODE:0:20}..."
+                  # Look for URL parameter format: code=VALUE
+                  AUTH_CODE=$(echo "$LOGIN_RESPONSE" | grep -o 'code=[A-Za-z0-9_-]\{10,\}' | cut -d'=' -f2 | head -1)
+                  echo "✅ Extracted authorization code from URL: ${AUTH_CODE:0:20}..."
                 elif echo "$LOGIN_RESPONSE" | grep -q '"code"'; then
-                  AUTH_CODE=$(echo "$LOGIN_RESPONSE" | grep -o '"code":"[^"]*"' | cut -d'"' -f4 | head -1)
+                  # Look for JSON format: "code":"VALUE"
+                  AUTH_CODE=$(echo "$LOGIN_RESPONSE" | grep -o '"code":"[A-Za-z0-9_-]\{10,\}"' | cut -d'"' -f4 | head -1)
                   echo "✅ Extracted authorization code from JSON: ${AUTH_CODE:0:20}..."
+                elif echo "$LOGIN_RESPONSE" | grep -q "Location:.*code="; then
+                  # Look for redirect Location header with code
+                  AUTH_CODE=$(echo "$LOGIN_RESPONSE" | grep "Location:" | grep -o 'code=[A-Za-z0-9_-]\{10,\}' | cut -d'=' -f2 | head -1)
+                  echo "✅ Extracted authorization code from redirect: ${AUTH_CODE:0:20}..."
                 else
                   echo "⚠️ No authorization code found in OAuth2 response"
                   echo "Saving OAuth2 response for debugging..."
                   echo "$LOGIN_RESPONSE" > oauth2_response.html
                   echo "Response saved to oauth2_response.html"
                   
-                  # Try to extract any code-like patterns
-                  POTENTIAL_CODE=$(echo "$LOGIN_RESPONSE" | grep -o '[A-Za-z0-9_-]\{20,\}' | head -1)
+                  # Last resort: Look for any code-like pattern but exclude known client IDs
+                  POTENTIAL_CODE=$(echo "$LOGIN_RESPONSE" | grep -o '[A-Za-z0-9_-]\{20,\}' | grep -v "A0A6C9030FC238CE0BC609E8E148DFC45C8E3D91B70A2740F2F51723464369B5" | grep -v "A5wH574pS74B4WAda3Yy" | head -1)
                   if [[ -n "$POTENTIAL_CODE" ]]; then
                     AUTH_CODE="$POTENTIAL_CODE"
                     echo "⚠️ Using potential authorization code: ${AUTH_CODE:0:20}..."
@@ -1443,15 +1476,18 @@ jobs:
                     rm -f mobile_token_cookies.txt 2>/dev/null || true
                   fi
                   
-                  # Step D2: Desktop Authentication using API Token
+                  # Step D2: Desktop Authentication using API Token (with timeout protection)
                   echo ""
                   echo "Step D2: Desktop Authentication - Using CERTUM_USERNAME + CERTUM_API_TOKEN..."
                   echo "🖥️  OFFICIAL CERTUM WORKFLOW: Desktop authentication with generated API token"
                   echo "Username: $CERTUM_USERNAME"
                   echo "API Token: ${CERTUM_API_TOKEN:0:8}*** (${#CERTUM_API_TOKEN} chars)"
                   
+                  # Add timeout protection to ensure workflow continues to checksum testing
+                  echo "⏰ IMPORTANT: Adding timeout protection to ensure checksum algorithms are tested"
+                  
                   if [[ -n "$CERTUM_API_TOKEN" ]]; then
-                    # Method D2a: GUI-based "Connect to SimplySign" with API token
+                    # Method D2a: GUI-based "Connect to SimplySign" with API token (with timeout)
                     echo ""
                     echo "Method D2a: GUI Authentication - Connect to SimplySign with API token..."
                     echo "Following official documentation: Right-click → Connect to SimplySign → Username + Token"
@@ -1461,12 +1497,12 @@ jobs:
                     echo "Username: $CERTUM_USERNAME" >> "/c/Users/$USER/certum_auth_test.txt"
                     echo "API Token: ${CERTUM_API_TOKEN:0:8}***" >> "/c/Users/$USER/certum_auth_test.txt"
                   
-                    
-                    # GUI automation for SimplySign Desktop authentication
+                    # GUI automation for SimplySign Desktop authentication (with timeout)
                     echo "Starting GUI automation for desktop authentication..."
+                    echo "⏰ Setting 60-second timeout to ensure workflow continues to checksum testing"
                     
                     # Start signing operation to trigger authentication prompt
-                    timeout 300 "$SIMPLYSIGN_EXE" --signing "/c/Users/$USER/certum_auth_test.txt" 2>&1 &
+                    timeout 60 "$SIMPLYSIGN_EXE" --signing "/c/Users/$USER/certum_auth_test.txt" 2>&1 &
                     DESKTOP_AUTH_PID=$!
                     
                     # Monitor for authentication windows and handle with API token
