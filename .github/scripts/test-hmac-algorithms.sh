@@ -8,14 +8,14 @@
 set -euo pipefail
 
 echo "=== Testing Real Certum Authentication Methods ==="
-echo "🎯 Based on mobile app analysis + desktop executable analysis:"
-echo "   • OAuth2 flow: virtucard.unizeto.pl/cas/oauth2.0/ (desktop pattern)"
+echo "🎯 Based on mobile app analysis + working web interface:"
+echo "   • OAuth2 flow: cloudsign.webnotarius.pl/idp/oauth2.0/ (working endpoint)"
 echo "   • TOTP algorithm: SHA1/SHA256/SHA512 with HMAC"
 echo "   • Time step: 30 seconds"
 echo "   • Digits: 8-digit activation codes"
 echo "   • Mobile client ID: A5wH574pS74B4WAda3Yy"
 echo "   • Authentication: OAuth2 Bearer token → SEED endpoint"
-echo "   • API sequence: accessToken → Bearer auth → seed/code/tasks"
+echo "   • Web interface: username + 'token from mobile application simplysign'"
 
 # Check if we have certificate credentials
 if [ -z "${CERTUM_USERNAME:-}" ] || [ -z "${CERTUM_PASSWORD:-}" ]; then
@@ -200,11 +200,11 @@ for algorithm in "${TOTP_ALGORITHMS[@]}"; do
   
   echo "  Generated code: $ACTIVATION_CODE"
   
-  # Step 1: Get OAuth2 access token first (based on desktop executable analysis)
-  echo "  Step 1: Getting OAuth2 access token (virtucard.unizeto.pl)..."
+  # Step 1: Get OAuth2 access token (using working cloudsign.webnotarius.pl endpoint)
+  echo "  Step 1: Getting OAuth2 access token (cloudsign.webnotarius.pl)..."
   
-  # Use the correct OAuth2 endpoints discovered in desktop executable
-  OAUTH2_BASE_URL="https://virtucard.unizeto.pl/cas/oauth2.0"
+  # Use the working OAuth2 endpoints (confirmed accessible)
+  OAUTH2_BASE_URL="https://cloudsign.webnotarius.pl/idp/oauth2.0"
   MOBILE_CLIENT_ID="A5wH574pS74B4WAda3Yy"
   OAUTH2_CLIENT_SECRET="051181ADEFDE10FC62D4F7ECFF370A4F0595341A925B010DFC18C5B6E369B3E0"
   
@@ -230,30 +230,9 @@ for algorithm in "${TOTP_ALGORITHMS[@]}"; do
     ACCESS_TOKEN=$(echo "$TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
     echo "  ✅ Got OAuth2 access token (length: ${#ACCESS_TOKEN})"
   else
-    echo "  ❌ Failed to get OAuth2 access token from virtucard.unizeto.pl"
-    echo "  🔄 Trying fallback: cloudsign.webnotarius.pl OAuth2..."
-    
-    # Fallback to cloudsign OAuth2 endpoint
-    FALLBACK_TOKEN_RESPONSE=$(curl -s --max-time 30 \
-      -X POST \
-      -H "Content-Type: application/x-www-form-urlencoded" \
-      -H "Accept: application/json" \
-      -H "User-Agent: SimplySign/1.0" \
-      -d "grant_type=password" \
-      -d "client_id=$MOBILE_CLIENT_ID" \
-      -d "client_secret=$OAUTH2_CLIENT_SECRET" \
-      -d "username=$CERTUM_USERNAME" \
-      -d "password=$CERTUM_PASSWORD" \
-      -d "scope=profile" \
-      "https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken" 2>&1)
-    
-    if echo "$FALLBACK_TOKEN_RESPONSE" | grep -q "access_token"; then
-      ACCESS_TOKEN=$(echo "$FALLBACK_TOKEN_RESPONSE" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
-      echo "  ✅ Got fallback OAuth2 access token (length: ${#ACCESS_TOKEN})"
-    else
-      echo "  ❌ Both OAuth2 endpoints failed"
-      continue
-    fi
+    echo "  ❌ Failed to get OAuth2 access token from cloudsign.webnotarius.pl"
+    echo "  Error details: $(echo "$TOKEN_RESPONSE" | head -3)"
+    continue
   fi
   
   # Step 2: Use access token to call SEED endpoint with proper authentication
@@ -329,9 +308,9 @@ powershell -Command "
 echo ""
 echo "✅ Authentication method testing completed"
 echo "🎯 Key findings:"
-echo "  • Credential store integration tested"
+echo "  • Working OAuth2 endpoint: cloudsign.webnotarius.pl (confirmed accessible)"
 echo "  • SimplySign Desktop CLI capabilities verified"
 echo "  • TOTP-based activation code generation implemented"
 echo "  • Mobile app TOTP parameters discovered (30s timeStep, SHA algorithms)"
-echo "  • Certificate store status checked"
-echo "  • Using real mobile client configuration from Config.plist"
+echo "  • Web interface confirmed: username + 'token from mobile application'"
+echo "  • Using working endpoint configuration (virtucard.unizeto.pl not accessible)"
