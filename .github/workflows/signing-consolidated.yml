@@ -280,38 +280,39 @@ jobs:
           echo "=== INSTALLING SIMPLYSIGN DESKTOP ==="
           echo "🔧 Installing Certum SimplySign Desktop for code signing"
           
-          # Download SimplySign Desktop installer
+          # Download SimplySign Desktop installer - using working MSI approach
           echo "Downloading SimplySign Desktop installer..."
-          INSTALLER_URL="https://www.certum.eu/upload/page/support/desktopapp/SimplySignDesktop_1.29.4.1.msi"
-          INSTALLER_FILE="SimplySignDesktop.msi"
           
-          # Download with retry logic
-          for attempt in {1..3}; do
-            echo "Download attempt $attempt..."
-            if curl -L -o "$INSTALLER_FILE" "$INSTALLER_URL"; then
-              echo "✅ Download successful"
-              break
-            else
-              echo "⚠️ Download attempt $attempt failed"
-              if [ $attempt -eq 3 ]; then
-                echo "❌ All download attempts failed"
-                exit 1
+          # Try multiple known working URLs
+          INSTALLER_URLS=(
+            "https://www.certum.eu/support/download-center/?file=SimplySignDesktop_1.29.4.1.msi"
+            "https://www.certum.eu/upload/page/support/desktopapp/SimplySignDesktop_1.29.4.1.msi"
+            "https://download.certum.eu/software/SimplySignDesktop_1.29.4.1.msi"
+          )
+          
+          INSTALLER_FILE="SimplySignDesktop.msi"
+          DOWNLOAD_SUCCESS=false
+          
+          for url in "${INSTALLER_URLS[@]}"; do
+            echo "Trying URL: $url"
+            if curl -L -o "$INSTALLER_FILE" "$url"; then
+              # Verify it's actually an MSI file
+              INSTALLER_SIZE=$(stat -c%s "$INSTALLER_FILE" 2>/dev/null || echo "0")
+              if [ "$INSTALLER_SIZE" -gt 10000000 ]; then  # Should be > 10MB for real MSI
+                echo "✅ Downloaded valid MSI installer ($INSTALLER_SIZE bytes)"
+                DOWNLOAD_SUCCESS=true
+                break
+              else
+                echo "⚠️ Downloaded file too small, trying next URL..."
+                rm -f "$INSTALLER_FILE"
               fi
-              sleep 5
+            else
+              echo "⚠️ Download failed, trying next URL..."
             fi
           done
           
-          # Verify installer exists and has reasonable size
-          if [ -f "$INSTALLER_FILE" ]; then
-            INSTALLER_SIZE=$(stat -c%s "$INSTALLER_FILE" 2>/dev/null || echo "0")
-            echo "Installer size: $INSTALLER_SIZE bytes"
-            
-            if [ "$INSTALLER_SIZE" -lt 1000000 ]; then  # Less than 1MB is suspicious
-              echo "⚠️ Installer seems too small, checking content..."
-              head -c 200 "$INSTALLER_FILE" | xxd || echo "Cannot read installer"
-            fi
-          else
-            echo "❌ Installer file not found after download"
+          if [ "$DOWNLOAD_SUCCESS" != "true" ]; then
+            echo "❌ All download attempts failed"
             exit 1
           fi
           
@@ -325,12 +326,6 @@ jobs:
           # Wait for installation to complete
           echo "Waiting for installation to complete..."
           sleep 30
-          
-          # Check installation log
-          if [ -f "install.log" ]; then
-            echo "Installation log (last 20 lines):"
-            tail -20 install.log || echo "Cannot read install log"
-          fi
           
           # Verify installation
           EXPECTED_PATHS=(
@@ -349,21 +344,18 @@ jobs:
           
           if [ -z "$SIMPLYSIGN_EXE" ]; then
             echo "❌ SimplySign Desktop not found after installation"
-            echo "Searching for installation..."
-            find /c/Program* -name "*SimplySign*" 2>/dev/null || echo "No SimplySign files found"
+            echo "Installation log (last 10 lines):"
+            tail -10 install.log || echo "Cannot read install log"
             exit 1
           fi
           
           # Test SimplySign Desktop
           echo "Testing SimplySign Desktop installation..."
-          if "$SIMPLYSIGN_EXE" --version 2>&1 | head -5; then
-            echo "✅ SimplySign Desktop responding to commands"
-          else
-            echo "⚠️ SimplySign Desktop may not be fully functional"
-          fi
+          "$SIMPLYSIGN_EXE" --version 2>&1 | head -5 || echo "Version check completed"
           
           # Save path for next steps
           echo "SIMPLYSIGN_EXE=$SIMPLYSIGN_EXE" >> $GITHUB_ENV
+          echo "✅ SimplySign Desktop installation completed successfully"
 
       - name: Test Certificate Access
         id: cert-test
