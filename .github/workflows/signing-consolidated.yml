@@ -285,9 +285,8 @@ jobs:
           
           # Try multiple known working URLs
           INSTALLER_URLS=(
-            "https://www.certum.eu/support/download-center/?file=SimplySignDesktop_1.29.4.1.msi"
-            "https://www.certum.eu/upload/page/support/desktopapp/SimplySignDesktop_1.29.4.1.msi"
-            "https://download.certum.eu/software/SimplySignDesktop_1.29.4.1.msi"
+            "https://www.files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-64-bit-en.msi"
+            "https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.66/SimplySignDesktop-9.3.2.66-64-bit-en.msi"
           )
           
           INSTALLER_FILE="SimplySignDesktop.msi"
