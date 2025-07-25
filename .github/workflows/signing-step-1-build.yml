@@ -122,7 +122,7 @@ jobs:
           fi
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: unsigned-binary-${{ steps.build-output.outputs.build-timestamp }}
           path: dist/entrypoint.exe
