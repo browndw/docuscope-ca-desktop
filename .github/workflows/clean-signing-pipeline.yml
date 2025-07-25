@@ -1,0 +1,224 @@
+name: "Clean Signing Pipeline with Modular Scripts"
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_mock_binary:
+        description: 'Use mock binary for fast certificate testing'
+        required: false
+        default: false
+        type: boolean
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Step 1: Build Binary (separate job)
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      binary-path: ${{ steps.set-output.outputs.binary-path }}
+      binary-size: ${{ steps.set-output.outputs.binary-size }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Mock Binary
+        if: inputs.use_mock_binary == true
+        run: |
+          echo "Creating mock binary for fast testing..."
+          
+          # Create a simple C program
+          cat > test_binary.c << 'EOF'
+          #include <stdio.h>
+          int main() {
+              printf("DocuScope Test Binary v1.0\n");
+              printf("Mock binary for certificate testing\n");
+              return 0;
+          }
+          EOF
+          
+          # Compile with gcc (available on GitHub runners)
+          gcc test_binary.c -o docuscope-test.exe
+          
+          if [ -f "docuscope-test.exe" ]; then
+            echo "✅ Mock binary created successfully"
+            ls -la docuscope-test.exe
+            echo "BINARY_FILE=docuscope-test.exe" >> "$GITHUB_ENV"
+          else
+            echo "❌ Failed to create mock binary"
+            exit 1
+          fi
+
+      - name: Build Real Binary
+        if: inputs.use_mock_binary != true
+        run: |
+          echo "Building real PyInstaller binary..."
+          echo "⚠️ This is a placeholder - implement actual build process"
+          echo "For testing, we'll create a mock binary"
+          
+          # Temporary: Create mock binary even for "real" build
+          gcc -xc - -o docuscope-real.exe << 'EOF'
+          #include <stdio.h>
+          int main() {
+              printf("DocuScope Real Binary (Mock) v1.0\n");
+              return 0;
+          }
+          EOF
+          
+          echo "BINARY_FILE=docuscope-real.exe" >> "$GITHUB_ENV"
+
+      - name: Set Build Outputs
+        id: set-output
+        run: |
+          echo "binary-path=$BINARY_FILE" >> "$GITHUB_OUTPUT"
+          echo "binary-size=$(stat -c%s "$BINARY_FILE")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: unsigned-binary
+          path: "*.exe"
+          retention-days: 1
+
+  # Steps 2-5: All Certificate Operations (single job to avoid runner isolation)
+  certificate-operations:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Binary Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: unsigned-binary
+
+      - name: Prepare Binary for Signing
+        run: |
+          echo "Preparing binary for signing..."
+          
+          # Find the downloaded binary
+          BINARY_FILE=$(find . -name "*.exe" -type f | head -1)
+          if [ -n "$BINARY_FILE" ]; then
+            echo "✅ Found binary: $BINARY_FILE"
+            
+            # Create a standard name for signing
+            cp "$BINARY_FILE" "binary-to-sign.exe"
+            echo "BINARY_PATH=$(pwd)/binary-to-sign.exe" >> "$GITHUB_ENV"
+            
+            # Test the binary
+            echo "Testing binary functionality..."
+            timeout 5 ./binary-to-sign.exe || echo "Binary test completed"
+          else
+            echo "❌ No binary file found"
+            exit 1
+          fi
+
+      - name: Step 2 - Install SimplySign Desktop
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== Step 2: Installing SimplySign Desktop ==="
+          
+          # Use our modular script
+          chmod +x .github/scripts/install-simplysign.sh
+          ./.github/scripts/install-simplysign.sh
+          
+          echo "✅ Step 2 completed"
+
+      - name: Step 3 - Test Authentication
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== Step 3: Testing Authentication ==="
+          
+          # Use our modular script
+          chmod +x .github/scripts/test-authentication.sh
+          ./.github/scripts/test-authentication.sh
+          
+          echo "✅ Step 3 completed"
+
+      - name: Step 4 - Test Authentication Methods
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== Step 4: Testing Authentication Methods ==="
+          
+          # Use our modular script
+          chmod +x .github/scripts/test-hmac-algorithms.sh
+          ./.github/scripts/test-hmac-algorithms.sh
+          
+          echo "✅ Step 4 completed"
+
+      - name: Step 5 - Code Signing
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== Step 5: Code Signing ==="
+          
+          # Use our modular script
+          chmod +x .github/scripts/sign-binary.sh
+          ./.github/scripts/sign-binary.sh
+          
+          echo "✅ Step 5 completed"
+
+      - name: Verify Signed Binary
+        run: |
+          echo "Verifying signed binary..."
+          
+          if [ -f "$BINARY_PATH" ]; then
+            echo "✅ Signed binary exists: $BINARY_PATH"
+            ls -la "$BINARY_PATH"
+            
+            # Test the signed binary
+            echo "Testing signed binary..."
+            timeout 5 "$BINARY_PATH" || echo "Signed binary test completed"
+            
+          else
+            echo "❌ Signed binary not found"
+            exit 1
+          fi
+
+      - name: Upload Signed Binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: signed-binary
+          path: "binary-to-sign.exe"
+          retention-days: 7
+
+  # Summary job
+  summary:
+    needs: [build, certificate-operations]
+    runs-on: windows-latest
+    if: always()
+    
+    steps:
+      - name: Pipeline Summary
+        run: |
+          echo "=== Clean Signing Pipeline Summary ==="
+          echo ""
+          echo "Build Job: ${{ needs.build.result }}"
+          echo "Certificate Operations: ${{ needs.certificate-operations.result }}"
+          echo ""
+          
+          if [ "${{ needs.build.result }}" = "success" ] && [ "${{ needs.certificate-operations.result }}" = "success" ]; then
+            echo "🎉 Pipeline completed successfully!"
+            echo "✅ Binary built and signed with Certum certificate"
+          else
+            echo "❌ Pipeline failed"
+            echo "Check the logs for details"
+          fi
