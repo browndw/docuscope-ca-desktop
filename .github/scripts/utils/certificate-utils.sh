@@ -33,23 +33,62 @@ check_certificate_store() {
 # Function to find signtool.exe
 find_signtool() {
   echo "Searching for signtool.exe..."
+  echo "🔧 Prioritizing working SDK versions, avoiding 10.0.22621.0 due to /fd parameter regression"
   
-  # Common signtool paths
+  # Working signtool paths (prioritize older stable versions that work with /fd)
   SIGNTOOL_PATHS=(
+    # Prioritize known working versions first
+    "/c/Program Files (x86)/Windows Kits/10/bin/10.0.17763.0/x64/signtool.exe"
+    "/c/Program Files (x86)/Windows Kits/10/bin/10.0.18362.0/x64/signtool.exe"
+    "/c/Program Files (x86)/Windows Kits/10/bin/10.0.19041.0/x64/signtool.exe"
+    "/c/Program Files (x86)/Windows Kits/10/bin/10.0.20348.0/x64/signtool.exe"
+    "/c/Program Files (x86)/Windows Kits/10/bin/10.0.22000.0/x64/signtool.exe"
+    # Legacy SDK versions (also reliable)
+    "/c/Program Files (x86)/Microsoft SDKs/Windows/v7.1A/Bin/signtool.exe"
+    "/c/Program Files (x86)/Windows Kits/8.1/bin/x64/signtool.exe"
+    # Wildcard patterns for any other versions (but lower priority)
     "/c/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe"
     "/c/Program Files/Windows Kits/10/bin/*/x64/signtool.exe"
-    "/c/Program Files (x86)/Windows Kits/8.1/bin/x64/signtool.exe"
-    "/c/Program Files/Windows Kits/8.1/bin/x64/signtool.exe"
+    # Check PATH (last resort)
+    "$(which signtool.exe 2>/dev/null)"
   )
   
   for path_pattern in "${SIGNTOOL_PATHS[@]}"; do
-    for path in $path_pattern; do
-      if [ -f "$path" ]; then
-        echo "✅ Found signtool.exe: $path"
-        echo "SIGNTOOL_PATH=$path" >> "$GITHUB_OUTPUT"
+    if [[ "$path_pattern" == *"*"* ]]; then
+      # Handle wildcard patterns
+      for path in $path_pattern; do
+        if [ -f "$path" ]; then
+          # Skip problematic SDK version
+          if [[ "$path" == *"10.0.22621.0"* ]]; then
+            echo "⚠️ Skipping problematic SDK version: $path (known /fd parameter regression)"
+            continue
+          fi
+          
+          echo "✅ Found signtool.exe: $path"
+          if [ -n "${GITHUB_OUTPUT:-}" ]; then
+            echo "SIGNTOOL_PATH=$path" >> "$GITHUB_OUTPUT"
+          fi
+          export SIGNTOOL_PATH="$path"
+          return 0
+        fi
+      done
+    else
+      # Handle direct paths
+      if [ -f "$path_pattern" ] && [ -n "$path_pattern" ]; then
+        # Skip problematic SDK version
+        if [[ "$path_pattern" == *"10.0.22621.0"* ]]; then
+          echo "⚠️ Skipping problematic SDK version: $path_pattern (known /fd parameter regression)"
+          continue
+        fi
+        
+        echo "✅ Found signtool.exe: $path_pattern"
+        if [ -n "${GITHUB_OUTPUT:-}" ]; then
+          echo "SIGNTOOL_PATH=$path_pattern" >> "$GITHUB_OUTPUT"
+        fi
+        export SIGNTOOL_PATH="$path_pattern"
         return 0
       fi
-    done
+    fi
   done
   
   echo "❌ signtool.exe not found"
