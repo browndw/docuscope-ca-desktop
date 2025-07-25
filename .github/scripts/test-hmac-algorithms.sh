@@ -133,8 +133,6 @@ def generate_totp_patterns(username):
 if __name__ == "__main__":
     try:
         username = sys.argv[1] if len(sys.argv) > 1 else "test"
-        print(f"DEBUG: Processing username: {username}", file=sys.stderr)
-        
         results = generate_totp_patterns(username)
         
         print(f"Generated {len(results)} TOTP codes:")
@@ -152,37 +150,68 @@ EOF
 
 # Generate TOTP codes
 echo "🎲 Generating TOTP codes for username: $CERTUM_USERNAME"
-echo "DEBUG: Running Python TOTP generator..."
 
-# Run with both stdout and stderr capture
-TOTP_OUTPUT=$(python totp_generator.py "$CERTUM_USERNAME" 2>&1)
+# Run with proper output separation
+TOTP_OUTPUT=$(python totp_generator.py "$CERTUM_USERNAME" 2>/dev/null)
 TOTP_EXIT_CODE=$?
 
-echo "DEBUG: Python exit code: $TOTP_EXIT_CODE"
-echo "DEBUG: Python output: $TOTP_OUTPUT"
-
 if [ $TOTP_EXIT_CODE -eq 0 ] && echo "$TOTP_OUTPUT" | grep -q "Generated.*TOTP codes"; then
-    echo "$TOTP_OUTPUT"
     TOTP_RESULTS="$TOTP_OUTPUT"
+    echo "✅ TOTP Generation Results:"
+    echo "$TOTP_RESULTS"
 else
     echo "❌ TOTP generation failed"
-    echo "Error output: $TOTP_OUTPUT"
+    # Capture error details separately
+    TOTP_ERROR=$(python totp_generator.py "$CERTUM_USERNAME" 2>&1 >/dev/null)
+    echo "Error details: $TOTP_ERROR"
     TOTP_RESULTS="TOTP generation failed"
 fi
 
 if [ "$TOTP_RESULTS" != "TOTP generation failed" ]; then
-    echo ""
-    echo "✅ TOTP Generation Results:"
-    echo "$TOTP_RESULTS"
     
     # Extract first generated code for testing
     FIRST_TOTP=$(echo "$TOTP_RESULTS" | grep "Pattern 1" | grep -o '[0-9]\{6\}' | head -1)
     if [ -n "$FIRST_TOTP" ]; then
         echo ""
         echo "🧪 Testing SEED validation with generated TOTP: $FIRST_TOTP"
+        echo "📱 Mobile app analysis: Functions use 'token' and 'mail' parameters"
+        echo ""
         
-        # Test with Certum SEED endpoint
-        SEED_RESPONSE=$(curl -s --max-time 15 \
+        # Test Format 1: Mobile app structure (token + mail)
+        echo "🔍 Test 1: Mobile app format {\"mail\": \"email\", \"token\": \"totp\"}"
+        SEED_RESPONSE1=$(curl -s --max-time 15 \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -H "User-Agent: SimplySign-Mobile/1.0" \
+          -d "{
+            \"mail\": \"$CERTUM_USERNAME\",
+            \"token\": \"$FIRST_TOTP\"
+          }" \
+          "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
+        
+        echo "Response 1: $(echo "$SEED_RESPONSE1" | head -2)"
+        
+        # Test Format 2: Alternative field names
+        echo ""
+        echo "🔍 Test 2: Alternative format {\"email\": \"email\", \"token\": \"totp\"}"
+        SEED_RESPONSE2=$(curl -s --max-time 15 \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -H "User-Agent: SimplySign-Mobile/1.0" \
+          -d "{
+            \"email\": \"$CERTUM_USERNAME\",
+            \"token\": \"$FIRST_TOTP\"
+          }" \
+          "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
+        
+        echo "Response 2: $(echo "$SEED_RESPONSE2" | head -2)"
+        
+        # Test Format 3: Original nested structure (for comparison)
+        echo ""
+        echo "🔍 Test 3: Original nested format (for comparison)"
+        SEED_RESPONSE3=$(curl -s --max-time 15 \
           -X POST \
           -H "Content-Type: application/json" \
           -H "Accept: application/json" \
@@ -195,15 +224,50 @@ if [ "$TOTP_RESULTS" != "TOTP generation failed" ]; then
           }" \
           "https://cloudsign.webnotarius.pl/cas/api/seed/code/tasks" 2>&1 || echo "Network request failed")
         
-        echo "SEED validation response: $(echo "$SEED_RESPONSE" | head -2)"
+        echo "Response 3: $(echo "$SEED_RESPONSE3" | head -2)"
         
-        if echo "$SEED_RESPONSE" | grep -q '"state":"success"\|"status":"success"'; then
-            echo "🎉 SUCCESS! TOTP code validated successfully"
-            echo "✅ SEED authentication working"
-        elif echo "$SEED_RESPONSE" | grep -q 'validation:NotBlank'; then
-            echo "⚠️ Endpoint structure confirmed, authentication may be needed"
-        else
-            echo "📝 Testing alternative TOTP patterns..."
+        # Test Format 4: Alternative scratch endpoint
+        echo ""
+        echo "🔍 Test 4: Scratch endpoint {\"mail\": \"email\", \"token\": \"totp\"}"
+        SEED_RESPONSE4=$(curl -s --max-time 15 \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -H "Accept: application/json" \
+          -H "User-Agent: SimplySign-Mobile/1.0" \
+          -d "{
+            \"mail\": \"$CERTUM_USERNAME\",
+            \"token\": \"$FIRST_TOTP\"
+          }" \
+          "https://cloudsign.webnotarius.pl/cas/api/seed/reset/scratch/tasks" 2>&1 || echo "Network request failed")
+        
+        echo "Response 4: $(echo "$SEED_RESPONSE4" | head -2)"
+        
+        # Check for success in any response
+        echo ""
+        echo "🎯 ANALYSIS RESULTS:"
+        
+        SUCCESS_FOUND=false
+        for i in 1 2 3 4; do
+            RESPONSE_VAR="SEED_RESPONSE$i"
+            RESPONSE_VALUE="${!RESPONSE_VAR}"
+            
+            if echo "$RESPONSE_VALUE" | grep -q '"state":"success"\|"status":"success"'; then
+                echo "✅ SUCCESS! Format $i worked - TOTP code validated successfully"
+                SUCCESS_FOUND=true
+                break
+            elif echo "$RESPONSE_VALUE" | grep -q 'validation:NotBlank'; then
+                echo "⚠️ Format $i: Server received request but fields were blank"
+            elif echo "$RESPONSE_VALUE" | grep -q 'bad.request'; then
+                echo "❌ Format $i: Bad request structure"
+            else
+                echo "🔄 Format $i: Different response received"
+            fi
+        done
+        
+        if [ "$SUCCESS_FOUND" = false ]; then
+            echo ""
+            echo "📝 All formats tested - analyzing patterns for authentication needs..."
+            echo "💡 Next step: May need pre-authentication or session tokens"
         fi
     fi
 else
