@@ -35,6 +35,16 @@ jobs:
         ./.github/scripts/package-simplysign.sh
       shell: bash
 
+    - name: Verify Packaged Configuration
+      run: |
+        # Extract the package for verification
+        unzip -q simplysign-desktop-package.zip
+        # Change to the package directory so verification script finds the right structure
+        cd simplysign-desktop-package
+        chmod +x ../.github/scripts/verify-auto-auth.sh
+        ../.github/scripts/verify-auto-auth.sh
+      shell: bash
+
     - name: Upload SimplySign Desktop Artifact
       uses: actions/upload-artifact@v4
       with:
@@ -42,10 +52,3 @@ jobs:
         path: simplysign-desktop-package.zip
         retention-days: 7
         compression-level: 9
-
-    - name: Verify Configuration
-      if: inputs.debug == true
-      run: |
-        chmod +x ./.github/scripts/verify-auto-auth.sh
-        ./.github/scripts/verify-auto-auth.sh
-      shell: bash
