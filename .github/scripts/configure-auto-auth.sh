@@ -8,18 +8,71 @@ set -euo pipefail
 echo "=== Configuring SimplySign Desktop for Automatic Authentication ==="
 echo "🎯 BREAKTHROUGH: Setting SimplySignDesktopShowLogonDialogAfterApplicationStartup"
 
-# Check if SimplySign Desktop is installed
-SIMPLYSIGN_EXE="/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
-if [ ! -f "$SIMPLYSIGN_EXE" ]; then
-  echo "❌ SimplySign Desktop not found at: $SIMPLYSIGN_EXE"
-  exit 1
+# Check for SimplySign Desktop - try packaged version first, then installed
+SIMPLYSIGN_EXE=""
+PACKAGE_LOCATION=""
+
+# Method 1: Look for extracted package (preferred)
+if [ -f "./SimplySign Desktop/SimplySignDesktop.exe" ]; then
+    SIMPLYSIGN_EXE="./SimplySign Desktop/SimplySignDesktop.exe"
+    PACKAGE_LOCATION="."
+    echo "✅ Found packaged SimplySign Desktop: $SIMPLYSIGN_EXE"
+elif [ -d "./SimplySign Desktop" ]; then
+    SIMPLYSIGN_EXE="./SimplySign Desktop/SimplySignDesktop.exe"
+    PACKAGE_LOCATION="."
+    echo "✅ Found package directory: ./SimplySign Desktop"
+# Method 2: Look for installed version (fallback)
+elif [ -f "/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe" ]; then
+    SIMPLYSIGN_EXE="/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
+    echo "✅ Found installed SimplySign Desktop: $SIMPLYSIGN_EXE"
+else
+    echo "❌ SimplySign Desktop not found in package or installation"
+    echo "   Looked for:"
+    echo "   - ./SimplySign Desktop/SimplySignDesktop.exe (packaged)"
+    echo "   - /c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe (installed)"
+    exit 1
 fi
 
-echo "✅ SimplySign Desktop found: $SIMPLYSIGN_EXE"
-
-# Method 1: Windows Registry configuration
+# Method 1: Use existing registry files (if from package)
 echo ""
-echo "📋 Method 1: Configuring Windows Registry..."
+echo "📋 Method 1: Import existing registry configuration..."
+
+if [ -n "$PACKAGE_LOCATION" ]; then
+    # We're working with a package - check for pre-configured registry files
+    REG_FILES_FOUND=false
+    
+    for reg_dir in "$PACKAGE_LOCATION/registry" "$PACKAGE_LOCATION/../registry" "./registry"; do
+        if [ -d "$reg_dir" ]; then
+            echo "   Found registry directory: $reg_dir"
+            
+            for reg_file in "$reg_dir"/*.reg; do
+                if [ -f "$reg_file" ]; then
+                    echo "   Importing registry file: $(basename "$reg_file")"
+                    
+                    # Import the registry file
+                    if command -v reg >/dev/null 2>&1; then
+                        reg import "$(cygpath -w "$reg_file")" 2>/dev/null && echo "     ✅ Successfully imported $(basename "$reg_file")" || echo "     ⚠️ Failed to import $(basename "$reg_file")"
+                        REG_FILES_FOUND=true
+                    else
+                        echo "     ⚠️ Registry command not available"
+                    fi
+                fi
+            done
+        fi
+    done
+    
+    if [ "$REG_FILES_FOUND" = true ]; then
+        echo "✅ Registry files imported from package"
+    else
+        echo "⚠️ No registry files found in package - will use manual configuration"
+    fi
+else
+    echo "   Working with installed version - using manual registry configuration"
+fi
+
+# Method 2: Manual Windows Registry configuration (fallback)
+echo ""
+echo "📋 Method 2: Manual Windows Registry configuration..."
 
 if command -v reg >/dev/null 2>&1; then
     echo "   Setting registry keys for automatic OAuth2 dialog..."
@@ -55,20 +108,29 @@ else
     echo "⚠️ Registry command not available"
 fi
 
-# Method 2: Configuration file approach
+# Method 3: Configuration file approach (for packages)
 echo ""
-echo "📋 Method 2: Configuring via configuration files..."
+echo "📋 Method 3: Configuration file approach..."
 
-# Look for SimplySign configuration directories
-CURRENT_USER="${USER:-${USERNAME:-$(whoami)}}"
-CONFIG_LOCATIONS=(
-    "/c/Program Files/Certum/SimplySign Desktop"
-    "/c/ProgramData/Certum/SimplySign Desktop" 
-    "/c/Users/$CURRENT_USER/AppData/Local/Certum"
-    "/c/Users/$CURRENT_USER/AppData/Roaming/Certum"
-    "/c/Users/$CURRENT_USER/AppData/Local/SimplySign Desktop"
-    "/c/Users/$CURRENT_USER/AppData/Roaming/SimplySign Desktop"
-)
+if [ -n "$PACKAGE_LOCATION" ]; then
+    # Look for configuration files in the package
+    CONFIG_LOCATIONS=(
+        "$PACKAGE_LOCATION/SimplySign Desktop"
+        "$PACKAGE_LOCATION/config"
+        "$(dirname "$SIMPLYSIGN_EXE")"
+    )
+else
+    # Look for configuration files in standard locations
+    CURRENT_USER="${USER:-${USERNAME:-$(whoami)}}"
+    CONFIG_LOCATIONS=(
+        "/c/Program Files/Certum/SimplySign Desktop"
+        "/c/ProgramData/Certum/SimplySign Desktop" 
+        "/c/Users/$CURRENT_USER/AppData/Local/Certum"
+        "/c/Users/$CURRENT_USER/AppData/Roaming/Certum"
+        "/c/Users/$CURRENT_USER/AppData/Local/SimplySign Desktop"
+        "/c/Users/$CURRENT_USER/AppData/Roaming/SimplySign Desktop"
+    )
+fi
 
 for config_dir in "${CONFIG_LOCATIONS[@]}"; do
     if [ -d "$config_dir" ]; then
@@ -98,9 +160,9 @@ for config_dir in "${CONFIG_LOCATIONS[@]}"; do
     fi
 done
 
-# Method 3: PowerShell configuration
+# Method 4: PowerShell configuration (fallback)
 echo ""
-echo "📋 Method 3: PowerShell registry configuration..."
+echo "📋 Method 4: PowerShell registry configuration..."
 
 if command -v powershell >/dev/null 2>&1; then
     echo "   Configuring registry via PowerShell..."
