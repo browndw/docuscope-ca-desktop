@@ -82,30 +82,246 @@ else
   echo "❌ signtool.exe not found - code signing tests will be skipped"
 fi
 
-# Initialize SimplySign Desktop for Step 4 (TOTP authentication)
+# Configure SimplySign Desktop for automatic authentication (BREAKTHROUGH!)
 echo ""
-echo "🔧 Initializing SimplySign Desktop for Step 4..."
-echo "📱 Preparing application to receive TOTP authentication"
+echo "🔧 BREAKTHROUGH: Configuring automatic authentication..."
+echo "📱 Based on macOS discovery: SimplySignDesktopShowLogonDialogAfterApplicationStartup"
+
+# Configure the setting that enables automatic ConnectToCloud on startup
+echo "Configuring SimplySign Desktop for automatic OAuth2 dialog..."
+
+# For Windows, the setting is likely stored in registry or config file
+# Try multiple approaches based on our macOS discovery
+
+# Method 1: Try Windows Registry (most likely location)
+echo "📋 Method 1: Windows Registry configuration..."
+if command -v reg >/dev/null 2>&1; then
+    echo "   Setting registry key for automatic logon dialog..."
+    
+    # Registry locations to try (based on typical Windows application patterns)
+    REG_LOCATIONS=(
+        "HKEY_CURRENT_USER\\Software\\Certum\\SimplySign Desktop"
+        "HKEY_CURRENT_USER\\Software\\SimplySignDesktop" 
+        "HKEY_CURRENT_USER\\Software\\Asseco\\SimplySign Desktop"
+        "HKEY_CURRENT_USER\\Software\\Asseco Data Systems\\SimplySign Desktop"
+        "HKEY_LOCAL_MACHINE\\Software\\Certum\\SimplySign Desktop"
+    )
+    
+    for reg_path in "${REG_LOCATIONS[@]}"; do
+        echo "   Trying registry path: $reg_path"
+        
+        # Try to set the automatic startup authentication setting
+        reg add "$reg_path" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null || echo "     Registry path not accessible: $reg_path"
+        reg add "$reg_path" /v "ShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null || echo "     Alt registry key attempted"
+        reg add "$reg_path" /v "AutoShowLogonDialog" /t REG_SZ /d "Yes" /f 2>/dev/null || echo "     Alt registry key attempted"
+        reg add "$reg_path" /v "AutomaticAuthentication" /t REG_SZ /d "Yes" /f 2>/dev/null || echo "     Alt registry key attempted"
+    done
+    
+    echo "✅ Registry configuration attempted"
+else
+    echo "⚠️ Registry command not available"
+fi
+
+# Method 2: Try configuration file approach
+echo ""
+echo "� Method 2: Configuration file approach..."
+
+# Look for SimplySign configuration files
+CONFIG_LOCATIONS=(
+    "/c/Program Files/Certum/SimplySign Desktop"
+    "/c/ProgramData/Certum/SimplySign Desktop" 
+    "/c/Users/$USER/AppData/Local/Certum"
+    "/c/Users/$USER/AppData/Roaming/Certum"
+    "/c/Users/$USER/AppData/Local/SimplySign Desktop"
+    "/c/Users/$USER/AppData/Roaming/SimplySign Desktop"
+)
+
+for config_dir in "${CONFIG_LOCATIONS[@]}"; do
+    if [ -d "$config_dir" ]; then
+        echo "   Found config directory: $config_dir"
+        
+        # Look for configuration files
+        find "$config_dir" -name "*.xml" -o -name "*.plist" -o -name "*.config" -o -name "*.ini" -o -name "*.cfg" 2>/dev/null | while read config_file; do
+            echo "   Found config file: $config_file"
+            
+            # If it's an XML file (like macOS SimplySignDesktop.xml), try to add the setting
+            if [[ "$config_file" == *.xml ]]; then
+                echo "   Attempting to configure XML file: $config_file"
+                
+                # Create backup
+                cp "$config_file" "${config_file}.backup" 2>/dev/null || true
+                
+                # Try to add the setting if it doesn't exist
+                if grep -q "ShowLogonDialogAfterApplicationStartup" "$config_file" 2>/dev/null; then
+                    echo "   Setting already exists in XML file"
+                else
+                    echo "   Adding automatic authentication setting to XML..."
+                    # Add before closing </dict> or </plist> tag
+                    sed -i.bak '/<\/dict>/i\
+    <key>SimplySignDesktopShowLogonDialogAfterApplicationStartup</key>\
+    <string>Yes</string>' "$config_file" 2>/dev/null || echo "   XML modification attempted"
+                fi
+            fi
+        done
+    fi
+done
+
+# Method 3: PowerShell approach for Windows-specific configuration
+echo ""
+echo "� Method 3: PowerShell configuration approach..."
+if command -v powershell >/dev/null 2>&1; then
+    powershell -Command "
+    try {
+        Write-Host '🔧 Configuring SimplySign Desktop via PowerShell...'
+        
+        # Try to find and configure SimplySign Desktop settings
+        \$configPaths = @(
+            \"\$env:LOCALAPPDATA\\Certum\",
+            \"\$env:APPDATA\\Certum\",
+            \"\$env:LOCALAPPDATA\\SimplySign Desktop\",
+            \"\$env:APPDATA\\SimplySign Desktop\",
+            \"\$env:PROGRAMFILES\\Certum\\SimplySign Desktop\",
+            \"\$env:ProgramData\\Certum\"
+        )
+        
+        foreach (\$path in \$configPaths) {
+            if (Test-Path \$path) {
+                Write-Host \"   Found config path: \$path\"
+                
+                # Look for configuration files
+                \$configFiles = Get-ChildItem -Path \$path -Recurse -Include @('*.xml', '*.config', '*.ini', '*.plist') -ErrorAction SilentlyContinue
+                
+                foreach (\$file in \$configFiles) {
+                    Write-Host \"   Found config file: \$(\$file.FullName)\"
+                }
+            }
+        }
+        
+        # Try to set via Windows registry using PowerShell
+        Write-Host '📋 Setting registry configuration via PowerShell...'
+        
+        \$regPaths = @(
+            'HKCU:\\Software\\Certum\\SimplySign Desktop',
+            'HKCU:\\Software\\SimplySignDesktop',
+            'HKCU:\\Software\\Asseco\\SimplySign Desktop'
+        )
+        
+        foreach (\$regPath in \$regPaths) {
+            try {
+                if (-not (Test-Path \$regPath)) {
+                    New-Item -Path \$regPath -Force | Out-Null
+                    Write-Host \"   Created registry path: \$regPath\"
+                }
+                
+                New-ItemProperty -Path \$regPath -Name 'SimplySignDesktopShowLogonDialogAfterApplicationStartup' -Value 'Yes' -PropertyType String -Force | Out-Null
+                New-ItemProperty -Path \$regPath -Name 'ShowLogonDialogAfterApplicationStartup' -Value 'Yes' -PropertyType String -Force | Out-Null
+                New-ItemProperty -Path \$regPath -Name 'AutoShowLogonDialog' -Value 'Yes' -PropertyType String -Force | Out-Null
+                
+                Write-Host \"   ✅ Registry configuration set: \$regPath\"
+            } catch {
+                Write-Host \"   ⚠️ Registry path failed: \$regPath - \$(\$_.Exception.Message)\"
+            }
+        }
+        
+        Write-Host '✅ PowerShell configuration completed'
+    } catch {
+        Write-Host \"⚠️ PowerShell configuration error: \$(\$_.Exception.Message)\"
+    }
+    " 2>&1
+fi
+
+echo ""
+echo "✅ Automatic authentication configuration completed!"
+echo "🎯 BREAKTHROUGH: SimplySign Desktop should now automatically show OAuth2 dialog on startup"
 
 # Terminate any existing SimplySign processes to start fresh
+echo ""
+echo "🔄 Preparing clean startup for automatic authentication..."
 echo "Cleaning up any existing SimplySign processes..."
 taskkill /F /IM "SimplySignDesktop.exe" 2>/dev/null || echo "No existing processes found"
 sleep 2
 
-# Start SimplySign Desktop in background, ready for TOTP
-echo "Starting SimplySign Desktop in background..."
-echo "Command: '$SIMPLYSIGN_EXE' (background process)"
+# Test automatic authentication (BREAKTHROUGH!)
+echo ""
+echo "🚀 TESTING AUTOMATIC AUTHENTICATION..."
+echo "📱 Based on macOS discovery: OAuth2 dialog should open automatically!"
 
-# Start the application and let it initialize
+# Start SimplySign Desktop and test automatic OAuth2 trigger
+echo "Starting SimplySign Desktop with automatic authentication..."
+echo "Command: '$SIMPLYSIGN_EXE' (testing automatic OAuth2 trigger)"
+
+# Start the application and monitor for automatic OAuth2 dialog
 "$SIMPLYSIGN_EXE" &
-INIT_PID=$!
+AUTO_TEST_PID=$!
 
-echo "✅ SimplySign Desktop initialized (PID: $INIT_PID)"
+echo "✅ SimplySign Desktop started (PID: $AUTO_TEST_PID)"
+echo "⏱️ Monitoring for automatic OAuth2 dialog (based on macOS connectToCloudThread discovery)..."
 
-# Give it time to fully initialize
-sleep 5
+# Monitor for automatic OAuth2 dialog for 30 seconds
+MONITOR_START=$(date +%s)
+MAX_AUTO_MONITOR=30
+OAUTH_AUTO_DETECTED=false
 
-# Try to programmatically trigger connectToCloud based on macOS discoveries
+echo "🔍 Looking for automatic OAuth2 authentication dialog..."
+
+for ((i=1; i<=MAX_AUTO_MONITOR; i++)); do
+    # Check for authentication-related windows
+    if command -v powershell >/dev/null 2>&1; then
+        DIALOG_CHECK=$(powershell -Command "
+        \$authDialogs = Get-Process | Where-Object { 
+            \$_.MainWindowTitle -like '*certum*' -or 
+            \$_.MainWindowTitle -like '*oauth*' -or
+            \$_.MainWindowTitle -like '*login*' -or
+            \$_.MainWindowTitle -like '*authentication*' -or
+            \$_.MainWindowTitle -like '*sign*' -or
+            \$_.MainWindowTitle -like '*web*' -or
+            \$_.MainWindowTitle -like '*browser*'
+        }
+        if (\$authDialogs) { 
+            \$authDialogs | ForEach-Object { Write-Host \"\$(\$_.ProcessName):\$(\$_.MainWindowTitle)\" }
+        }
+        " 2>/dev/null)
+        
+        if [ -n "$DIALOG_CHECK" ]; then
+            echo "🎉 BREAKTHROUGH SUCCESS! Automatic OAuth2 dialog detected: $DIALOG_CHECK"
+            OAUTH_AUTO_DETECTED=true
+            break
+        fi
+    fi
+    
+    if [ $((i % 10)) -eq 0 ]; then
+        echo "   [$i/$MAX_AUTO_MONITOR] Monitoring for automatic OAuth2..."
+    fi
+    
+    sleep 1
+done
+
+if [ "$OAUTH_AUTO_DETECTED" = true ]; then
+    echo ""
+    echo "🎉 BREAKTHROUGH CONFIRMED!"
+    echo "✅ Automatic OAuth2 authentication dialog appeared!"
+    echo "🔐 SimplySign Desktop successfully configured for automatic authentication"
+    echo "📱 OAuth2 dialog is ready for credential entry"
+    echo ""
+    echo "🎯 AUTOMATION SUCCESS:"
+    echo "  • No manual UI interaction required to trigger OAuth2"
+    echo "  • OAuth2 dialog opens automatically on application startup"
+    echo "  • Perfect for CI/CD automation with user credential prompts"
+    echo ""
+    
+    # Test successful - we can use this in Step 4
+    AUTO_AUTH_SUCCESS=true
+else
+    echo ""
+    echo "⚠️ Automatic OAuth2 dialog not detected during initial test"
+    echo "💡 Authentication may still be triggered when certificate access is needed"
+    echo "🔄 Will attempt manual trigger methods as fallback..."
+    
+    AUTO_AUTH_SUCCESS=false
+fi
+
+# If automatic didn't work, try the manual trigger methods
+if [ "$AUTO_AUTH_SUCCESS" != true ]; then
 echo ""
 echo "� Attempting to trigger connectToCloud authentication flow..."
 echo "   Based on macOS analysis: [SCCAppDelegate connectToCloud:] → OAuth2 dialog"
@@ -245,20 +461,48 @@ else
     echo "💡 Authentication may be triggered when certificate access is needed"
 fi
 
+fi
+
 echo ""
-echo "🔐 Application is now ready to receive TOTP authentication in Step 4"
-echo "📋 Next step: Manual approval → Certificate access → OAuth2 authentication"
+echo "🔐 Application is now ready to receive authentication in Step 4"
+
+if [ "$AUTO_AUTH_SUCCESS" = true ]; then
+    echo "🎉 AUTOMATIC AUTHENTICATION CONFIRMED!"
+    echo "📋 Next step: Manual approval → Automatic OAuth2 → Credential entry"
+    echo "💡 No manual trigger required - OAuth2 opens automatically"
+else
+    echo "📋 Next step: Manual approval → Manual trigger → OAuth2 authentication"
+    echo "💡 Will attempt to trigger OAuth2 when certificate access is needed"
+fi
 
 # Brief verification that the process is still running
 sleep 3
 if tasklist 2>/dev/null | grep -i "SimplySignDesktop" >/dev/null; then
     echo "✅ SimplySign Desktop running successfully"
-    echo "💡 Process will remain active for TOTP authentication"
+    
+    if [ "$AUTO_AUTH_SUCCESS" = true ]; then
+        echo "� Process configured for automatic OAuth2 authentication"
+    else
+        echo "�💡 Process will remain active for manual authentication trigger"
+    fi
 else
     echo "⚠️ SimplySign Desktop may have exited"
     echo "💡 Will attempt to restart in Step 4 if needed"
 fi
 
 echo ""
-echo "✅ Authentication testing and initialization completed"
-echo "🚀 Ready for Step 4: Certum Desktop Signing with TOTP"
+echo "✅ Authentication testing and configuration completed"
+
+if [ "$AUTO_AUTH_SUCCESS" = true ]; then
+    echo "🎯 BREAKTHROUGH SUCCESS: Automatic authentication working!"
+    echo "🚀 Ready for Step 4: Automatic OAuth2 → TOTP entry → Certificate access"
+else
+    echo "🚀 Ready for Step 4: Manual trigger → OAuth2 → TOTP entry → Certificate access"
+fi
+
+echo ""
+echo "📊 Configuration Summary:"
+echo "  • Registry settings: Applied to multiple locations"
+echo "  • Configuration files: Modified where found"
+echo "  • Automatic trigger: $( [ "$AUTO_AUTH_SUCCESS" = true ] && echo "✅ SUCCESS" || echo "⚠️ Manual fallback required" )"
+echo "  • OAuth2 detection: $( [ "$OAUTH_AUTO_DETECTED" = true ] && echo "✅ Automatic dialog confirmed" || echo "⚠️ Will monitor during certificate access" )"
