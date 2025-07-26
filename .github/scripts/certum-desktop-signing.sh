@@ -51,8 +51,10 @@ fi
 echo "✅ SimplySign Desktop found: $SIMPLYSIGN_EXE"
 
 # Check if SimplySign Desktop is already running from Step 3
-if pgrep -f "SimplySignDesktop.exe" >/dev/null; then
+if command -v pgrep >/dev/null 2>&1 && pgrep -f "SimplySignDesktop.exe" >/dev/null; then
     echo "✅ SimplySign Desktop already running (initialized in Step 3)"
+elif tasklist 2>/dev/null | grep -i "SimplySignDesktop" >/dev/null; then
+    echo "✅ SimplySign Desktop already running (found via tasklist)"
 else
     echo "🔧 Starting SimplySign Desktop..."
     "$SIMPLYSIGN_EXE" &
@@ -71,6 +73,10 @@ fi
 
 echo "✅ Binary to sign: $BINARY_PATH"
 echo "   Size: $(stat -c%s "$BINARY_PATH" 2>/dev/null || stat -f%z "$BINARY_PATH" 2>/dev/null || echo "unknown") bytes"
+
+# Define signed binary path
+SIGNED_BINARY="${BINARY_PATH%.exe}-signed.exe"
+echo "   Expected signed output: $SIGNED_BINARY"
 echo ""
 
 # Connect to Certum cloud using the discovered authentication flow
@@ -102,12 +108,12 @@ echo ""
 # Try to find and interact with SimplySign Desktop GUI
 echo "🔍 Searching for SimplySign Desktop GUI elements..."
 
-# Method 1: PowerShell GUI automation
+# Method 1: PowerShell GUI automation with timeout
 if command -v powershell >/dev/null 2>&1; then
     echo "📋 Using PowerShell for Windows GUI automation..."
     
-    # Create PowerShell script for GUI automation
-    powershell -Command "
+    # Create PowerShell script for GUI automation with timeout
+    timeout 15 powershell -Command "
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
     
@@ -122,27 +128,33 @@ if command -v powershell >/dev/null 2>&1; then
         if (\$hwnd -ne [System.IntPtr]::Zero) {
             Write-Host '✅ Found main window handle'
             
-            # Bring window to foreground
-            [System.Windows.Forms.SendKeys]::SendWait('%{TAB}')
-            Start-Sleep -Seconds 1
-            
-            # Try common shortcuts for connect (Ctrl+C, Ctrl+L, F5, etc.)
-            Write-Host '🔍 Trying keyboard shortcuts for connection...'
-            [System.Windows.Forms.SendKeys]::SendWait('^c')  # Ctrl+C
-            Start-Sleep -Seconds 1
-            [System.Windows.Forms.SendKeys]::SendWait('^l')  # Ctrl+L 
-            Start-Sleep -Seconds 1
-            [System.Windows.Forms.SendKeys]::SendWait('{F5}') # F5 (refresh/connect)
-            Start-Sleep -Seconds 1
-            
-            Write-Host '✅ GUI automation commands sent'
+            try {
+                # Brief attempt to bring window to foreground
+                Write-Host '🔍 Attempting to activate window...'
+                [void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
+                [Microsoft.VisualBasic.Interaction]::AppActivate(\$processes[0].Id)
+                Start-Sleep -Seconds 1
+                
+                # Try a few quick keyboard shortcuts
+                Write-Host '🔍 Trying keyboard shortcuts for connection...'
+                [System.Windows.Forms.SendKeys]::SendWait('{F5}')  # F5 first (most common)
+                Start-Sleep -Seconds 1
+                [System.Windows.Forms.SendKeys]::SendWait('^c')    # Ctrl+C
+                Start-Sleep -Seconds 1
+                [System.Windows.Forms.SendKeys]::SendWait('%c')    # Alt+C
+                Start-Sleep -Seconds 1
+                
+                Write-Host '✅ GUI automation commands sent'
+            } catch {
+                Write-Host '⚠️ GUI automation had issues: ' \$_.Exception.Message
+            }
         } else {
             Write-Host '⚠️ No main window handle found'
         }
     } else {
         Write-Host '❌ No SimplySign Desktop process found'
     }
-    " 2>&1 || echo "PowerShell GUI automation completed"
+    " 2>&1 || echo "PowerShell GUI automation completed with timeout"
 else
     echo "⚠️ PowerShell not available for GUI automation"
 fi
