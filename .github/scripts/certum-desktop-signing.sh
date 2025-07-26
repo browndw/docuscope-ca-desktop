@@ -106,34 +106,67 @@ echo ""
 echo "💡 STRATEGY: Trigger authentication by requesting certificate access"
 echo ""
 
-# Method 1: Try direct signing - this should trigger authentication automatically
-echo ""
-echo "🔍 Method 4: Attempting direct signing with signtool..."
-echo "   This may work if authentication succeeded silently"
+# Method 1: Find and use signtool to trigger authentication
+echo "🔍 Method 1: Locating signtool and triggering certificate access..."
 
-# Look for signtool in common locations
+# Comprehensive search for signtool
 SIGNTOOL_PATHS=(
     "/c/Program Files (x86)/Windows Kits/10/bin/x64/signtool.exe"
     "/c/Program Files/Windows Kits/10/bin/x64/signtool.exe"
     "/c/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/x64/signtool.exe"
-    "signtool.exe"
+    "/c/Program Files (x86)/Windows Kits/10/bin/10.0.19041.0/x64/signtool.exe"
+    "/c/Program Files (x86)/Windows Kits/10/bin/10.0.18362.0/x64/signtool.exe"
+    "/c/Program Files (x86)/Windows Kits/10/bin/10.0.17763.0/x64/signtool.exe"
 )
 
+# Also search in PATH and common SDK locations
+echo "🔍 Searching for signtool in multiple locations..."
 SIGNTOOL=""
-for path in "${SIGNTOOL_PATHS[@]}"; do
-    if [ -f "$path" ] || command -v "$path" >/dev/null 2>&1; then
-        SIGNTOOL="$path"
-        echo "✅ Found signtool: $SIGNTOOL"
-        break
+
+# First try PATH
+if command -v signtool.exe >/dev/null 2>&1; then
+    SIGNTOOL="signtool.exe"
+    echo "✅ Found signtool in PATH: $SIGNTOOL"
+else
+    # Search specific paths
+    for path in "${SIGNTOOL_PATHS[@]}"; do
+        if [ -f "$path" ]; then
+            SIGNTOOL="$path"
+            echo "✅ Found signtool: $SIGNTOOL"
+            break
+        fi
+    done
+fi
+
+# If still not found, try to find it dynamically
+if [ -z "$SIGNTOOL" ]; then
+    echo "🔍 Searching Windows SDK installation directories..."
+    SDK_SEARCH=$(find "/c/Program Files"* -name "signtool.exe" 2>/dev/null | head -1)
+    if [ -n "$SDK_SEARCH" ]; then
+        SIGNTOOL="$SDK_SEARCH"
+        echo "✅ Found signtool via search: $SIGNTOOL"
     fi
-done
+fi
 
 if [ -n "$SIGNTOOL" ]; then
-    echo "🔐 Attempting to sign with certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
+    echo ""
+    echo "🔐 Attempting to access certificate: $CERTUM_CERTIFICATE_SHA1"
+    echo "   This should trigger OAuth2 authentication dialog"
     
-    # Try signing with the certificate
-    if "$SIGNTOOL" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /tr http://timestamp.comodoca.com /td sha256 /fd sha256 "$BINARY_PATH" 2>&1; then
-        echo "🎉 SUCCESS! Binary signed successfully with signtool"
+    # First, verify signtool works
+    echo ""
+    echo "📋 Testing signtool functionality..."
+    if "$SIGNTOOL" /? >/dev/null 2>&1; then
+        echo "✅ Signtool is functional"
+    else
+        echo "⚠️ Signtool may have issues, but continuing..."
+    fi
+    
+    echo ""
+    echo "📋 Attempting certificate access (this should trigger OAuth2)..."
+    # Try to sign - this should trigger OAuth2 authentication
+    if "$SIGNTOOL" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /tr http://timestamp.comodoca.com /td sha256 /fd sha256 /v "$BINARY_PATH" 2>&1; then
+        echo "🎉 SUCCESS! Binary signed successfully"
         AUTH_SUCCESS=true
         # Check if a separate signed file was created
         if [ -f "${BINARY_PATH%.exe}-signed.exe" ]; then
@@ -143,11 +176,78 @@ if [ -n "$SIGNTOOL" ]; then
             SIGNED_BINARY="$BINARY_PATH"
         fi
     else
-        echo "⚠️ Signtool signing failed - certificate may not be accessible yet"
-        echo "   This is expected if authentication hasn't completed"
+        echo "⚠️ Initial signing attempt failed"
+        echo "   Expected behavior: OAuth2 dialog should appear for authentication"
+        echo "   If no dialog appeared, trying alternative approaches..."
     fi
 else
-    echo "⚠️ Signtool not found - cannot attempt direct signing"
+    echo "❌ ERROR: Signtool not found in any expected location"
+    echo "   Cannot trigger certificate access without signtool"
+    echo "   Windows SDK may not be properly installed"
+    
+    # List what we did find
+    echo ""
+    echo "🔍 Available executables in Windows Kits directories:"
+    find "/c/Program Files"* -name "*sign*" -type f 2>/dev/null | head -10 || echo "   None found"
+fi
+
+echo ""
+echo "🔍 Method 2: PowerShell certificate store access..."
+# Try to access certificate via PowerShell - this might also trigger OAuth2
+if command -v powershell >/dev/null 2>&1; then
+    echo "📋 Attempting certificate store access via PowerShell..."
+    
+    powershell -Command "
+    try {
+        Write-Host '🔍 Accessing Windows Certificate Store...'
+        \$store = New-Object System.Security.Cryptography.X509Certificates.X509Store('My', 'CurrentUser')
+        \$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+        
+        Write-Host '📋 Looking for certificate: $CERTUM_CERTIFICATE_SHA1'
+        \$cert = \$store.Certificates | Where-Object { \$_.Thumbprint -eq '$CERTUM_CERTIFICATE_SHA1' }
+        
+        if (\$cert) {
+            Write-Host '✅ Certificate found in store'
+            Write-Host \"   Subject: \$(\$cert.Subject)\"
+            Write-Host \"   Issuer: \$(\$cert.Issuer)\"
+            Write-Host \"   Valid: \$(\$cert.NotBefore) to \$(\$cert.NotAfter)\"
+            
+            # Try to access private key - this should trigger OAuth2
+            Write-Host '🔐 Attempting to access private key (may trigger OAuth2)...'
+            \$hasPrivateKey = \$cert.HasPrivateKey
+            Write-Host \"   HasPrivateKey: \$hasPrivateKey\"
+            
+            if (\$hasPrivateKey) {
+                Write-Host '✅ Private key is accessible'
+                # Try to get the private key object
+                try {
+                    \$privateKey = \$cert.PrivateKey
+                    if (\$privateKey) {
+                        Write-Host '✅ Private key object obtained'
+                    } else {
+                        Write-Host '⚠️ Private key object is null - authentication may be needed'
+                    }
+                } catch {
+                    Write-Host \"⚠️ Private key access failed: \$(\$_.Exception.Message)\"
+                    Write-Host '   This may have triggered OAuth2 authentication dialog'
+                }
+            } else {
+                Write-Host '❌ Certificate has no private key or key is not accessible'
+            }
+        } else {
+            Write-Host '❌ Certificate not found in current user store'
+            Write-Host '   Listing available certificates:'
+            \$store.Certificates | ForEach-Object { 
+                Write-Host \"   - \$(\$_.Thumbprint) (\$(\$_.Subject))\" 
+            } | Select-Object -First 5
+        }
+        
+        \$store.Close()
+    } catch {
+        Write-Host \"⚠️ Certificate store access error: \$(\$_.Exception.Message)\"
+        Write-Host '   This error may have triggered OAuth2 authentication'
+    }
+    " 2>&1
 fi
 
 # Monitor for authentication success and certificate access
