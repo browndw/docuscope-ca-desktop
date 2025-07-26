@@ -13,6 +13,11 @@ on:
         required: false
         default: true
         type: boolean
+      certum_totp_seed:
+        description: 'TOTP Code from mobile app (6 digits) - Leave empty to pause for manual entry'
+        required: false
+        default: ''
+        type: string
 
 defaults:
   run:
@@ -167,16 +172,38 @@ jobs:
             const { owner, repo } = context.repo;
             const run_id = context.runId;
             
-            console.log('🔐 SimplySign Desktop is installed and ready for signing');
-            console.log('� OAuth2 authentication will be required during signing');
+            console.log('🎉 BREAKTHROUGH: Automatic Authentication Configured!');
+            console.log('🔐 SimplySign Desktop is ready with automatic OAuth2 trigger');
             console.log('');
             console.log('⚠️  WORKFLOW PAUSED - Manual Approval Required');
             console.log('');
+            console.log('🚀 AUTOMATIC AUTHENTICATION FLOW:');
+            console.log('  Based on macOS discovery: SimplySignDesktopShowLogonDialogAfterApplicationStartup');
+            console.log('  ✅ Setting configured in Step 3 via registry/config');
+            console.log('  ✅ OAuth2 dialog should open automatically when triggered');
+            console.log('  ✅ No manual "Connect to Cloud" clicking required!');
+            console.log('');
             console.log('📋 When you approve this step:');
-            console.log('  1. Signing will attempt to access certificate');
-            console.log('  2. OAuth2 browser window should open automatically');
-            console.log('  3. Enter username and TOTP from mobile app');
-            console.log('  4. Complete authentication within 30 seconds');
+            console.log('  1. 🚀 Certificate access will trigger automatic OAuth2 dialog');
+            console.log('  2. 🌐 OAuth2 web view opens without manual intervention');
+            console.log('  3. 👤 Enter your Certum email address');
+            console.log('  4. 📱 Enter TOTP code from mobile app');
+            console.log('  5. ✅ Authentication completes automatically');
+            console.log('  6. 🔐 Certificate becomes available for signing');
+            console.log('');
+            console.log('💡 TOTP Input Options:');
+            if (process.env.CERTUM_TOTP_SEED && process.env.CERTUM_TOTP_SEED.length > 0) {
+              console.log('  ✅ TOTP provided via workflow input - will be auto-entered');
+            } else {
+              console.log('  📱 Manual TOTP entry required in OAuth2 dialog');
+              console.log('  ⏱️  Please have your mobile TOTP app ready');
+            }
+            console.log('');
+            console.log('🎯 AUTOMATION BREAKTHROUGH:');
+            console.log('  • No AppleScript or UI automation needed');
+            console.log('  • No manual button clicking required');  
+            console.log('  • OAuth2 trigger happens automatically');
+            console.log('  • Perfect for CI/CD with minimal human intervention');
             console.log('');
             console.log(`🔗 Workflow URL: https://github.com/${owner}/${repo}/actions/runs/${run_id}`);
             
@@ -188,10 +215,13 @@ jobs:
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+          CERTUM_TOTP_SEED: ${{ inputs.certum_totp_seed }}
         run: |
           echo "=== Step 4: Certum Desktop Signing ==="
           echo "🔐 Ready for OAuth2-based signing"
-          echo "📱 TOTP will be entered manually in OAuth2 browser dialog"
+          echo "📱 TOTP status: ${{ inputs.certum_totp_seed != '' && 'Provided via workflow input' || 'Manual entry required in OAuth2 dialog' }}"
+          echo "🎯 AUTOMATIC AUTHENTICATION: OAuth2 dialog should open automatically!"
+          echo "💡 Based on macOS discovery - no manual trigger required"
           
           # Use our modular script
           chmod +x .github/scripts/certum-desktop-signing.sh
