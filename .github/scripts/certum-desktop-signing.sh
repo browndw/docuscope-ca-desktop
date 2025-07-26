@@ -82,12 +82,35 @@ echo ""
 
 # Connect to Certum cloud using the discovered authentication flow
 echo "☁️  Connecting to Certum cloud with OAuth2 authentication..."
+echo "🎉 BREAKTHROUGH: Using automatic authentication discovery from Step 3"
 echo "📧 Username: $CERTUM_USERNAME"
 if [ -n "$CERTUM_API_TOKEN" ]; then
   echo "🔐 API Token: $CERTUM_API_TOKEN (6-digit TOTP)"
 else
   echo "🔐 API Token: Will be entered manually in OAuth2 dialog"
 fi
+echo ""
+
+# BREAKTHROUGH: Use automatic authentication configuration from Step 3
+echo "🚀 AUTOMATIC AUTHENTICATION FLOW:"
+echo "   Based on macOS discovery: SimplySignDesktopShowLogonDialogAfterApplicationStartup"
+echo "   ✅ Configuration applied in Step 3 via registry/config"
+echo "   ✅ OAuth2 dialog should open automatically when certificate is accessed"
+echo "   ✅ No manual 'Connect to Cloud' trigger required!"
+echo ""
+
+echo "📋 Expected Flow:"
+echo "   1. 🔐 Request certificate access (signtool command)"
+echo "   2. 🚀 SimplySign Desktop automatically opens OAuth2 dialog"
+echo "   3. 🌐 OAuth2 web view appears without manual intervention"
+echo "   4. 👤 Enter email: $CERTUM_USERNAME"
+if [ -n "$CERTUM_API_TOKEN" ]; then
+  echo "   5. 📱 Enter TOTP: $CERTUM_API_TOKEN (provided via workflow input)"
+else
+  echo "   5. 📱 Enter TOTP from mobile app manually"
+fi
+echo "   6. ✅ Authentication completes, certificate becomes available"
+echo "   7. 🔐 Code signing proceeds automatically"
 echo ""
 
 # Based on our macOS testing, SimplySign Desktop is a background service that:
