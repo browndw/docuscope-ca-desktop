@@ -44,6 +44,34 @@ echo ""
 if [ "$TESTING_PACKAGE" = true ]; then
     echo "🔍 Verifying registry configuration for PACKAGED version..."
     echo "   (This tests the configuration that will be used in production)"
+    
+    # Import the registry files from the package first
+    echo "📥 Importing packaged registry files..."
+    REG_FILES_IMPORTED=false
+    
+    if [ -d "./registry" ]; then
+        for reg_file in ./registry/*.reg; do
+            if [ -f "$reg_file" ]; then
+                echo "   Importing: $(basename "$reg_file")"
+                if command -v reg >/dev/null 2>&1; then
+                    reg import "$(cygpath -w "$reg_file")" 2>/dev/null && echo "     ✅ Successfully imported $(basename "$reg_file")" || echo "     ⚠️ Failed to import $(basename "$reg_file")"
+                    REG_FILES_IMPORTED=true
+                else
+                    echo "     ⚠️ Registry command not available"
+                fi
+            fi
+        done
+        
+        if [ "$REG_FILES_IMPORTED" = true ]; then
+            echo "✅ Registry files imported from package"
+            echo "   Waiting 2 seconds for registry to settle..."
+            sleep 2
+        else
+            echo "⚠️ No registry files successfully imported"
+        fi
+    else
+        echo "⚠️ No registry directory found in package"
+    fi
 else
     echo "🔍 Verifying registry configuration for INSTALLED version..."
     echo "   (Warning: This may not match the packaged artifact)"
