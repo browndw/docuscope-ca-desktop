@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      require_manual_approval:
+        description: 'Require manual approval before TOTP signing (recommended for production)'
+        required: false
+        default: true
+        type: boolean
 
 defaults:
   run:
@@ -154,17 +159,42 @@ jobs:
           
           echo "✅ Step 3 completed"
 
-      - name: Step 4 - Test Authentication Methods
+      - name: Manual Approval - Ready for TOTP Signing
+        if: inputs.require_manual_approval == true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run_id = context.runId;
+            
+            console.log('🔐 SimplySign Desktop is installed and ready for signing');
+            console.log('📱 Please generate a fresh TOTP code from your mobile device');
+            console.log('⏱️  You have 30 seconds after generating the code to complete signing');
+            console.log('');
+            console.log('📋 Steps to complete:');
+            console.log('  1. Open your mobile app');
+            console.log('  2. Generate new TOTP code');
+            console.log('  3. Input the code when prompted');
+            console.log('  4. Signing will complete automatically');
+            console.log('');
+            console.log(`🔗 Monitor progress: https://github.com/${owner}/${repo}/actions/runs/${run_id}`);
+            
+            // This creates a visible checkpoint in the workflow logs
+            return 'Ready for manual TOTP input';
+
+      - name: Step 4 - Certum Desktop Signing
         env:
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
-          echo "=== Step 4: Testing Authentication Methods ==="
+          echo "=== Step 4: Certum Desktop Signing ==="
+          echo "🔐 Ready for TOTP-based signing"
+          echo "📱 Please have your mobile device ready to generate TOTP codes"
           
           # Use our modular script
-          chmod +x .github/scripts/test-hmac-algorithms.sh
-          ./.github/scripts/test-hmac-algorithms.sh
+          chmod +x .github/scripts/certum-desktop-signing.sh
+          ./.github/scripts/certum-desktop-signing.sh
           
           echo "✅ Step 4 completed"
 
