@@ -27,17 +27,18 @@ echo "✅ Username (email): $CERTUM_USERNAME"
 echo "✅ Certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
 echo ""
 
-# Check for TOTP input (the actual API token from mobile device)
-if [ -z "${CERTUM_TOTP_SEED:-}" ]; then
-  echo "❌ CERTUM_TOTP_SEED environment variable required"
-  echo "   This should be the 6-digit TOTP code from your mobile device"
-  echo "   Generate fresh code and run: export CERTUM_TOTP_SEED=123456"
-  exit 1
+# Check for TOTP input (optional - authentication will be manual via OAuth2)
+if [ -n "${CERTUM_TOTP_SEED:-}" ]; then
+  # TOTP provided - can be used for automated authentication (if supported)
+  CERTUM_API_TOKEN="$CERTUM_TOTP_SEED"
+  echo "✅ TOTP API Token provided: $CERTUM_API_TOKEN"
+  echo "   Note: Manual OAuth2 authentication may still be required"
+else
+  # No TOTP - fully manual OAuth2 authentication
+  echo "📱 No TOTP provided - OAuth2 authentication will be fully manual"
+  echo "   SimplySign Desktop will show OAuth2 browser dialog automatically"
+  CERTUM_API_TOKEN=""
 fi
-
-# Rename for clarity - this is actually the API token from mobile
-CERTUM_API_TOKEN="$CERTUM_TOTP_SEED"
-echo "✅ TOTP API Token provided: $CERTUM_API_TOKEN"
 echo ""
 
 # Verify SimplySign Desktop is available and running
@@ -80,113 +81,107 @@ echo "   Expected signed output: $SIGNED_BINARY"
 echo ""
 
 # Connect to Certum cloud using the discovered authentication flow
-echo "☁️  Connecting to Certum cloud with TOTP authentication..."
+echo "☁️  Connecting to Certum cloud with OAuth2 authentication..."
 echo "📧 Username: $CERTUM_USERNAME"
-echo "🔐 API Token: $CERTUM_API_TOKEN (6-digit TOTP)"
-echo ""
-
-# Based on our macOS testing, we discovered the exact authentication flow:
-# 1. connectToCloud method triggers OAuth2 web view
-# 2. PanelWebViewController handles the authentication
-# 3. requestOAuth2Access processes the credentials
-# 4. authProcedureCompleted indicates success
-
-echo "🔍 Implementing Windows GUI automation for connectToCloud..."
-echo "   • Method discovered: [SCCAppDelegate connectToCloud:]"
-echo "   • OAuth2 Web View: PanelWebViewController"
-echo "   • Success indicator: authProcedureCompleted"
-echo ""
-
-# For Windows, we need to trigger the equivalent GUI interaction
-echo "🖥️ Windows GUI Automation Strategy:"
-echo "   1. Find SimplySign Desktop window"
-echo "   2. Locate 'Connect with cloud' button/menu"
-echo "   3. Trigger OAuth2 authentication dialog"
-echo "   4. Input credentials automatically"
-echo ""
-
-# Try to find and interact with SimplySign Desktop GUI
-echo "🔍 Searching for SimplySign Desktop GUI elements..."
-
-# Method 1: PowerShell GUI automation with timeout
-if command -v powershell >/dev/null 2>&1; then
-    echo "📋 Using PowerShell for Windows GUI automation..."
-    
-    # Create PowerShell script for GUI automation with timeout
-    timeout 15 powershell -Command "
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    
-    # Find SimplySign Desktop window
-    \$processes = Get-Process | Where-Object { \$_.ProcessName -like '*SimplySign*' }
-    if (\$processes) {
-        Write-Host '✅ Found SimplySign Desktop process(es)'
-        \$processes | ForEach-Object { Write-Host '   Process:' \$_.ProcessName 'PID:' \$_.Id }
-        
-        # Try to bring window to foreground and trigger connection
-        \$hwnd = \$processes[0].MainWindowHandle
-        if (\$hwnd -ne [System.IntPtr]::Zero) {
-            Write-Host '✅ Found main window handle'
-            
-            try {
-                # Brief attempt to bring window to foreground
-                Write-Host '🔍 Attempting to activate window...'
-                [void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
-                [Microsoft.VisualBasic.Interaction]::AppActivate(\$processes[0].Id)
-                Start-Sleep -Seconds 1
-                
-                # Try a few quick keyboard shortcuts
-                Write-Host '🔍 Trying keyboard shortcuts for connection...'
-                [System.Windows.Forms.SendKeys]::SendWait('{F5}')  # F5 first (most common)
-                Start-Sleep -Seconds 1
-                [System.Windows.Forms.SendKeys]::SendWait('^c')    # Ctrl+C
-                Start-Sleep -Seconds 1
-                [System.Windows.Forms.SendKeys]::SendWait('%c')    # Alt+C
-                Start-Sleep -Seconds 1
-                
-                Write-Host '✅ GUI automation commands sent'
-            } catch {
-                Write-Host '⚠️ GUI automation had issues: ' \$_.Exception.Message
-            }
-        } else {
-            Write-Host '⚠️ No main window handle found'
-        }
-    } else {
-        Write-Host '❌ No SimplySign Desktop process found'
-    }
-    " 2>&1 || echo "PowerShell GUI automation completed with timeout"
+if [ -n "$CERTUM_API_TOKEN" ]; then
+  echo "🔐 API Token: $CERTUM_API_TOKEN (6-digit TOTP)"
 else
-    echo "⚠️ PowerShell not available for GUI automation"
+  echo "🔐 API Token: Will be entered manually in OAuth2 dialog"
 fi
-
 echo ""
 
-# Method 2: AutoHotkey-style automation (if available)
-echo "🔍 Alternative: Manual GUI interaction required..."
+# Based on our macOS testing, SimplySign Desktop is a background service that:
+# 1. Acts as a proxy between public certificates and private cloud keys
+# 2. Runs in system tray (not dock/taskbar)
+# 3. Makes certificates available to system certificate store after authentication
+# 4. Authentication is triggered when certificate access is needed
+
+echo "🔍 Understanding SimplySign Desktop Architecture:"
+echo "   • Function: Certificate proxy service (public cert ↔ private cloud key)"
+echo "   • Location: System tray/background service"
+echo "   • Auth Trigger: Certificate access request (not GUI shortcuts)"
+echo "   • Auth Method: OAuth2 web browser (automatic popup)"
 echo ""
-echo "📋 CRITICAL STEPS FOR MANUAL AUTHENTICATION:"
-echo "   ⚠️  You have ~25 seconds remaining with TOTP: $CERTUM_API_TOKEN"
+
+echo "💡 STRATEGY: Trigger authentication by requesting certificate access"
 echo ""
-echo "   1. 🖥️  Find SimplySign Desktop window/tray icon"
-echo "   2. 🔘 Look for 'Connect with cloud' or 'Login' button"
-echo "   3. 📧 Enter username: $CERTUM_USERNAME"
-echo "   4. 🔐 Enter TOTP token: $CERTUM_API_TOKEN"
-echo "   5. ✅ Complete OAuth2 authentication"
+
+# Method 1: Try direct signing - this should trigger authentication automatically
 echo ""
-echo "   🎯 Success indicator: Look for certificate access or 'Connected' status"
+echo "🔍 Method 4: Attempting direct signing with signtool..."
+echo "   This may work if authentication succeeded silently"
+
+# Look for signtool in common locations
+SIGNTOOL_PATHS=(
+    "/c/Program Files (x86)/Windows Kits/10/bin/x64/signtool.exe"
+    "/c/Program Files/Windows Kits/10/bin/x64/signtool.exe"
+    "/c/Program Files (x86)/Microsoft SDKs/Windows/v10.0A/bin/NETFX 4.8 Tools/x64/signtool.exe"
+    "signtool.exe"
+)
+
+SIGNTOOL=""
+for path in "${SIGNTOOL_PATHS[@]}"; do
+    if [ -f "$path" ] || command -v "$path" >/dev/null 2>&1; then
+        SIGNTOOL="$path"
+        echo "✅ Found signtool: $SIGNTOOL"
+        break
+    fi
+done
+
+if [ -n "$SIGNTOOL" ]; then
+    echo "🔐 Attempting to sign with certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
+    
+    # Try signing with the certificate
+    if "$SIGNTOOL" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /tr http://timestamp.comodoca.com /td sha256 /fd sha256 "$BINARY_PATH" 2>&1; then
+        echo "🎉 SUCCESS! Binary signed successfully with signtool"
+        AUTH_SUCCESS=true
+        # Check if a separate signed file was created
+        if [ -f "${BINARY_PATH%.exe}-signed.exe" ]; then
+            SIGNED_BINARY="${BINARY_PATH%.exe}-signed.exe"
+        else
+            # Signing was done in-place
+            SIGNED_BINARY="$BINARY_PATH"
+        fi
+    else
+        echo "⚠️ Signtool signing failed - certificate may not be accessible yet"
+        echo "   This is expected if authentication hasn't completed"
+    fi
+else
+    echo "⚠️ Signtool not found - cannot attempt direct signing"
+fi
 
 # Monitor for authentication success and certificate access
 echo ""
-echo "🔍 MONITORING AUTHENTICATION PROGRESS..."
-echo "   Looking for certificate access and signing capability"
+echo "🔍 MONITORING FOR OAUTH2 AUTHENTICATION..."
+echo "   Expecting OAuth2 web browser to open automatically"
+echo "   Manual completion required for authentication"
 echo ""
 
-# Give time for authentication (reduced from 60 to 30 seconds due to TOTP expiry)
+# Give time for authentication
 MONITOR_START=$(date +%s)
-MAX_WAIT=30
+if [ -n "$CERTUM_API_TOKEN" ]; then
+  # TOTP provided - shorter timeout since token expires
+  MAX_WAIT=25  # Leave 5 seconds buffer before TOTP expires
+  echo "⏱️ Monitoring for $MAX_WAIT seconds (TOTP: $CERTUM_API_TOKEN expires soon)..."
+else
+  # No TOTP - longer timeout for manual entry
+  MAX_WAIT=60  # Allow time for manual TOTP generation and entry
+  echo "⏱️ Monitoring for $MAX_WAIT seconds (manual TOTP entry)..."
+fi
 AUTH_SUCCESS=false
 
-echo "⏱️  Monitoring for $MAX_WAIT seconds (TOTP expires in ~30 seconds total)..."
+echo ""
+echo "🌐 MANUAL AUTHENTICATION REQUIRED:"
+echo "   1. OAuth2 browser should open automatically"
+echo "   2. Enter username: $CERTUM_USERNAME"  
+if [ -n "$CERTUM_API_TOKEN" ]; then
+  echo "   3. Enter TOTP: $CERTUM_API_TOKEN"
+  echo "   4. Complete authentication within $(($MAX_WAIT - 5)) seconds"
+else
+  echo "   3. Generate TOTP from mobile app and enter it"
+  echo "   4. Complete authentication within $MAX_WAIT seconds"
+fi
+echo ""
 
 for ((i=1; i<=MAX_WAIT; i++)); do
     CURRENT_TIME=$(date +%s)
@@ -256,19 +251,31 @@ else
     echo "   1. ✅ Check if SimplySign Desktop authentication dialog appeared"
     echo "   2. ✅ Verify credentials were entered correctly:"
     echo "      • Username: $CERTUM_USERNAME"
-    echo "      • TOTP: $CERTUM_API_TOKEN (may have expired)"
+    if [ -n "$CERTUM_API_TOKEN" ]; then
+      echo "      • TOTP: $CERTUM_API_TOKEN (may have expired)"
+    else
+      echo "      • TOTP: Generated from mobile app during authentication"
+    fi
     echo "   3. ✅ Look for certificate access in SimplySign Desktop GUI"
     echo "   4. ✅ Try manual binary signing if certificates are accessible"
     echo ""
-    echo "   🔄 If TOTP expired, generate new token and retry authentication"
+    if [ -n "$CERTUM_API_TOKEN" ]; then
+      echo "   🔄 If TOTP expired, generate new token and retry authentication"
+    else
+      echo "   🔄 Generate fresh TOTP from mobile app and retry authentication"
+    fi
 fi
 
 echo ""
 echo "🎯 SUMMARY:"
 echo "   • Username: $CERTUM_USERNAME"
-echo "   • API Token: $CERTUM_API_TOKEN (valid for ~30 seconds)"
+if [ -n "$CERTUM_API_TOKEN" ]; then
+  echo "   • API Token: $CERTUM_API_TOKEN (expires in ~30 seconds)"
+else
+  echo "   • API Token: Manual entry via OAuth2 dialog"
+fi
 echo "   • Certificate: $CERTUM_CERTIFICATE_SHA1"
 echo "   • Binary: $BINARY_PATH"
-echo "   • Status: $([ -f "$SIGNED_BINARY" ] && echo "✅ Signed" || echo "🔄 Manual intervention required")"
+echo "   • Status: $([ -f "$SIGNED_BINARY" ] && echo "✅ Signed" || echo "🔄 Manual OAuth2 authentication required")"
 echo ""
 echo "🚀 NEXT: Verify signed binary and proceed with distribution"
