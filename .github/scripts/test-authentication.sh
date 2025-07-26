@@ -82,4 +82,38 @@ else
   echo "❌ signtool.exe not found - code signing tests will be skipped"
 fi
 
-echo "✅ Authentication testing completed"
+# Initialize SimplySign Desktop for Step 4 (TOTP authentication)
+echo ""
+echo "🔧 Initializing SimplySign Desktop for Step 4..."
+echo "📱 Preparing application to receive TOTP authentication"
+
+# Terminate any existing SimplySign processes to start fresh
+echo "Cleaning up any existing SimplySign processes..."
+taskkill /F /IM "SimplySignDesktop.exe" 2>/dev/null || echo "No existing processes found"
+sleep 2
+
+# Start SimplySign Desktop in background, ready for TOTP
+echo "Starting SimplySign Desktop in background..."
+echo "Command: '$SIMPLYSIGN_EXE' (background process)"
+
+# Start the application and let it initialize
+"$SIMPLYSIGN_EXE" &
+INIT_PID=$!
+
+echo "✅ SimplySign Desktop initialized (PID: $INIT_PID)"
+echo "🔐 Application is now ready to receive TOTP authentication in Step 4"
+echo "📋 Next step: Manual approval → TOTP input → Certificate access"
+
+# Brief verification that the process started successfully
+sleep 3
+if kill -0 $INIT_PID 2>/dev/null; then
+  echo "✅ SimplySign Desktop running successfully"
+  echo "💡 Process will remain active for TOTP authentication"
+else
+  echo "⚠️ SimplySign Desktop may have exited quickly"
+  echo "💡 Will attempt to restart in Step 4 if needed"
+fi
+
+echo ""
+echo "✅ Authentication testing and initialization completed"
+echo "🚀 Ready for Step 4: Certum Desktop Signing with TOTP"
