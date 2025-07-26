@@ -127,13 +127,15 @@ echo ""
 echo "� Method 2: Configuration file approach..."
 
 # Look for SimplySign configuration files
+# Get current user name for Windows paths
+CURRENT_USER="${USER:-${USERNAME:-$(whoami)}}"
 CONFIG_LOCATIONS=(
     "/c/Program Files/Certum/SimplySign Desktop"
     "/c/ProgramData/Certum/SimplySign Desktop" 
-    "/c/Users/$USER/AppData/Local/Certum"
-    "/c/Users/$USER/AppData/Roaming/Certum"
-    "/c/Users/$USER/AppData/Local/SimplySign Desktop"
-    "/c/Users/$USER/AppData/Roaming/SimplySign Desktop"
+    "/c/Users/$CURRENT_USER/AppData/Local/Certum"
+    "/c/Users/$CURRENT_USER/AppData/Roaming/Certum"
+    "/c/Users/$CURRENT_USER/AppData/Local/SimplySign Desktop"
+    "/c/Users/$CURRENT_USER/AppData/Roaming/SimplySign Desktop"
 )
 
 for config_dir in "${CONFIG_LOCATIONS[@]}"; do
