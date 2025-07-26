@@ -100,13 +100,14 @@ echo ""
 echo "📋 Method 3: PowerShell registry configuration..."
 
 if command -v powershell >/dev/null 2>&1; then
+    echo "   Configuring registry via PowerShell..."
     powershell -Command "
     Write-Host 'Configuring SimplySign Desktop via PowerShell...'
     
     \$regPaths = @(
-        'HKCU:\\Software\\Certum\\SimplySign Desktop',
-        'HKCU:\\Software\\SimplySignDesktop',
-        'HKCU:\\Software\\Asseco\\SimplySign Desktop'
+        'HKCU:\Software\Certum\SimplySign Desktop',
+        'HKCU:\Software\SimplySignDesktop',
+        'HKCU:\Software\Asseco\SimplySign Desktop'
     )
     
     foreach (\$regPath in \$regPaths) {
@@ -116,18 +117,30 @@ if command -v powershell >/dev/null 2>&1; then
                 Write-Host \"Created registry path: \$regPath\"
             }
             
-            New-ItemProperty -Path \$regPath -Name 'SimplySignDesktopShowLogonDialogAfterApplicationStartup' -Value 'Yes' -PropertyType String -Force | Out-Null
-            New-ItemProperty -Path \$regPath -Name 'ShowLogonDialogAfterApplicationStartup' -Value 'Yes' -PropertyType String -Force | Out-Null
-            New-ItemProperty -Path \$regPath -Name 'AutoShowLogonDialog' -Value 'Yes' -PropertyType String -Force | Out-Null
+            # Set the critical breakthrough setting
+            Set-ItemProperty -Path \$regPath -Name 'SimplySignDesktopShowLogonDialogAfterApplicationStartup' -Value 'Yes' -Type String -Force
+            Set-ItemProperty -Path \$regPath -Name 'ShowLogonDialogAfterApplicationStartup' -Value 'Yes' -Type String -Force
+            Set-ItemProperty -Path \$regPath -Name 'AutoShowLogonDialog' -Value 'Yes' -Type String -Force
+            Set-ItemProperty -Path \$regPath -Name 'AutomaticAuthentication' -Value 'Yes' -Type String -Force
             
             Write-Host \"Registry configuration set: \$regPath\"
+            
+            # Verify the setting was applied
+            \$value = Get-ItemProperty -Path \$regPath -Name 'SimplySignDesktopShowLogonDialogAfterApplicationStartup' -ErrorAction SilentlyContinue
+            if (\$value) {
+                Write-Host \"  Verified: SimplySignDesktopShowLogonDialogAfterApplicationStartup = \$(\$value.SimplySignDesktopShowLogonDialogAfterApplicationStartup)\"
+            }
         } catch {
-            Write-Host \"Registry path failed: \$regPath\"
+            Write-Host \"Registry path failed: \$regPath - \$(\$_.Exception.Message)\"
         }
     }
     
     Write-Host 'PowerShell configuration completed'
-    "
+    " || echo "   PowerShell configuration failed"
+    
+    echo "✅ PowerShell configuration completed"
+else
+    echo "⚠️ PowerShell not available"
 fi
 
 echo ""
