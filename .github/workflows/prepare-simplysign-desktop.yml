@@ -1,0 +1,51 @@
+name: Prepare SimplySign Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Enable debug mode'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  prepare-simplysign:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install SimplySign Desktop
+      run: |
+        chmod +x ./.github/scripts/install-simplysign.sh
+        ./.github/scripts/install-simplysign.sh
+      shell: bash
+
+    - name: Configure Automatic Authentication
+      run: |
+        chmod +x ./.github/scripts/configure-auto-auth.sh
+        ./.github/scripts/configure-auto-auth.sh
+      shell: bash
+
+    - name: Package SimplySign Desktop
+      run: |
+        chmod +x ./.github/scripts/package-simplysign.sh
+        ./.github/scripts/package-simplysign.sh
+      shell: bash
+
+    - name: Upload SimplySign Desktop Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: simplysign-desktop-configured
+        path: simplysign-desktop-package.zip
+        retention-days: 7
+        compression-level: 9
+
+    - name: Verify Configuration
+      if: inputs.debug == true
+      run: |
+        chmod +x ./.github/scripts/verify-auto-auth.sh
+        ./.github/scripts/verify-auto-auth.sh
+      shell: bash
