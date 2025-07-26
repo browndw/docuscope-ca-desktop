@@ -9,15 +9,10 @@ on:
         default: false
         type: boolean
       require_manual_approval:
-        description: 'Require manual approval before TOTP signing (recommended for production)'
+        description: 'Require manual approval before certificate signing (recommended for production)'
         required: false
         default: true
         type: boolean
-      certum_totp_seed:
-        description: 'TOTP Code from mobile app (6 digits) - Generate fresh code before starting workflow'
-        required: false
-        default: ''
-        type: string
 
 defaults:
   run:
@@ -164,8 +159,8 @@ jobs:
           
           echo "✅ Step 3 completed"
 
-      - name: Manual Approval - Ready for TOTP Signing
-        if: inputs.require_manual_approval == true && inputs.certum_totp_seed == ''
+      - name: Manual Approval - Ready for Certificate Signing
+        if: inputs.require_manual_approval == true
         uses: actions/github-script@v7
         with:
           script: |
@@ -173,30 +168,30 @@ jobs:
             const run_id = context.runId;
             
             console.log('🔐 SimplySign Desktop is installed and ready for signing');
-            console.log('📱 TOTP token was not provided in workflow inputs');
+            console.log('� OAuth2 authentication will be required during signing');
             console.log('');
-            console.log('⚠️  WORKFLOW STOPPED - TOTP Required');
+            console.log('⚠️  WORKFLOW PAUSED - Manual Approval Required');
             console.log('');
-            console.log('📋 To proceed with signing:');
-            console.log('  1. Cancel this workflow run');
-            console.log('  2. Generate fresh TOTP code from mobile app');
-            console.log('  3. Re-run workflow with TOTP in "certum_totp_seed" input');
-            console.log('  4. Signing will complete automatically');
+            console.log('📋 When you approve this step:');
+            console.log('  1. Signing will attempt to access certificate');
+            console.log('  2. OAuth2 browser window should open automatically');
+            console.log('  3. Enter username and TOTP from mobile app');
+            console.log('  4. Complete authentication within 30 seconds');
             console.log('');
             console.log(`🔗 Workflow URL: https://github.com/${owner}/${repo}/actions/runs/${run_id}`);
             
-            throw new Error('TOTP token required in workflow inputs');
+            // This will pause the workflow for manual approval
+            core.warning('Workflow paused for manual approval. Click "Approve" to continue with certificate signing.');
 
       - name: Step 4 - Certum Desktop Signing
         env:
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
-          CERTUM_TOTP_SEED: ${{ inputs.certum_totp_seed }}
         run: |
           echo "=== Step 4: Certum Desktop Signing ==="
-          echo "🔐 Ready for TOTP-based signing"
-          echo "📱 Using TOTP from workflow input: ${{ inputs.certum_totp_seed != '' && '✅ Provided' || '❌ Missing' }}"
+          echo "🔐 Ready for OAuth2-based signing"
+          echo "📱 TOTP will be entered manually in OAuth2 browser dialog"
           
           # Use our modular script
           chmod +x .github/scripts/certum-desktop-signing.sh
