@@ -98,7 +98,7 @@ jobs:
   certificate-operations:
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
@@ -171,53 +171,109 @@ jobs:
           
           echo "✅ Step 3 completed"
 
-      # Step 4: Manual Approval Gate (if required)
-      - name: Manual Approval - Ready for Certificate Signing
+      # Step 4: Enable RDP Access for Interactive Authentication
+      - name: Enable RDP Access for OAuth2 Authentication
         if: inputs.require_manual_approval == true
         run: |
           echo '🎉 BREAKTHROUGH: Automatic Authentication Configured!'
           echo '🔐 SimplySign Desktop is ready with automatic OAuth2 trigger'
           echo ''
-          echo '🚀 AUTOMATIC AUTHENTICATION FLOW:'
-          echo '  Based on macOS discovery: SimplySignDesktopShowLogonDialogAfterApplicationStartup'
-          echo '  ✅ Setting configured in Step 3 via registry/config'
-          echo '  ✅ OAuth2 dialog should open automatically when triggered'
-          echo '  ✅ No manual "Connect to Cloud" clicking required!'
+          echo '�️ ENABLING RDP ACCESS FOR INTERACTIVE AUTHENTICATION'
+          echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
           echo ''
-          echo '📋 Next step will:'
-          echo '  1. 🚀 Certificate access will trigger automatic OAuth2 dialog'
-          echo '  2. 🌐 OAuth2 web view opens without manual intervention'
-          echo '  3. 👤 Enter your Certum email address'
-          echo '  4. 📱 Enter TOTP code from mobile app'
-          echo '  5. ✅ Authentication completes automatically'
-          echo '  6. 🔐 Certificate becomes available for signing'
+          
+          # Set RDP password
+          RDP_PASSWORD=$(openssl rand -base64 32 | tr -d '=/+' | cut -c1-16)
+          echo "RDP_PASSWORD=$RDP_PASSWORD" >> "$GITHUB_ENV"
+          
+          # Enable RDP
+          echo '🔧 Configuring Windows Remote Desktop...'
+          powershell -Command "
+          # Enable RDP
+          Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+          
+          # Enable RDP through Windows Firewall
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
+          
+          # Set authentication level
+          Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' -Name 'UserAuthentication' -Value 0
+          
+          # Create RDP user
+          net user rdpuser '$RDP_PASSWORD' /add
+          net localgroup 'Remote Desktop Users' rdpuser /add
+          net localgroup 'Administrators' rdpuser /add
+          
+          Write-Host '✅ RDP enabled and user created'
+          "
+          
+          # Get public IP for RDP connection
+          echo '🌐 Getting runner public IP address...'
+          PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s https://ipecho.net/plain || curl -s https://icanhazip.com)
+          echo "Runner Public IP: $PUBLIC_IP"
+          
           echo ''
-          echo '💡 TOTP Input Options:'
-          if [ -n "${{ inputs.certum_totp_seed }}" ]; then
-            echo '  ✅ TOTP provided via workflow input - will be auto-entered'
-          else
-            echo '  📱 Manual TOTP entry required in OAuth2 dialog'
-            echo '  ⏱️  Please have your mobile TOTP app ready'
-          fi
+          echo '🔐 RDP CONNECTION DETAILS:'
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🖥️  IP Address: $PUBLIC_IP"
+          echo "👤 Username: rdpuser"
+          echo "🔑 Password: $RDP_PASSWORD"
+          echo "🚪 Port: 3389 (default RDP port)"
           echo ''
-          echo '🎯 AUTOMATION BREAKTHROUGH:'
-          echo '  • No AppleScript or UI automation needed'
-          echo '  • No manual button clicking required'  
-          echo '  • OAuth2 trigger happens automatically'
-          echo '  • Perfect for CI/CD with minimal human intervention'
+          echo '📱 MOBILE TOTP APP: Have your Certum mobile app ready!'
           echo ''
-          echo '✅ Configuration complete! Proceeding with certificate signing...'
+          echo '🎯 AUTHENTICATION INSTRUCTIONS:'
+          echo '1. � Connect to RDP using the credentials above'
+          echo '2. 🖥️  You should see Windows desktop with SimplySign Desktop running'
+          echo '3. 🚀 OAuth2 dialog should be visible (from Step 3 auto-trigger)'
+          echo '4. 👤 Enter your Certum email in the OAuth2 dialog'
+          echo '5. 📱 Generate TOTP code on mobile and enter it'
+          echo '6. ✅ Complete authentication (virtual smart card activates)'
+          echo '7. ❌ CLOSE this RDP session (workflow will continue automatically)'
           echo ''
-          echo 'ℹ️ Monitor the next step for OAuth2 dialog and TOTP authentication.'
+          echo '⚠️  IMPORTANT TIMING:'
+          echo '• You have 45 minutes to complete authentication'
+          echo '• OAuth2 dialog may timeout - if so, signing step will re-trigger it'
+          echo '• Once authenticated, signing will happen automatically'
+          echo '• Do NOT stay connected - close RDP after authentication'
+          echo ''
+          echo '🔄 WORKFLOW STATUS: Pausing for 45 minutes for manual authentication'
+          echo 'The workflow will automatically continue after the timeout or when you close RDP'
+          echo ''
+          
+          # Wait for authentication - 45 minute window
+          echo "⏳ Waiting 45 minutes for interactive authentication..."
+          echo "$(date): Authentication window started"
+          
+          # Monitor for authentication completion
+          for i in {1..2700}; do  # 45 minutes = 2700 seconds
+            sleep 1
+            
+            # Check every minute
+            if [ $((i % 60)) -eq 0 ]; then
+              minutes_remaining=$(((2700 - i) / 60))
+              echo "⏱️  Authentication time remaining: $minutes_remaining minutes"
+              
+              # Check if user has disconnected (sign they completed auth)
+              active_sessions=$(powershell -Command "quser 2>$null | Select-String 'rdpuser' | Measure-Object | Select-Object -ExpandProperty Count")
+              if [ "$active_sessions" -eq "0" ]; then
+                echo "✅ RDP session closed - assuming authentication completed!"
+                echo "🚀 Proceeding with certificate signing..."
+                break
+              fi
+            fi
+          done
+          
+          echo "$(date): Authentication window ended"
+          echo "🔄 Proceeding with certificate signing phase..."
 
-      - name: Step 4 - Certum Desktop Signing
+      - name: Step 5 - Certum Desktop Signing
         env:
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
           CERTUM_TOTP_SEED: ${{ inputs.certum_totp_seed }}
         run: |
-          echo "=== Step 4: Certum Desktop Signing ==="
+          echo "=== Step 5: Certum Desktop Signing ==="
           echo "🔐 Ready for OAuth2-based signing"
           echo "📱 TOTP status: ${{ inputs.certum_totp_seed != '' && 'Provided via workflow input' || 'Manual entry required in OAuth2 dialog' }}"
           echo "🎯 AUTOMATIC AUTHENTICATION: OAuth2 dialog should open automatically!"
@@ -227,21 +283,21 @@ jobs:
           chmod +x .github/scripts/certum-desktop-signing.sh
           ./.github/scripts/certum-desktop-signing.sh
           
-          echo "✅ Step 4 completed"
+          echo "✅ Step 5 completed"
 
-      - name: Step 5 - Code Signing
+      - name: Step 6 - Code Signing
         env:
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
           CERTUM_PASSWORD: ${{ secrets.CERTUM_PASSWORD }}
           CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
-          echo "=== Step 5: Code Signing ==="
+          echo "=== Step 6: Code Signing ==="
           
           # Use our modular script
           chmod +x .github/scripts/sign-binary.sh
           ./.github/scripts/sign-binary.sh
           
-          echo "✅ Step 5 completed"
+          echo "✅ Step 6 completed"
 
       - name: Verify Signed Binary
         run: |
