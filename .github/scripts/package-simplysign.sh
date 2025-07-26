@@ -22,30 +22,55 @@ echo "✅ SimplySign Desktop found: $SIMPLYSIGN_DIR"
 PACKAGE_DIR="simplysign-desktop-package"
 mkdir -p "$PACKAGE_DIR"
 
-echo "📦 Creating SimplySign Desktop package..."
+echo "📦 Creating minimal SimplySign Desktop package..."
 
-# Copy the entire SimplySign Desktop installation
-echo "   Copying SimplySign Desktop files..."
-cp -r "$SIMPLYSIGN_DIR" "$PACKAGE_DIR/" || {
-    echo "❌ Failed to copy SimplySign Desktop directory"
-    exit 1
-}
+# Copy only the essential SimplySign Desktop files
+echo "   Copying core SimplySign Desktop files..."
 
-# Copy relevant user configuration (if exists)
-echo "   Copying user configuration..."
-CURRENT_USER="${USER:-${USERNAME:-$(whoami)}}"
-USER_CONFIG_LOCATIONS=(
-    "/c/Users/$CURRENT_USER/AppData/Local/Certum"
-    "/c/Users/$CURRENT_USER/AppData/Roaming/Certum"
-    "/c/Users/$CURRENT_USER/AppData/Local/SimplySign Desktop"
-    "/c/Users/$CURRENT_USER/AppData/Roaming/SimplySign Desktop"
+# Create the essential directory structure
+mkdir -p "$PACKAGE_DIR/SimplySign Desktop"
+
+# Copy only the essential executable and core files
+ESSENTIAL_FILES=(
+    "SimplySignDesktop.exe"
+    "SimplySignDesktop.exe.config"
+    "SimplySignDesktop.pdb"
+    "*.dll"
+    "*.config"
 )
 
-for config_dir in "${USER_CONFIG_LOCATIONS[@]}"; do
-    if [ -d "$config_dir" ]; then
-        echo "   Found user config: $config_dir"
-        mkdir -p "$PACKAGE_DIR/user-config"
-        cp -r "$config_dir" "$PACKAGE_DIR/user-config/" 2>/dev/null || true
+for pattern in "${ESSENTIAL_FILES[@]}"; do
+    find "$SIMPLYSIGN_DIR" -maxdepth 1 -name "$pattern" -type f -exec cp {} "$PACKAGE_DIR/SimplySign Desktop/" \; 2>/dev/null || true
+done
+
+# Check what we actually copied
+COPIED_SIZE=$(du -sh "$PACKAGE_DIR/SimplySign Desktop" 2>/dev/null | cut -f1 || echo "Unknown")
+FILE_COUNT=$(find "$PACKAGE_DIR/SimplySign Desktop" -type f | wc -l)
+echo "   ✅ Copied $FILE_COUNT essential files ($COPIED_SIZE)"
+
+# List the files for verification
+echo "   Essential files included:"
+find "$PACKAGE_DIR/SimplySign Desktop" -type f -exec basename {} \; | sort | sed 's/^/     /'
+
+# Copy only essential registry configuration (not user files)
+echo "   Copying minimal configuration..."
+CURRENT_USER="${USER:-${USERNAME:-$(whoami)}}"
+
+# Only look for essential XML config files, not entire directories
+mkdir -p "$PACKAGE_DIR/config"
+
+# Look for specific SimplySign config files only
+find "/c/Users/$CURRENT_USER/AppData/Local" -name "SimplySignDesktop.xml" -o -name "certum.xml" 2>/dev/null | while read -r config_file; do
+    if [ -f "$config_file" ]; then
+        echo "   Found essential config: $(basename "$config_file")"
+        cp "$config_file" "$PACKAGE_DIR/config/" 2>/dev/null || true
+    fi
+done
+
+find "/c/Users/$CURRENT_USER/AppData/Roaming" -name "SimplySignDesktop.xml" -o -name "certum.xml" 2>/dev/null | while read -r config_file; do
+    if [ -f "$config_file" ]; then
+        echo "   Found essential config: $(basename "$config_file")"
+        cp "$config_file" "$PACKAGE_DIR/config/" 2>/dev/null || true
     fi
 done
 
@@ -80,33 +105,37 @@ INSTALL_DIR="/c/Program Files/Certum"
 # Create installation directory
 mkdir -p "$INSTALL_DIR"
 
-# Copy SimplySign Desktop
+# Copy SimplySign Desktop (minimal essential files)
 if [ -d "$PACKAGE_DIR/SimplySign Desktop" ]; then
-    echo "📦 Restoring SimplySign Desktop..."
+    echo "📦 Restoring minimal SimplySign Desktop..."
     cp -r "$PACKAGE_DIR/SimplySign Desktop" "$INSTALL_DIR/"
     echo "✅ SimplySign Desktop restored to: $INSTALL_DIR/SimplySign Desktop"
+    
+    # List what was restored
+    FILE_COUNT=$(find "$INSTALL_DIR/SimplySign Desktop" -type f | wc -l)
+    DIR_SIZE=$(du -sh "$INSTALL_DIR/SimplySign Desktop" 2>/dev/null | cut -f1 || echo "Unknown")
+    echo "   Restored $FILE_COUNT files ($DIR_SIZE)"
 else
     echo "❌ SimplySign Desktop package not found"
     exit 1
 fi
 
-# Restore user configuration
-if [ -d "$PACKAGE_DIR/user-config" ]; then
-    echo "🔧 Restoring user configuration..."
+# Restore essential configuration
+if [ -d "$PACKAGE_DIR/config" ]; then
+    echo "🔧 Restoring essential configuration..."
     
     CURRENT_USER="${USER:-${USERNAME:-$(whoami)}}"
-    USER_APPDATA="/c/Users/$CURRENT_USER/AppData"
+    USER_APPDATA_LOCAL="/c/Users/$CURRENT_USER/AppData/Local"
+    USER_APPDATA_ROAMING="/c/Users/$CURRENT_USER/AppData/Roaming"
     
-    mkdir -p "$USER_APPDATA/Local"
-    mkdir -p "$USER_APPDATA/Roaming"
+    mkdir -p "$USER_APPDATA_LOCAL/Certum"
+    mkdir -p "$USER_APPDATA_ROAMING/Certum"
     
-    # Copy configuration files
-    find "$PACKAGE_DIR/user-config" -type d -name "Certum" -exec cp -r {} "$USER_APPDATA/Local/" \; 2>/dev/null || true
-    find "$PACKAGE_DIR/user-config" -type d -name "Certum" -exec cp -r {} "$USER_APPDATA/Roaming/" \; 2>/dev/null || true
-    find "$PACKAGE_DIR/user-config" -type d -name "SimplySign Desktop" -exec cp -r {} "$USER_APPDATA/Local/" \; 2>/dev/null || true
-    find "$PACKAGE_DIR/user-config" -type d -name "SimplySign Desktop" -exec cp -r {} "$USER_APPDATA/Roaming/" \; 2>/dev/null || true
+    # Copy essential config files
+    find "$PACKAGE_DIR/config" -name "*.xml" -exec cp {} "$USER_APPDATA_LOCAL/Certum/" \; 2>/dev/null || true
+    find "$PACKAGE_DIR/config" -name "*.xml" -exec cp {} "$USER_APPDATA_ROAMING/Certum/" \; 2>/dev/null || true
     
-    echo "✅ User configuration restored"
+    echo "✅ Essential configuration restored"
 fi
 
 # Restore registry settings
@@ -143,16 +172,18 @@ chmod +x "$PACKAGE_DIR/restore-simplysign.sh"
 
 # Create package information file
 echo "   Creating package information..."
+FINAL_SIZE=$(du -sh "$PACKAGE_DIR" 2>/dev/null | cut -f1 || echo "Unknown")
 cat > "$PACKAGE_DIR/package-info.txt" << EOF
-SimplySign Desktop Package
-==========================
+Minimal SimplySign Desktop Package
+==================================
 
 Created: $(date)
 Configuration: Automatic OAuth2 Authentication Enabled
+Package Type: MINIMAL (Essential files only)
 
 Contents:
-- SimplySign Desktop/ - Complete application installation
-- user-config/ - User configuration files (if found)
+- SimplySign Desktop/ - Core application files (executable + essential DLLs)
+- config/ - Essential XML configuration files only
 - registry/ - Registry settings export
 - restore-simplysign.sh - Restoration script
 
@@ -161,13 +192,18 @@ Key Configuration:
 - OAuth2 dialog appears automatically on startup
 - No manual trigger required for authentication
 
+Optimization:
+- Only includes essential SimplySign Desktop files (~6-10 MB)
+- Excludes proCertum SmartSign suite and unnecessary files
+- Minimal configuration files only
+
 Usage:
 1. Extract package
 2. Run restore-simplysign.sh
 3. Start SimplySign Desktop
 4. OAuth2 dialog should appear automatically
 
-Size: $(du -sh "$PACKAGE_DIR" | cut -f1)
+Package Size: $FINAL_SIZE (optimized for artifacts)
 EOF
 
 # Create the final zip package
@@ -188,11 +224,22 @@ else
     echo "   ✅ Created with tar.gz compression"
 fi
 
-# Get package size
+# Get package size and verify it's minimal
 if [ -f "simplysign-desktop-package.zip" ]; then
     PACKAGE_SIZE=$(du -sh "simplysign-desktop-package.zip" | cut -f1)
+    PACKAGE_SIZE_BYTES=$(du -b "simplysign-desktop-package.zip" | cut -f1)
     echo "📦 Package size: $PACKAGE_SIZE"
     PACKAGE_FILE="simplysign-desktop-package.zip"
+    
+    # Verify the package is appropriately sized (should be under 50MB for minimal)
+    MAX_SIZE_BYTES=$((50 * 1024 * 1024))  # 50MB in bytes
+    if [ "$PACKAGE_SIZE_BYTES" -gt "$MAX_SIZE_BYTES" ]; then
+        echo "⚠️ WARNING: Package seems large ($PACKAGE_SIZE) - expected <50MB for minimal SimplySign Desktop"
+        echo "   This may include unnecessary files from proCertum SmartSign suite"
+    else
+        echo "✅ Package size optimal for minimal SimplySign Desktop"
+    fi
+    
 elif [ -f "simplysign-desktop-package.tar.gz" ]; then
     PACKAGE_SIZE=$(du -sh "simplysign-desktop-package.tar.gz" | cut -f1)
     echo "📦 Package size: $PACKAGE_SIZE"
