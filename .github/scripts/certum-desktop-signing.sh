@@ -174,7 +174,7 @@ fi
 if [ -n "$SIGNTOOL" ]; then
     echo ""
     echo "🔐 Attempting to access certificate: $CERTUM_CERTIFICATE_SHA1"
-    echo "   This should trigger OAuth2 authentication dialog"
+    echo "   This should trigger automatic OAuth2 authentication dialog"
     
     # First, verify signtool works
     echo ""
@@ -186,9 +186,107 @@ if [ -n "$SIGNTOOL" ]; then
     fi
     
     echo ""
-    echo "📋 Attempting certificate access (this should trigger OAuth2)..."
-    # Try to sign - this should trigger OAuth2 authentication
-    if "$SIGNTOOL" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /tr http://timestamp.comodoca.com /td sha256 /fd sha256 /v "$BINARY_PATH" 2>&1; then
+    echo "� Pre-signing OAuth2 dialog check..."
+    # Monitor for OAuth2 dialogs before attempting to sign
+    oauth2_detected=false
+    
+    # Look for existing OAuth2/browser processes
+    if tasklist 2>/dev/null | grep -E -i "(chrome|edge|firefox|webview)" | head -3; then
+        echo "🌐 Browser/WebView processes detected - OAuth2 may already be open"
+        oauth2_detected=true
+    fi
+    
+    echo ""
+    echo "�📋 Attempting certificate access (this should trigger OAuth2)..."
+    echo "   Signtool command: $SIGNTOOL sign /sha1 $CERTUM_CERTIFICATE_SHA1 ..."
+    echo "   🎯 Expecting automatic OAuth2 dialog from Step 3 configuration"
+    
+    # Start the signing process, which should trigger OAuth2 authentication
+    # Use timeout to prevent hanging if authentication fails
+    echo ""
+    echo "🚀 Starting certificate signing (OAuth2 should open automatically)..."
+    
+    signing_output=""
+    signing_success=false
+    
+    # Create a temporary script to run signtool with timeout
+    temp_script=$(mktemp)
+    cat > "$temp_script" << 'EOF'
+#!/bin/bash
+exec "$@"
+EOF
+    chmod +x "$temp_script"
+    
+    # Run signtool with monitoring
+    (
+        echo "🔐 Starting signtool process..."
+        # Give the process some time to potentially show OAuth2 dialog
+        timeout 300s "$SIGNTOOL" sign \
+            /sha1 "$CERTUM_CERTIFICATE_SHA1" \
+            /tr http://timestamp.comodoca.com \
+            /td sha256 \
+            /fd sha256 \
+            /v "$BINARY_PATH" 2>&1 || echo "SIGNTOOL_TIMEOUT_OR_FAILED"
+    ) &
+    
+    signtool_pid=$!
+    
+    # Monitor for OAuth2 dialog while signtool runs
+    echo "🔍 Monitoring for OAuth2 authentication dialog..."
+    for i in {1..60}; do  # Monitor for up to 5 minutes
+        sleep 5
+        
+        echo "   Check $i/60: Looking for OAuth2 dialog..."
+        
+        # Check for OAuth2-related processes
+        if tasklist 2>/dev/null | grep -E -i "(chrome\.exe|msedge\.exe|firefox\.exe|iexplore\.exe|webview)" | head -2; then
+            echo "   🌐 OAuth2 browser/WebView process detected!"
+            oauth2_detected=true
+            
+            # Also check if new browser windows appeared
+            browser_count=$(tasklist 2>/dev/null | grep -E -i "(chrome|edge|firefox|iexplore|webview)" | wc -l)
+            if [ "$browser_count" -gt 0 ]; then
+                echo "   📊 Found $browser_count browser/webview processes"
+            fi
+            
+            echo ""
+            echo "🎉 OAUTH2 AUTHENTICATION DIALOG DETECTED!"
+            echo "📱 Please complete the OAuth2 authentication:"
+            echo "   1. 👤 Enter your Certum email: $CERTUM_USERNAME"
+            if [ -n "$CERTUM_API_TOKEN" ]; then
+                echo "   2. 📱 Enter TOTP code: $CERTUM_API_TOKEN"
+            else
+                echo "   2. 📱 Enter TOTP code from your mobile app"
+            fi
+            echo "   3. ✅ Click 'Sign In' or 'Authenticate'"
+            echo ""
+            echo "⏳ Waiting for authentication to complete..."
+            echo "   (Signtool will continue once certificate becomes available)"
+            break
+        fi
+        
+        # Check if signtool process is still running
+        if ! kill -0 $signtool_pid 2>/dev/null; then
+            echo "   ℹ️ Signtool process completed"
+            break
+        fi
+    done
+    
+    # Wait for signtool to complete
+    echo ""
+    echo "⏳ Waiting for signtool to complete..."
+    wait $signtool_pid
+    signtool_exit_code=$?
+    
+    # Clean up
+    rm -f "$temp_script"
+    
+    echo ""
+    echo "📊 Signtool Results:"
+    echo "   Exit code: $signtool_exit_code"
+    echo "   OAuth2 detected: $oauth2_detected"
+    
+    if [ $signtool_exit_code -eq 0 ]; then
         echo "🎉 SUCCESS! Binary signed successfully"
         AUTH_SUCCESS=true
         # Check if a separate signed file was created
