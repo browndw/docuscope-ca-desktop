@@ -36,8 +36,11 @@ if command -v reg >/dev/null 2>&1; then
     for reg_path in "${REG_LOCATIONS[@]}"; do
         echo "   Configuring registry path: $reg_path"
         
-        # The critical setting from macOS discovery
-        reg add "$reg_path" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null || echo "     Registry path attempted: $reg_path"
+        # Create the registry path first
+        reg add "$reg_path" /f 2>/dev/null || true
+        
+        # The critical setting from macOS discovery - proper escaping
+        reg add "$reg_path" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null && echo "     ✓ SimplySignDesktopShowLogonDialogAfterApplicationStartup set" || echo "     ⚠ Registry path failed: $reg_path"
         
         # Additional related settings
         reg add "$reg_path" /v "ShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null || true
@@ -112,26 +115,32 @@ if command -v powershell >/dev/null 2>&1; then
     
     foreach (\$regPath in \$regPaths) {
         try {
+            Write-Host \"Processing registry path: \$regPath\"
+            
             if (-not (Test-Path \$regPath)) {
-                New-Item -Path \$regPath -Force | Out-Null
-                Write-Host \"Created registry path: \$regPath\"
+                \$null = New-Item -Path \$regPath -Force
+                Write-Host \"  Created registry path: \$regPath\"
+            } else {
+                Write-Host \"  Registry path exists: \$regPath\"
             }
             
-            # Set the critical breakthrough setting
-            Set-ItemProperty -Path \$regPath -Name 'SimplySignDesktopShowLogonDialogAfterApplicationStartup' -Value 'Yes' -Type String -Force
-            Set-ItemProperty -Path \$regPath -Name 'ShowLogonDialogAfterApplicationStartup' -Value 'Yes' -Type String -Force
-            Set-ItemProperty -Path \$regPath -Name 'AutoShowLogonDialog' -Value 'Yes' -Type String -Force
-            Set-ItemProperty -Path \$regPath -Name 'AutomaticAuthentication' -Value 'Yes' -Type String -Force
+            # Set the critical breakthrough setting with explicit type
+            \$null = New-ItemProperty -Path \$regPath -Name 'SimplySignDesktopShowLogonDialogAfterApplicationStartup' -Value 'Yes' -PropertyType String -Force
+            \$null = New-ItemProperty -Path \$regPath -Name 'ShowLogonDialogAfterApplicationStartup' -Value 'Yes' -PropertyType String -Force
+            \$null = New-ItemProperty -Path \$regPath -Name 'AutoShowLogonDialog' -Value 'Yes' -PropertyType String -Force
+            \$null = New-ItemProperty -Path \$regPath -Name 'AutomaticAuthentication' -Value 'Yes' -PropertyType String -Force
             
-            Write-Host \"Registry configuration set: \$regPath\"
+            Write-Host \"  Registry values set for: \$regPath\"
             
-            # Verify the setting was applied
+            # Verify the setting was applied immediately
             \$value = Get-ItemProperty -Path \$regPath -Name 'SimplySignDesktopShowLogonDialogAfterApplicationStartup' -ErrorAction SilentlyContinue
-            if (\$value) {
-                Write-Host \"  Verified: SimplySignDesktopShowLogonDialogAfterApplicationStartup = \$(\$value.SimplySignDesktopShowLogonDialogAfterApplicationStartup)\"
+            if (\$value -and \$value.SimplySignDesktopShowLogonDialogAfterApplicationStartup) {
+                Write-Host \"  ✓ Verified: SimplySignDesktopShowLogonDialogAfterApplicationStartup = '\$(\$value.SimplySignDesktopShowLogonDialogAfterApplicationStartup)'\"
+            } else {
+                Write-Host \"  ✗ Verification failed for: \$regPath\"
             }
         } catch {
-            Write-Host \"Registry path failed: \$regPath - \$(\$_.Exception.Message)\"
+            Write-Host \"  ✗ Registry path failed: \$regPath - \$(\$_.Exception.Message)\"
         }
     }
     

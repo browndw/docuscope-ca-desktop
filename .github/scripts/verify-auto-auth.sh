@@ -229,14 +229,18 @@ for ((i=1; i<=20; i++)); do
             echo "   🔍 Mid-point check: Looking for OAuth2 network activity..."
             NETWORK_CHECK=$(powershell -Command "
             # Check if any OAuth2 or Certum-related network connections are active
-            \$connections = Get-NetTCPConnection -State Listen,Established -ErrorAction SilentlyContinue | 
-                Where-Object { \$_.OwningProcess -ne 0 }
-            
-            foreach (\$conn in \$connections) {
-                \$proc = Get-Process -Id \$conn.OwningProcess -ErrorAction SilentlyContinue
-                if (\$proc -and \$proc.ProcessName -eq 'SimplySignDesktop') {
-                    Write-Output \"Network:\$(\$conn.LocalAddress):\$(\$conn.LocalPort)->\\$(\$conn.RemoteAddress):\$(\$conn.RemotePort)\"
+            try {
+                \$connections = Get-NetTCPConnection -State Listen,Established -ErrorAction SilentlyContinue | 
+                    Where-Object { \$_.OwningProcess -ne 0 }
+                
+                foreach (\$conn in \$connections) {
+                    \$proc = Get-Process -Id \$conn.OwningProcess -ErrorAction SilentlyContinue
+                    if (\$proc -and \$proc.ProcessName -eq 'SimplySignDesktop') {
+                        Write-Output \"Network:\$(\$conn.LocalAddress):\$(\$conn.LocalPort)->\$(\$conn.RemoteAddress):\$(\$conn.RemotePort)\"
+                    }
                 }
+            } catch {
+                Write-Output \"NetworkCheck:NotAvailable\"
             }
             " 2>/dev/null)
             
