@@ -259,15 +259,12 @@ jobs:
                 case "$STATUS" in
                   "Accepted")
                     echo "=== Tauri app notarization SUCCESSFUL ==="
-                    echo "Stapling notarization to zip file first..."
-                    xcrun stapler staple "DocuScope CA.zip"
-                    echo "Extracting stapled app from zip..."
-                    # Remove the original app and extract the stapled version
-                    rm -rf "$APP_PATH"
-                    unzip -o "DocuScope CA.zip" -d "$(dirname "$APP_PATH")"
+                    echo "Stapling notarization to app bundle..."
+                    echo "NOTE: For .app bundles, we staple the app directly (not the zip)"
+                    xcrun stapler staple "$APP_PATH"
                     echo "Verifying stapled app bundle..."
                     xcrun stapler validate "$APP_PATH"
-                    echo "Notarization stapled and verified successfully"
+                    echo "App bundle notarization stapled and verified successfully"
                     echo "Both Python binary and Tauri app are now fully notarized!"
                     break
                     ;;
