@@ -1,7 +1,7 @@
 {
   "productName": "DocuScope CA",
   "version": "0.4.0",
-  "identifier": "docuscope.streamlit.app",
+  "identifier": "ca.docuscope.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -36,7 +36,11 @@
   "bundle": {
     "publisher": "David Brown",
     "active": true,
-    "targets": "all",
+    "targets": {
+      "linux": ["deb", "appimage"],
+      "macos": ["dmg"],
+      "windows": ["msi", "nsis"]
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
