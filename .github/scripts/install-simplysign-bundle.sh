@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Install SimplySign Desktop from Windows Bundle
-# Extracts SimplySign Desktop from the 264MB proCertum SmartSign bundle
+# Downloads and installs SimplySign Desktop directly using the official installer
 
 set -euo pipefail
 
@@ -10,12 +10,11 @@ echo "=== Installing SimplySign Desktop from Windows Bundle ==="
 # Bundle download URL and local file
 BUNDLE_URL="https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.67/SimplySignDesktop-9.3.2.67-win-64-bit.exe"
 BUNDLE_FILE="SimplySignDesktop-9.3.2.67-win-64-bit.exe"
-EXTRACT_DIR="bundle_extracted"
 INSTALL_DIR="/c/Program Files/Certum"
 
 # Download the bundle if not already present
 if [ ! -f "$BUNDLE_FILE" ]; then
-  echo "📥 Downloading SimplySign Desktop bundle..."
+  echo "📥 Downloading SimplySign Desktop installer..."
   echo "   URL: $BUNDLE_URL"
   
   if command -v curl >/dev/null 2>&1; then
@@ -28,158 +27,138 @@ if [ ! -f "$BUNDLE_FILE" ]; then
   fi
   
   if [ ! -f "$BUNDLE_FILE" ]; then
-    echo "❌ Failed to download bundle"
+    echo "❌ Failed to download installer"
     exit 1
   fi
 fi
 
-echo "✅ Bundle ready: $BUNDLE_FILE ($(du -h "$BUNDLE_FILE" | cut -f1))"
+echo "✅ Installer ready: $BUNDLE_FILE ($(du -h "$BUNDLE_FILE" | cut -f1))"
 
-# Install 7-Zip if not available
-if ! command -v 7z >/dev/null 2>&1; then
-  echo "📦 Installing 7-Zip..."
-  choco install 7zip -y
-  # Add to PATH for current session
-  export PATH="$PATH:/c/Program Files/7-Zip"
-fi
+# Install SimplySign Desktop using PowerShell
+echo "� Installing SimplySign Desktop..."
 
-# Extract the bundle
-echo "📂 Extracting Windows bundle..."
-rm -rf "$EXTRACT_DIR"
-mkdir -p "$EXTRACT_DIR"
-
-# The bundle is a self-extracting executable, not a 7z archive
-# Try multiple extraction methods
-
-echo "   Attempting silent extraction..."
-# Method 1: Try silent extraction flags
-if "$BUNDLE_FILE" /S /EXTRACT:"$(cygpath -w "$PWD/$EXTRACT_DIR")" 2>/dev/null; then
-    echo "✅ Bundle extracted with /S /EXTRACT"
-elif "$BUNDLE_FILE" /SILENT /DIR:"$(cygpath -w "$PWD/$EXTRACT_DIR")" 2>/dev/null; then
-    echo "✅ Bundle extracted with /SILENT /DIR"
-elif "$BUNDLE_FILE" -o"$EXTRACT_DIR" -y 2>/dev/null; then
-    echo "✅ Bundle extracted with -o -y"
-else
-    echo "   Silent extraction failed, trying 7z extraction..."
+# Use PowerShell to run the installer silently
+powershell -Command "
+    Write-Host 'Running SimplySign Desktop installer...'
+    \$installerPath = '$(cygpath -w "$PWD/$BUNDLE_FILE")'
+    \$installDir = '$(cygpath -w "$INSTALL_DIR")'
     
-    # Method 2: Try 7z extraction (sometimes works with self-extractors)
-    if 7z x "$BUNDLE_FILE" -o"$EXTRACT_DIR" -y > /dev/null 2>&1; then
-        echo "✅ Bundle extracted with 7z"
-    else
-        echo "   7z extraction failed, trying unzip..."
-        
-        # Method 3: Try unzip (some executables are zip-based)
-        if unzip -q "$BUNDLE_FILE" -d "$EXTRACT_DIR" 2>/dev/null; then
-            echo "✅ Bundle extracted with unzip"
-        else
-            echo "   Unzip failed, trying manual execution with timeout..."
-            
-            # Method 4: Run the executable with timeout to prevent hanging
-            cd "$EXTRACT_DIR"
-            timeout 60s "../$BUNDLE_FILE" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$(cygpath -w "$PWD")" 2>/dev/null || {
-                echo "   Manual execution timed out or failed"
-                cd ..
-                
-                # Method 5: Try different extraction tools
-                echo "   Trying alternative extraction methods..."
-                
-                # Try with PowerShell Expand-Archive (for zip-based executables)
-                if command -v powershell >/dev/null 2>&1; then
-                    powershell -Command "
-                        try {
-                            Expand-Archive -Path '$(cygpath -w "$PWD/$BUNDLE_FILE")' -DestinationPath '$(cygpath -w "$PWD/$EXTRACT_DIR")' -Force
-                            Write-Host 'Extracted with PowerShell Expand-Archive'
-                        } catch {
-                            Write-Host 'PowerShell extraction failed'
-                            exit 1
-                        }
-                    " 2>/dev/null && echo "✅ Bundle extracted with PowerShell" || {
-                        echo "❌ All extraction methods failed"
-                        echo "Bundle file info:"
-                        file "$BUNDLE_FILE" 2>/dev/null || echo "file command not available"
-                        echo ""
-                        echo "🔍 Analyzing bundle structure..."
-                        echo "File size: $(du -h "$BUNDLE_FILE" | cut -f1)"
-                        echo "File type: $(file "$BUNDLE_FILE" 2>/dev/null || echo "Unknown")"
-                        echo ""
-                        echo "📋 Available extraction tools:"
-                        command -v 7z >/dev/null && echo "  ✅ 7z available" || echo "  ❌ 7z not available"
-                        command -v unzip >/dev/null && echo "  ✅ unzip available" || echo "  ❌ unzip not available"
-                        command -v powershell >/dev/null && echo "  ✅ PowerShell available" || echo "  ❌ PowerShell not available"
-                        exit 1
-                    }
-                else
-                    echo "❌ All extraction methods failed - PowerShell not available"
-                    exit 1
-                fi
-            }
-            
-            if [ "$PWD" != "$(dirname "$0")" ]; then
-                cd ..
-            fi
-        fi
-    fi
-fi
+    # Try different silent installation methods
+    Write-Host 'Attempting silent installation...'
+    
+    # Method 1: Standard silent switches
+    try {
+        \$process = Start-Process -FilePath \$installerPath -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS', '/DIR=', \$installDir -Wait -PassThru
+        if (\$process.ExitCode -eq 0) {
+            Write-Host '✅ Installation completed successfully'
+            exit 0
+        } else {
+            Write-Host '⚠️ Method 1 failed with exit code:' \$process.ExitCode
+        }
+    } catch {
+        Write-Host '⚠️ Method 1 failed:' \$_.Exception.Message
+    }
+    
+    # Method 2: NSIS-style switches
+    try {
+        \$process = Start-Process -FilePath \$installerPath -ArgumentList '/S', '/D=', \$installDir -Wait -PassThru
+        if (\$process.ExitCode -eq 0) {
+            Write-Host '✅ Installation completed successfully (Method 2)'
+            exit 0
+        } else {
+            Write-Host '⚠️ Method 2 failed with exit code:' \$process.ExitCode
+        }
+    } catch {
+        Write-Host '⚠️ Method 2 failed:' \$_.Exception.Message
+    }
+    
+    # Method 3: InstallShield-style switches
+    try {
+        \$process = Start-Process -FilePath \$installerPath -ArgumentList '/s', '/v/qn' -Wait -PassThru
+        if (\$process.ExitCode -eq 0) {
+            Write-Host '✅ Installation completed successfully (Method 3)'
+            exit 0
+        } else {
+            Write-Host '⚠️ Method 3 failed with exit code:' \$process.ExitCode
+        }
+    } catch {
+        Write-Host '⚠️ Method 3 failed:' \$_.Exception.Message
+    }
+    
+    # Method 4: Just run the installer and see what happens
+    Write-Host '🎯 Attempting default installation...'
+    try {
+        \$process = Start-Process -FilePath \$installerPath -Wait -PassThru
+        Write-Host 'Installation process completed with exit code:' \$process.ExitCode
+    } catch {
+        Write-Host '❌ Installation failed:' \$_.Exception.Message
+        exit 1
+    }
+"
 
-# Check if extraction was successful
-if [ ! -d "$EXTRACT_DIR" ] || [ -z "$(ls -A "$EXTRACT_DIR" 2>/dev/null)" ]; then
-    echo "❌ Extraction directory is empty"
+POWERSHELL_EXIT=$?
+
+if [ $POWERSHELL_EXIT -ne 0 ]; then
+    echo "❌ PowerShell installation failed"
     exit 1
+fi
+
+# Wait a moment for installation to complete
+sleep 5
+
+# Verify installation by looking for SimplySign Desktop in common locations
+echo "🔍 Verifying installation..."
+
+POSSIBLE_LOCATIONS=(
+    "/c/Program Files/Certum/SimplySign Desktop"
+    "/c/Program Files (x86)/Certum/SimplySign Desktop"
+    "/c/Program Files/SimplySign Desktop"
+    "/c/Program Files (x86)/SimplySign Desktop"
+    "/c/Program Files/proCertum/SimplySign Desktop"
+    "/c/Program Files (x86)/proCertum/SimplySign Desktop"
+)
+
+FOUND_LOCATION=""
+for location in "${POSSIBLE_LOCATIONS[@]}"; do
+    if [ -f "$location/SimplySignDesktop.exe" ]; then
+        FOUND_LOCATION="$location"
+        break
+    fi
+done
+
+if [ -n "$FOUND_LOCATION" ]; then
+    echo "✅ SimplySign Desktop found at: $FOUND_LOCATION"
+    
+    INSTALLED_SIZE=$(du -sh "$FOUND_LOCATION" | cut -f1)
+    FILE_COUNT=$(find "$FOUND_LOCATION" -type f | wc -l)
+    echo "� Size: $INSTALLED_SIZE ($FILE_COUNT files)"
+    
+    # List key files
+    echo "� Key files installed:"
+    find "$FOUND_LOCATION" -name "*.exe" -o -name "*.dll" -o -name "*.config" | head -10 | sed 's/^/   /'
+    
+    # Create a symlink to the standard location if it's not there
+    if [ "$FOUND_LOCATION" != "/c/Program Files/Certum/SimplySign Desktop" ]; then
+        echo "🔗 Creating standard location symlink..."
+        mkdir -p "/c/Program Files/Certum"
+        ln -sf "$FOUND_LOCATION" "/c/Program Files/Certum/SimplySign Desktop" 2>/dev/null || {
+            echo "   Symlink failed, copying instead..."
+            cp -r "$FOUND_LOCATION" "/c/Program Files/Certum/SimplySign Desktop"
+        }
+    fi
+    
 else
-    echo "✅ Bundle extracted successfully"
-    EXTRACTED_SIZE=$(du -sh "$EXTRACT_DIR" | cut -f1)
-    echo "   Extracted size: $EXTRACTED_SIZE"
+    echo "❌ SimplySign Desktop not found after installation"
+    echo "🔍 Searching for any SimplySign files..."
+    find /c/Program* -name "*Simply*" -type f 2>/dev/null | head -10 || echo "   No SimplySign files found"
+    exit 1
 fi
 
-# Find SimplySign Desktop within the extracted bundle
-echo "🔍 Locating SimplySign Desktop in bundle..."
-
-# Search for SimplySignDesktop.exe in the extracted contents
-SIMPLYSIGN_LOCATION=$(find "$EXTRACT_DIR" -name "SimplySignDesktop.exe" -type f | head -1)
-
-if [ -z "$SIMPLYSIGN_LOCATION" ]; then
-  echo "❌ SimplySignDesktop.exe not found in bundle"
-  echo "Bundle contents:"
-  find "$EXTRACT_DIR" -name "*.exe" | head -10
-  exit 1
-fi
-
-echo "✅ Found SimplySign Desktop: $SIMPLYSIGN_LOCATION"
-
-# Get the SimplySign Desktop directory
-SIMPLYSIGN_DIR=$(dirname "$SIMPLYSIGN_LOCATION")
-echo "📁 SimplySign Desktop directory: $SIMPLYSIGN_DIR"
-
-# Create installation directory
-echo "📂 Creating installation directory..."
-mkdir -p "$INSTALL_DIR"
-
-# Copy SimplySign Desktop to installation location
-echo "📋 Installing SimplySign Desktop..."
-cp -r "$SIMPLYSIGN_DIR" "$INSTALL_DIR/SimplySign Desktop"
-
-# Verify installation
-INSTALLED_EXE="$INSTALL_DIR/SimplySign Desktop/SimplySignDesktop.exe"
-if [ -f "$INSTALLED_EXE" ]; then
-  INSTALLED_SIZE=$(du -sh "$INSTALL_DIR/SimplySign Desktop" | cut -f1)
-  FILE_COUNT=$(find "$INSTALL_DIR/SimplySign Desktop" -type f | wc -l)
-  echo "✅ SimplySign Desktop installed successfully"
-  echo "📍 Location: $INSTALL_DIR/SimplySign Desktop"
-  echo "📏 Size: $INSTALLED_SIZE ($FILE_COUNT files)"
-  
-  # List key files
-  echo "🔑 Key files installed:"
-  find "$INSTALL_DIR/SimplySign Desktop" -name "*.exe" -o -name "*.dll" -o -name "*.config" | head -10 | sed 's/^/   /'
-else
-  echo "❌ Installation verification failed"
-  exit 1
-fi
-
-# Cleanup extraction directory
-echo "🧹 Cleaning up extraction directory..."
-rm -rf "$EXTRACT_DIR"
+# Cleanup installer
+echo "🧹 Cleaning up installer..."
+rm -f "$BUNDLE_FILE"
 
 echo ""
 echo "🚀 SimplySign Desktop installation complete!"
-echo "📂 Installed to: $INSTALL_DIR/SimplySign Desktop"
+echo "📂 Installed at: $FOUND_LOCATION"
 echo "🎯 Ready for OAuth2 configuration"
