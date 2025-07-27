@@ -377,8 +377,8 @@ jobs:
         if: steps.check-tag.outputs.is-tag == 'true'
         id: get_version
         run: |
-          version=$(grep "^version" pyproject.toml | cut -d'"' -f2)
-          echo "version=${version}" >> $GITHUB_OUTPUT
+          version=$(grep "^version" pyproject.toml | head -1 | cut -d'"' -f2)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Create release changelog
         if: steps.check-tag.outputs.is-tag == 'true'
