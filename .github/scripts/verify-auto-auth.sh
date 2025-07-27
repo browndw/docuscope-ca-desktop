@@ -124,10 +124,35 @@ if command -v reg >/dev/null 2>&1; then
             # Disable exit on error for registry parsing section
             set +e
             
-            # Get the value with improved parsing (with error handling)
+            # Get the value with improved PowerShell-based approach
             echo "   🔍 Debugging registry output:"
+            
+            # Method 1: Use PowerShell to query registry (more reliable than reg command)
+            if command -v powershell >/dev/null 2>&1; then
+                POWERSHELL_VALUE=$(powershell -Command "
+                try {
+                    \$regPath = '$reg_path' -replace 'HKEY_CURRENT_USER', 'HKCU:'
+                    \$value = Get-ItemProperty -Path \$regPath -Name 'SimplySignDesktopShowLogonDialogAfterApplicationStartup' -ErrorAction SilentlyContinue
+                    if (\$value) {
+                        Write-Output \$value.SimplySignDesktopShowLogonDialogAfterApplicationStartup
+                    } else {
+                        Write-Output 'NOT_FOUND'
+                    }
+                } catch {
+                    Write-Output 'ERROR'
+                }
+                " 2>/dev/null || echo "POWERSHELL_FAILED")
+                
+                echo "   PowerShell query result: '$POWERSHELL_VALUE'"
+            fi
+            
+            # Method 2: Traditional reg query (for comparison)
             REG_OUTPUT=$(reg query "$reg_path" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" 2>/dev/null || echo "")
-            echo "   Raw output: $REG_OUTPUT"
+            echo "   reg query raw output: '$REG_OUTPUT'"
+            
+            # Method 3: Try different reg query approach
+            REG_OUTPUT_ALT=$(reg query "$reg_path" 2>/dev/null | grep -A1 "SimplySignDesktopShowLogonDialogAfterApplicationStartup" || echo "")
+            echo "   Alternative reg query: '$REG_OUTPUT_ALT'"
             
             # Try multiple parsing methods with error handling
             VALUE1=""
@@ -144,16 +169,20 @@ if command -v reg >/dev/null 2>&1; then
             echo "   Parse method 2 (sed): '$VALUE2'"
             echo "   Parse method 3 (awk -F): '$VALUE3'"
             
-            # Use the first non-empty value
+            # Use PowerShell result if available, otherwise try parsed values
             VALUE=""
-            for v in "$VALUE1" "$VALUE2" "$VALUE3"; do
-                if [ -n "$v" ] && [ "$v" != "" ]; then
-                    VALUE="$v"
-                    break
-                fi
-            done
-            
-            echo "   🎯 Final extracted value: '$VALUE'"
+            if [ "$POWERSHELL_VALUE" = "Yes" ]; then
+                VALUE="Yes"
+                echo "   🎯 Using PowerShell result: '$VALUE'"
+            else
+                for v in "$VALUE1" "$VALUE2" "$VALUE3"; do
+                    if [ -n "$v" ] && [ "$v" != "" ]; then
+                        VALUE="$v"
+                        break
+                    fi
+                done
+                echo "   🎯 Using parsed result: '$VALUE'"
+            fi
             
             # Re-enable strict error handling
             set -e
@@ -436,6 +465,33 @@ for ((i=1; i<=20; i++)); do
         # Alternative detection methods for Windows
         if [ "$i" -eq 10 ]; then
             echo "   🔍 Mid-point check: Looking for OAuth2 network activity..."
+            
+            # Test connectivity to Certum OAuth2 endpoints
+            echo "   🌐 Testing connectivity to Certum OAuth2 endpoints..."
+            OAUTH_ENDPOINTS=(
+                "https://cloudsign.webnotarius.pl/idp/oauth2.0/authorize"
+                "https://cloudsign.webnotarius.pl/idp/oauth2.0/accessToken" 
+                "https://cloudsign.webnotarius.pl/idp/oauth2.0/profile"
+            )
+            
+            NETWORK_REACHABLE=false
+            for endpoint in "${OAUTH_ENDPOINTS[@]}"; do
+                echo "   Testing: $endpoint"
+                if curl -s --connect-timeout 5 --max-time 10 -I "$endpoint" >/dev/null 2>&1; then
+                    echo "   ✅ Reachable: $endpoint"
+                    NETWORK_REACHABLE=true
+                else
+                    echo "   ❌ Unreachable: $endpoint"
+                fi
+            done
+            
+            if [ "$NETWORK_REACHABLE" = false ]; then
+                echo "   🚨 CRITICAL: No OAuth2 endpoints reachable from CI environment"
+                echo "   💡 This explains why OAuth2 dialog doesn't appear"
+                echo "   🔧 SimplySign Desktop needs internet access to Certum cloud services"
+            else
+                echo "   ✅ OAuth2 endpoints are reachable - investigating other causes"
+            fi
             
             # Method 1: Check for network connections from SimplySign Desktop
             NETWORK_CHECK=$(powershell -Command "
