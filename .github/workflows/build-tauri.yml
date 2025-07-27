@@ -361,18 +361,32 @@ jobs:
           path: ./artifacts
           merge-multiple: true
 
+      - name: List downloaded artifacts
+        if: steps.check-tag.outputs.is-tag == 'true'
+        run: |
+          echo "=== Downloaded artifacts ==="
+          find ./artifacts -type f -ls
+          echo "=== Artifact summary ==="
+          echo "DEB files: $(find ./artifacts -name "*.deb" | wc -l)"
+          echo "AppImage files: $(find ./artifacts -name "*.AppImage" | wc -l)"
+          echo "EXE files: $(find ./artifacts -name "*.exe" | wc -l)"
+          echo "MSI files: $(find ./artifacts -name "*.msi" | wc -l)"
+          echo "DMG files: $(find ./artifacts -name "*.dmg" | wc -l)"
+
       - name: Get version from pyproject.toml
         if: steps.check-tag.outputs.is-tag == 'true'
         id: get_version
         run: |
           version=$(grep "^version" pyproject.toml | cut -d'"' -f2)
-          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "version=${version}" >> $GITHUB_OUTPUT
 
       - name: Create release changelog
         if: steps.check-tag.outputs.is-tag == 'true'
         run: |
-          pip install git-cliff==2.4.0
-          git cliff --latest > RELEASE_CHANGELOG.md
+          # Install git-cliff using curl for more reliable installation
+          curl -L https://github.com/orhun/git-cliff/releases/download/v2.4.0/git-cliff-2.4.0-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          chmod +x git-cliff-2.4.0/git-cliff
+          ./git-cliff-2.4.0/git-cliff --latest > RELEASE_CHANGELOG.md || echo "# Release v${{ steps.get_version.outputs.version }}" > RELEASE_CHANGELOG.md
 
       - name: Create GitHub Release
         if: steps.check-tag.outputs.is-tag == 'true'
@@ -381,11 +395,6 @@ jobs:
           tag_name: ${{ steps.check-tag.outputs.tag-name }}
           name: DocuScope CA Desktop v${{ steps.get_version.outputs.version }}
           body_path: RELEASE_CHANGELOG.md
-          files: |
-            ./artifacts/**/*.deb
-            ./artifacts/**/*.AppImage
-            ./artifacts/**/*.exe
-            ./artifacts/**/*.msi
-            ./artifacts/**/*.dmg
+          files: ./artifacts/**/*
           draft: false
           prerelease: false
