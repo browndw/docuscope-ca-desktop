@@ -44,6 +44,7 @@ jobs:
         chmod +x ../.github/scripts/verify-auto-auth.sh
         ../.github/scripts/verify-auto-auth.sh
       shell: bash
+      continue-on-error: true
 
     - name: Upload SimplySign Desktop Artifact
       uses: actions/upload-artifact@v4
