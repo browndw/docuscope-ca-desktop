@@ -3,7 +3,8 @@
 # Verify SimplySign Desktop Automatic Authentication Configuration
 # Tests that the configuration was applied correctly
 
-set -euo pipefail
+# Enable strict mode but disable exit on error for debugging sections
+set -uo pipefail
 
 echo "=== Verifying SimplySign Desktop Configuration ==="
 
@@ -114,15 +115,24 @@ if command -v reg >/dev/null 2>&1; then
         if reg query "$reg_path" 2>/dev/null | grep -q "SimplySignDesktopShowLogonDialogAfterApplicationStartup"; then
             echo "   ✅ Found SimplySignDesktopShowLogonDialogAfterApplicationStartup"
             
-            # Get the value with improved parsing
+            # Disable exit on error for registry parsing section
+            set +e
+            
+            # Get the value with improved parsing (with error handling)
             echo "   🔍 Debugging registry output:"
-            REG_OUTPUT=$(reg query "$reg_path" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" 2>/dev/null)
+            REG_OUTPUT=$(reg query "$reg_path" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" 2>/dev/null || echo "")
             echo "   Raw output: $REG_OUTPUT"
             
-            # Try multiple parsing methods
-            VALUE1=$(echo "$REG_OUTPUT" | grep "REG_SZ" | awk '{print $3}' | tr -d '\r\n' || echo "")
-            VALUE2=$(echo "$REG_OUTPUT" | grep "REG_SZ" | sed 's/.*REG_SZ[[:space:]]*//' | tr -d '\r\n' || echo "")
-            VALUE3=$(echo "$REG_OUTPUT" | grep "SimplySignDesktopShowLogonDialogAfterApplicationStartup" | awk -F'REG_SZ' '{print $2}' | xargs || echo "")
+            # Try multiple parsing methods with error handling
+            VALUE1=""
+            VALUE2=""
+            VALUE3=""
+            
+            if [ -n "$REG_OUTPUT" ]; then
+                VALUE1=$(echo "$REG_OUTPUT" | grep "REG_SZ" | awk '{print $3}' 2>/dev/null | tr -d '\r\n' 2>/dev/null || echo "")
+                VALUE2=$(echo "$REG_OUTPUT" | grep "REG_SZ" | sed 's/.*REG_SZ[[:space:]]*//' 2>/dev/null | tr -d '\r\n' 2>/dev/null || echo "")
+                VALUE3=$(echo "$REG_OUTPUT" | grep "SimplySignDesktopShowLogonDialogAfterApplicationStartup" | awk -F'REG_SZ' '{print $2}' 2>/dev/null | xargs 2>/dev/null || echo "")
+            fi
             
             echo "   Parse method 1 (awk \$3): '$VALUE1'"
             echo "   Parse method 2 (sed): '$VALUE2'"
@@ -136,6 +146,11 @@ if command -v reg >/dev/null 2>&1; then
                     break
                 fi
             done
+            
+            echo "   🎯 Final extracted value: '$VALUE'"
+            
+            # Re-enable strict error handling
+            set -e
             
             if [ "$VALUE" = "Yes" ]; then
                 echo "   ✅ Value correctly set to: $VALUE"
@@ -277,6 +292,9 @@ DETECTION_DETAILS=""
 
 for ((i=1; i<=20; i++)); do
     if command -v powershell >/dev/null 2>&1; then
+        # Disable exit on error for PowerShell sections
+        set +e
+        
         # Windows-specific detection based on executable analysis:
         # - csLoginForm (login form class from strings analysis)
         # - CERTUM_ID_PROVIDER_NAME (Certum provider)
@@ -342,6 +360,9 @@ for ((i=1; i<=20; i++)); do
             }
         }
         " 2>/dev/null)
+        
+        # Re-enable strict error handling after PowerShell
+        set -e
         
         if [ -n "$DIALOG_CHECK" ]; then
             echo "   🔍 DETECTED WINDOWS: $DIALOG_CHECK"
