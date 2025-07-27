@@ -66,21 +66,57 @@ else
     if 7z x "$BUNDLE_FILE" -o"$EXTRACT_DIR" -y > /dev/null 2>&1; then
         echo "✅ Bundle extracted with 7z"
     else
-        echo "   7z extraction failed, trying manual execution..."
+        echo "   7z extraction failed, trying unzip..."
         
-        # Method 3: Run the executable and hope it extracts
-        cd "$EXTRACT_DIR"
-        if "../$BUNDLE_FILE" 2>/dev/null; then
-            echo "✅ Bundle extracted by execution"
-            cd ..
+        # Method 3: Try unzip (some executables are zip-based)
+        if unzip -q "$BUNDLE_FILE" -d "$EXTRACT_DIR" 2>/dev/null; then
+            echo "✅ Bundle extracted with unzip"
         else
-            cd ..
-            echo "❌ All extraction methods failed"
-            echo "Bundle file info:"
-            file "$BUNDLE_FILE" 2>/dev/null || echo "file command not available"
-            echo "Trying to list contents with 7z..."
-            7z l "$BUNDLE_FILE" 2>/dev/null | head -20 || echo "Cannot list contents"
-            exit 1
+            echo "   Unzip failed, trying manual execution with timeout..."
+            
+            # Method 4: Run the executable with timeout to prevent hanging
+            cd "$EXTRACT_DIR"
+            timeout 60s "../$BUNDLE_FILE" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$(cygpath -w "$PWD")" 2>/dev/null || {
+                echo "   Manual execution timed out or failed"
+                cd ..
+                
+                # Method 5: Try different extraction tools
+                echo "   Trying alternative extraction methods..."
+                
+                # Try with PowerShell Expand-Archive (for zip-based executables)
+                if command -v powershell >/dev/null 2>&1; then
+                    powershell -Command "
+                        try {
+                            Expand-Archive -Path '$(cygpath -w "$PWD/$BUNDLE_FILE")' -DestinationPath '$(cygpath -w "$PWD/$EXTRACT_DIR")' -Force
+                            Write-Host 'Extracted with PowerShell Expand-Archive'
+                        } catch {
+                            Write-Host 'PowerShell extraction failed'
+                            exit 1
+                        }
+                    " 2>/dev/null && echo "✅ Bundle extracted with PowerShell" || {
+                        echo "❌ All extraction methods failed"
+                        echo "Bundle file info:"
+                        file "$BUNDLE_FILE" 2>/dev/null || echo "file command not available"
+                        echo ""
+                        echo "🔍 Analyzing bundle structure..."
+                        echo "File size: $(du -h "$BUNDLE_FILE" | cut -f1)"
+                        echo "File type: $(file "$BUNDLE_FILE" 2>/dev/null || echo "Unknown")"
+                        echo ""
+                        echo "📋 Available extraction tools:"
+                        command -v 7z >/dev/null && echo "  ✅ 7z available" || echo "  ❌ 7z not available"
+                        command -v unzip >/dev/null && echo "  ✅ unzip available" || echo "  ❌ unzip not available"
+                        command -v powershell >/dev/null && echo "  ✅ PowerShell available" || echo "  ❌ PowerShell not available"
+                        exit 1
+                    }
+                else
+                    echo "❌ All extraction methods failed - PowerShell not available"
+                    exit 1
+                fi
+            }
+            
+            if [ "$PWD" != "$(dirname "$0")" ]; then
+                cd ..
+            fi
         fi
     fi
 fi
