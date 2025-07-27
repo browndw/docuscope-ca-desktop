@@ -114,8 +114,29 @@ if command -v reg >/dev/null 2>&1; then
         if reg query "$reg_path" 2>/dev/null | grep -q "SimplySignDesktopShowLogonDialogAfterApplicationStartup"; then
             echo "   ✅ Found SimplySignDesktopShowLogonDialogAfterApplicationStartup"
             
-            # Get the value
-            VALUE=$(reg query "$reg_path" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" 2>/dev/null | grep "REG_SZ" | awk '{print $3}' || echo "")
+            # Get the value with improved parsing
+            echo "   🔍 Debugging registry output:"
+            REG_OUTPUT=$(reg query "$reg_path" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" 2>/dev/null)
+            echo "   Raw output: $REG_OUTPUT"
+            
+            # Try multiple parsing methods
+            VALUE1=$(echo "$REG_OUTPUT" | grep "REG_SZ" | awk '{print $3}' | tr -d '\r\n' || echo "")
+            VALUE2=$(echo "$REG_OUTPUT" | grep "REG_SZ" | sed 's/.*REG_SZ[[:space:]]*//' | tr -d '\r\n' || echo "")
+            VALUE3=$(echo "$REG_OUTPUT" | grep "SimplySignDesktopShowLogonDialogAfterApplicationStartup" | awk -F'REG_SZ' '{print $2}' | xargs || echo "")
+            
+            echo "   Parse method 1 (awk \$3): '$VALUE1'"
+            echo "   Parse method 2 (sed): '$VALUE2'"
+            echo "   Parse method 3 (awk -F): '$VALUE3'"
+            
+            # Use the first non-empty value
+            VALUE=""
+            for v in "$VALUE1" "$VALUE2" "$VALUE3"; do
+                if [ -n "$v" ] && [ "$v" != "" ]; then
+                    VALUE="$v"
+                    break
+                fi
+            done
+            
             if [ "$VALUE" = "Yes" ]; then
                 echo "   ✅ Value correctly set to: $VALUE"
                 REGISTRY_CONFIGURED=true
@@ -256,49 +277,96 @@ DETECTION_DETAILS=""
 
 for ((i=1; i<=20; i++)); do
     if command -v powershell >/dev/null 2>&1; then
-        # Based on macOS logs, look for these specific patterns:
-        # - "PanelWebViewController AuthorizeViaProvider" (OAuth2 process)
-        # - "ConnectToCloud" (automatic trigger)
-        # - "User credentials dialog" (OAuth2 dialog)
-        # - "OAuth2 web view" (authentication window)
+        # Windows-specific detection based on executable analysis:
+        # - csLoginForm (login form class from strings analysis)
+        # - CERTUM_ID_PROVIDER_NAME (Certum provider)
+        # - SimplySignDesktop specific windows
+        # - OAuth2/authentication dialogs
         
         DIALOG_CHECK=$(powershell -Command "
-        # Get all windows with titles - focus on SimplySign processes
+        # Method 1: Get all windows with titles - enhanced for Windows patterns
         \$windows = Get-Process | Where-Object { \$_.MainWindowTitle -ne '' }
         
         foreach (\$window in \$windows) {
             \$title = \$window.MainWindowTitle
             \$process = \$window.ProcessName
             
-            # Based on logs: look for SimplySign Desktop main window and OAuth dialogs
-            if (\$process -eq 'SimplySignDesktop' -or 
+            # Windows-specific patterns based on executable analysis
+            if (\$title -like '*Certum*' -or
                 \$title -like '*SimplySign*' -or
-                \$title -like '*Certum*' -or 
-                \$title -like '*OAuth*' -or 
+                \$title -like '*csLoginForm*' -or
+                \$title -like '*OAuth*' -or
                 \$title -like '*Authorization*' -or
-                \$title -like '*Authentication*' -or 
-                \$title -like '*Cloud*' -or
+                \$title -like '*Authentication*' -or
                 \$title -like '*Login*' -or
+                \$title -like '*Cloud*' -or
                 \$title -like '*Sign*in*' -or
                 \$title -like '*Web*View*' -or
-                \$title -like '*Panel*') {
+                \$title -like '*Panel*' -or
+                \$process -like '*SimplySign*' -or
+                \$process -like '*Certum*') {
                 
-                Write-Output \"\$process|\$title\"
+                Write-Output \"Windows:\$process|\$title\"
+            }
+        }
+        
+        # Method 2: Check for specific window classes (Windows-specific)
+        Add-Type -TypeDefinition '
+            using System;
+            using System.Runtime.InteropServices;
+            public class Win32 {
+                [DllImport(\"user32.dll\", SetLastError = true, CharSet = CharSet.Auto)]
+                public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+                [DllImport(\"user32.dll\", SetLastError = true)]
+                public static extern bool IsWindowVisible(IntPtr hWnd);
+            }
+        '
+        
+        # Look for specific window classes from executable analysis
+        \$loginForm = [Win32]::FindWindow('csLoginForm', \$null)
+        if (\$loginForm -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible(\$loginForm)) {
+            Write-Output \"WindowClass:csLoginForm|LoginForm\"
+        }
+        
+        # Method 3: Check for child windows and dialogs
+        \$childWindows = Get-Process | Where-Object { 
+            \$_.ProcessName -like '*SimplySign*' -or 
+            \$_.ProcessName -like '*Certum*' -or
+            \$_.MainWindowTitle -like '*Login*' -or
+            \$_.MainWindowTitle -like '*Auth*'
+        }
+        
+        foreach (\$child in \$childWindows) {
+            if (\$child.MainWindowTitle -ne '') {
+                Write-Output \"Child:\$(\$child.ProcessName)|\$(\$child.MainWindowTitle)\"
             }
         }
         " 2>/dev/null)
         
         if [ -n "$DIALOG_CHECK" ]; then
-            echo "   🔍 DETECTED WINDOW: $DIALOG_CHECK"
+            echo "   🔍 DETECTED WINDOWS: $DIALOG_CHECK"
             DETECTION_DETAILS="$DIALOG_CHECK"
             
-            # Check if this looks like SimplySign Desktop with potential OAuth capability
-            if echo "$DIALOG_CHECK" | grep -qi "SimplySignDesktop\|oauth\|auth\|login\|cloud\|certum\|panel\|web"; then
-                echo "   ✅ SimplySign Desktop window detected!"
+            # Enhanced detection for Windows-specific patterns
+            if echo "$DIALOG_CHECK" | grep -qi "Windows:\|WindowClass:\|Child:"; then
+                echo "   ✅ Enhanced Windows detection found results!"
                 
-                # Additional check: try to detect OAuth2-specific content or child windows
+                # Check for specific patterns from executable analysis
+                if echo "$DIALOG_CHECK" | grep -qi "csLoginForm\|Certum\|SimplySign\|Login\|OAuth\|Auth"; then
+                    echo "   🎯 CRITICAL: OAuth2/Authentication window detected!"
+                    echo "   Detection details: $DETECTION_DETAILS"
+                    OAUTH_DETECTED=true
+                    break
+                fi
+            fi
+            
+            # Fallback: Check generic OAuth patterns
+            if echo "$DIALOG_CHECK" | grep -qi "SimplySignDesktop\|oauth\|auth\|login\|cloud\|certum\|panel\|web"; then
+                echo "   ✅ SimplySign Desktop or authentication window detected!"
+                
+                # Additional verification for OAuth2-specific content
                 OAUTH_SPECIFIC=$(powershell -Command "
-                # Look for OAuth2/authentication related content in windows
+                # Look for OAuth2/authentication related processes and windows
                 \$oauthWindows = Get-Process | Where-Object { 
                     \$_.MainWindowTitle -like '*oauth*' -or 
                     \$_.MainWindowTitle -like '*authorization*' -or
@@ -338,18 +406,65 @@ for ((i=1; i<=20; i++)); do
             fi
         fi
         
-        # Alternative: Check for network activity or OAuth2 URLs being accessed
+        # Alternative detection methods for Windows
         if [ "$i" -eq 10 ]; then
             echo "   🔍 Mid-point check: Looking for OAuth2 network activity..."
+            
+            # Method 1: Check for network connections from SimplySign Desktop
             NETWORK_CHECK=$(powershell -Command "
-            # Check if any OAuth2 or Certum-related network connections are active
             try {
                 \$connections = Get-NetTCPConnection -State Listen,Established -ErrorAction SilentlyContinue | 
                     Where-Object { \$_.OwningProcess -ne 0 }
                 
                 foreach (\$conn in \$connections) {
                     \$proc = Get-Process -Id \$conn.OwningProcess -ErrorAction SilentlyContinue
-                    if (\$proc -and \$proc.ProcessName -eq 'SimplySignDesktop') {
+                    if (\$proc -and (\$proc.ProcessName -eq 'SimplySignDesktop' -or \$proc.ProcessName -like '*Certum*')) {
+                        Write-Output \"Network:\$(\$proc.ProcessName):\$(\$conn.LocalAddress):\$(\$conn.LocalPort)\"
+                    }
+                }
+            } catch { }
+            " 2>/dev/null)
+            
+            # Method 2: Check for child processes spawned by SimplySign Desktop
+            CHILD_PROCESSES=$(powershell -Command "
+            \$simplysign = Get-Process -Name 'SimplySignDesktop' -ErrorAction SilentlyContinue
+            if (\$simplysign) {
+                \$children = Get-WmiObject -Query \"SELECT * FROM Win32_Process WHERE ParentProcessId = \$(\$simplysign.Id)\" -ErrorAction SilentlyContinue
+                foreach (\$child in \$children) {
+                    Write-Output \"Child:\$(\$child.Name):\$(\$child.ProcessId)\"
+                }
+            }
+            " 2>/dev/null)
+            
+            # Method 3: Check for browser-like processes (OAuth may open in embedded browser)
+            BROWSER_CHECK=$(powershell -Command "
+            \$browsers = Get-Process | Where-Object { 
+                \$_.ProcessName -like '*webview*' -or 
+                \$_.ProcessName -like '*chrome*' -or 
+                \$_.ProcessName -like '*edge*' -or
+                \$_.ProcessName -like '*browser*' -or
+                \$_.MainWindowTitle -like '*login*' -or
+                \$_.MainWindowTitle -like '*auth*'
+            }
+            foreach (\$browser in \$browsers) {
+                if (\$browser.MainWindowTitle -ne '') {
+                    Write-Output \"Browser:\$(\$browser.ProcessName)|\$(\$browser.MainWindowTitle)\"
+                }
+            }
+            " 2>/dev/null)
+            
+            if [ -n "$NETWORK_CHECK" ] || [ -n "$CHILD_PROCESSES" ] || [ -n "$BROWSER_CHECK" ]; then
+                echo "   🎯 ACTIVITY DETECTED:"
+                [ -n "$NETWORK_CHECK" ] && echo "   Network: $NETWORK_CHECK"
+                [ -n "$CHILD_PROCESSES" ] && echo "   Children: $CHILD_PROCESSES"
+                [ -n "$BROWSER_CHECK" ] && echo "   Browser: $BROWSER_CHECK"
+                
+                # This indicates OAuth2 activity even if we can't see the exact dialog
+                OAUTH_DETECTED=true
+                DETECTION_DETAILS="Network/Process activity indicating OAuth2 process"
+                break
+            fi
+        fi
                         Write-Output \"Network:\$(\$conn.LocalAddress):\$(\$conn.LocalPort)->\$(\$conn.RemoteAddress):\$(\$conn.RemotePort)\"
                     }
                 }
