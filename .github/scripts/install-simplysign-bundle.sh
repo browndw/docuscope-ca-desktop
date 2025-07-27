@@ -7,18 +7,33 @@ set -euo pipefail
 
 echo "=== Installing SimplySign Desktop from Windows Bundle ==="
 
-# Bundle location
-BUNDLE_FILE="../_simplysign_windows_exe/SimplySignDesktop-9.3.2.67-win-64-bit.exe"
+# Bundle download URL and local file
+BUNDLE_URL="https://files.certum.eu/software/SimplySignDesktop/Windows/9.3.2.67/SimplySignDesktop-9.3.2.67-win-64-bit.exe"
+BUNDLE_FILE="SimplySignDesktop-9.3.2.67-win-64-bit.exe"
 EXTRACT_DIR="bundle_extracted"
 INSTALL_DIR="/c/Program Files/Certum"
 
-# Check if bundle exists
+# Download the bundle if not already present
 if [ ! -f "$BUNDLE_FILE" ]; then
-  echo "❌ Bundle not found: $BUNDLE_FILE"
-  exit 1
+  echo "📥 Downloading SimplySign Desktop bundle..."
+  echo "   URL: $BUNDLE_URL"
+  
+  if command -v curl >/dev/null 2>&1; then
+    curl -L -o "$BUNDLE_FILE" "$BUNDLE_URL"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$BUNDLE_FILE" "$BUNDLE_URL"
+  else
+    echo "❌ Neither curl nor wget available for download"
+    exit 1
+  fi
+  
+  if [ ! -f "$BUNDLE_FILE" ]; then
+    echo "❌ Failed to download bundle"
+    exit 1
+  fi
 fi
 
-echo "✅ Bundle found: $BUNDLE_FILE ($(du -h "$BUNDLE_FILE" | cut -f1))"
+echo "✅ Bundle ready: $BUNDLE_FILE ($(du -h "$BUNDLE_FILE" | cut -f1))"
 
 # Install 7-Zip if not available
 if ! command -v 7z >/dev/null 2>&1; then
