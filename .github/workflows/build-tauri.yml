@@ -331,7 +331,7 @@ jobs:
           retention-days: 30
 
   create-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && needs.build-tauri.result == 'success'
     needs: build-tauri
     runs-on: ubuntu-latest
     steps:
@@ -340,27 +340,45 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check if this is a tag-triggered build
+        id: check-tag
+        run: |
+          # Check if any tag exists at the current commit
+          CURRENT_TAG=$(git tag --points-at HEAD | grep '^v' | head -1)
+          if [[ -n "$CURRENT_TAG" ]]; then
+            echo "Found tag: $CURRENT_TAG"
+            echo "is-tag=true" >> $GITHUB_OUTPUT
+            echo "tag-name=$CURRENT_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "No version tag found at current commit"
+            echo "is-tag=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Download all artifacts
+        if: steps.check-tag.outputs.is-tag == 'true'
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
           merge-multiple: true
 
       - name: Get version from pyproject.toml
+        if: steps.check-tag.outputs.is-tag == 'true'
         id: get_version
         run: |
           version=$(grep "^version" pyproject.toml | cut -d'"' -f2)
           echo "version=$version" >> $GITHUB_OUTPUT
 
       - name: Create release changelog
+        if: steps.check-tag.outputs.is-tag == 'true'
         run: |
           pip install git-cliff==2.4.0
           git cliff --latest > RELEASE_CHANGELOG.md
 
       - name: Create GitHub Release
+        if: steps.check-tag.outputs.is-tag == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.get_version.outputs.version }}
+          tag_name: ${{ steps.check-tag.outputs.tag-name }}
           name: DocuScope CA Desktop v${{ steps.get_version.outputs.version }}
           body_path: RELEASE_CHANGELOG.md
           files: |
