@@ -48,12 +48,51 @@ echo "📂 Extracting Windows bundle..."
 rm -rf "$EXTRACT_DIR"
 mkdir -p "$EXTRACT_DIR"
 
-# Extract using 7z (the bundle is 7z-based)
-if 7z x "$BUNDLE_FILE" -o"$EXTRACT_DIR" -y > /dev/null; then
-  echo "✅ Bundle extracted successfully"
+# The bundle is a self-extracting executable, not a 7z archive
+# Try multiple extraction methods
+
+echo "   Attempting silent extraction..."
+# Method 1: Try silent extraction flags
+if "$BUNDLE_FILE" /S /EXTRACT:"$(cygpath -w "$PWD/$EXTRACT_DIR")" 2>/dev/null; then
+    echo "✅ Bundle extracted with /S /EXTRACT"
+elif "$BUNDLE_FILE" /SILENT /DIR:"$(cygpath -w "$PWD/$EXTRACT_DIR")" 2>/dev/null; then
+    echo "✅ Bundle extracted with /SILENT /DIR"
+elif "$BUNDLE_FILE" -o"$EXTRACT_DIR" -y 2>/dev/null; then
+    echo "✅ Bundle extracted with -o -y"
 else
-  echo "❌ Failed to extract bundle"
-  exit 1
+    echo "   Silent extraction failed, trying 7z extraction..."
+    
+    # Method 2: Try 7z extraction (sometimes works with self-extractors)
+    if 7z x "$BUNDLE_FILE" -o"$EXTRACT_DIR" -y > /dev/null 2>&1; then
+        echo "✅ Bundle extracted with 7z"
+    else
+        echo "   7z extraction failed, trying manual execution..."
+        
+        # Method 3: Run the executable and hope it extracts
+        cd "$EXTRACT_DIR"
+        if "../$BUNDLE_FILE" 2>/dev/null; then
+            echo "✅ Bundle extracted by execution"
+            cd ..
+        else
+            cd ..
+            echo "❌ All extraction methods failed"
+            echo "Bundle file info:"
+            file "$BUNDLE_FILE" 2>/dev/null || echo "file command not available"
+            echo "Trying to list contents with 7z..."
+            7z l "$BUNDLE_FILE" 2>/dev/null | head -20 || echo "Cannot list contents"
+            exit 1
+        fi
+    fi
+fi
+
+# Check if extraction was successful
+if [ ! -d "$EXTRACT_DIR" ] || [ -z "$(ls -A "$EXTRACT_DIR" 2>/dev/null)" ]; then
+    echo "❌ Extraction directory is empty"
+    exit 1
+else
+    echo "✅ Bundle extracted successfully"
+    EXTRACTED_SIZE=$(du -sh "$EXTRACT_DIR" | cut -f1)
+    echo "   Extracted size: $EXTRACTED_SIZE"
 fi
 
 # Find SimplySign Desktop within the extracted bundle
