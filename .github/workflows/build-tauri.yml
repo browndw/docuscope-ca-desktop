@@ -6,7 +6,6 @@ on:
   workflow_run:
     workflows: ["Build Python Binary"]
     types: [completed]
-    branches: [main]
 
 defaults:
   run:
