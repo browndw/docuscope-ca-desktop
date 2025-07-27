@@ -62,10 +62,7 @@ if [ "$TESTING_PACKAGE" = true ]; then
                 
                 if command -v reg >/dev/null 2>&1; then
                     # Try importing and capture output
-                    import_output=$(reg import "$win_path" 2>&1)
-                    import_result=$?
-                    
-                    if [ $import_result -eq 0 ]; then
+                    if reg import "$win_path" 2>&1; then
                         echo "     ✅ Successfully imported $(basename "$reg_file")"
                         REG_FILES_IMPORTED=true
                     else
@@ -89,6 +86,15 @@ if [ "$TESTING_PACKAGE" = true ]; then
             echo "✅ Registry configuration applied"
             echo "   Waiting 3 seconds for registry to settle..."
             sleep 3
+            
+            # Since .reg import may be silently failing, ensure manual registry addition
+            echo "🔧 Ensuring registry values are set manually as backup..."
+            reg add "HKEY_CURRENT_USER\\Software\\Certum\\SimplySign Desktop" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null && echo "   ✅ Manual Certum key ensured"
+            reg add "HKEY_CURRENT_USER\\Software\\SimplySignDesktop" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null && echo "   ✅ Manual SimplySign key ensured"
+            reg add "HKEY_CURRENT_USER\\Software\\Asseco\\SimplySign Desktop" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null && echo "   ✅ Manual Asseco key ensured"
+            
+            echo "   Waiting 2 more seconds for manual registry changes to settle..."
+            sleep 2
         else
             echo "⚠️ No registry files successfully imported"
         fi
@@ -484,18 +490,6 @@ for ((i=1; i<=20; i++)); do
                 OAUTH_DETECTED=true
                 DETECTION_DETAILS="Network/Process activity indicating OAuth2 process"
                 break
-            fi
-        fi
-                        Write-Output \"Network:\$(\$conn.LocalAddress):\$(\$conn.LocalPort)->\$(\$conn.RemoteAddress):\$(\$conn.RemotePort)\"
-                    }
-                }
-            } catch {
-                Write-Output \"NetworkCheck:NotAvailable\"
-            }
-            " 2>/dev/null)
-            
-            if [ -n "$NETWORK_CHECK" ]; then
-                echo "   🌐 SimplySign Desktop network activity: $NETWORK_CHECK"
             fi
         fi
     fi
