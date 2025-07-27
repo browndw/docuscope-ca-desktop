@@ -222,16 +222,15 @@ jobs:
               case "$STATUS" in
                 "Accepted")
                   echo "=== Python binary notarization SUCCESSFUL ==="
-                  echo "Stapling notarization to zip file first..."
-                  xcrun stapler staple "entrypoint-${{ matrix.target }}.zip"
-                  echo "Extracting stapled binary from zip..."
-                  unzip -o "entrypoint-${{ matrix.target }}.zip" -d temp_extract/
-                  cp temp_extract/entrypoint ./dist/entrypoint
-                  chmod +x ./dist/entrypoint
-                  rm -rf temp_extract/
-                  echo "Verifying stapled binary..."
-                  xcrun stapler validate ./dist/entrypoint
-                  echo "Notarization stapled and verified successfully"
+                  echo "NOTE: For standalone binaries, the notarization ticket is automatically"
+                  echo "associated with the binary during the notarization process."
+                  echo "No separate stapling step is required for single executables."
+                  echo ""
+                  echo "Verifying the notarized binary..."
+                  # The binary is already notarized, we just need to verify it
+                  spctl --assess --type execute --verbose ./dist/entrypoint
+                  echo "Binary notarization verified successfully"
+                  echo "The binary is now properly notarized and ready for distribution"
                   break
                   ;;
                 "Rejected")
