@@ -53,9 +53,31 @@ if [ "$TESTING_PACKAGE" = true ]; then
         for reg_file in ./registry/*.reg; do
             if [ -f "$reg_file" ]; then
                 echo "   Importing: $(basename "$reg_file")"
+                echo "   File size: $(wc -c < "$reg_file") bytes"
+                
+                # Convert to Windows path
+                win_path=$(cygpath -w "$reg_file")
+                echo "   Windows path: $win_path"
+                
                 if command -v reg >/dev/null 2>&1; then
-                    reg import "$(cygpath -w "$reg_file")" 2>/dev/null && echo "     ✅ Successfully imported $(basename "$reg_file")" || echo "     ⚠️ Failed to import $(basename "$reg_file")"
-                    REG_FILES_IMPORTED=true
+                    # Try importing and capture output
+                    import_output=$(reg import "$win_path" 2>&1)
+                    import_result=$?
+                    
+                    if [ $import_result -eq 0 ]; then
+                        echo "     ✅ Successfully imported $(basename "$reg_file")"
+                        REG_FILES_IMPORTED=true
+                    else
+                        echo "     ⚠️ Failed to import $(basename "$reg_file")"
+                        echo "     Error output: $import_output"
+                        
+                        # Try manual registry addition as fallback
+                        echo "     🔧 Trying manual registry addition as fallback..."
+                        reg add "HKEY_CURRENT_USER\\Software\\Certum\\SimplySign Desktop" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null && echo "     ✅ Manual Certum key added"
+                        reg add "HKEY_CURRENT_USER\\Software\\SimplySignDesktop" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null && echo "     ✅ Manual SimplySign key added"
+                        reg add "HKEY_CURRENT_USER\\Software\\Asseco\\SimplySign Desktop" /v "SimplySignDesktopShowLogonDialogAfterApplicationStartup" /t REG_SZ /d "Yes" /f 2>/dev/null && echo "     ✅ Manual Asseco key added"
+                        REG_FILES_IMPORTED=true
+                    fi
                 else
                     echo "     ⚠️ Registry command not available"
                 fi
@@ -63,9 +85,9 @@ if [ "$TESTING_PACKAGE" = true ]; then
         done
         
         if [ "$REG_FILES_IMPORTED" = true ]; then
-            echo "✅ Registry files imported from package"
-            echo "   Waiting 2 seconds for registry to settle..."
-            sleep 2
+            echo "✅ Registry configuration applied"
+            echo "   Waiting 3 seconds for registry to settle..."
+            sleep 3
         else
             echo "⚠️ No registry files successfully imported"
         fi
