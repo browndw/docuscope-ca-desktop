@@ -47,19 +47,56 @@ fi
 
 # Perform code signing
 echo "Signing binary with Certum certificate..."
-echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
 
-if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH"; then
-  echo "✅ Code signing successful!"
+# Try multiple certificate store locations for cloud certificates
+echo "Attempting signing with various certificate store parameters..."
+
+# Method 1: Default (Current User Personal store)
+echo "Method 1: Default certificate lookup"
+echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
+if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH" 2>/dev/null; then
+  echo "✅ Code signing successful with default method!"
+else
+  echo "Method 1 failed, trying Method 2..."
   
-  # Verify the signature
-  echo "Verifying signature..."
-  if "$SIGNTOOL_PATH" verify /pa "$BINARY_PATH"; then
-    echo "✅ Signature verification successful!"
+  # Method 2: Explicitly specify Current User MY store
+  echo "Method 2: Current User Personal (MY) store"
+  echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /s MY /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
+  if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /s MY /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH" 2>/dev/null; then
+    echo "✅ Code signing successful with MY store!"
+  else
+    echo "Method 2 failed, trying Method 3..."
     
-    # Get signature info
-    echo "Signature details:"
-    "$SIGNTOOL_PATH" verify /pa /v "$BINARY_PATH" | head -20
+    # Method 3: Local Machine Personal store
+    echo "Method 3: Local Machine Personal (MY) store"
+    echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /s MY /sm /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
+    if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /s MY /sm /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH" 2>/dev/null; then
+      echo "✅ Code signing successful with Local Machine MY store!"
+    else
+      echo "Method 3 failed, trying Method 4..."
+      
+      # Method 4: Try ROOT store (sometimes cloud certs end up here)
+      echo "Method 4: ROOT certificate store"
+      echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /s ROOT /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
+      if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /s ROOT /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH" 2>/dev/null; then
+        echo "✅ Code signing successful with ROOT store!"
+      else
+        echo "❌ All certificate store methods failed"
+        echo "Certificate may not be accessible or SHA1 may be incorrect"
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+# Verify the signature (common for all successful signing methods)
+echo "Verifying signature..."
+if "$SIGNTOOL_PATH" verify /pa "$BINARY_PATH"; then
+  echo "✅ Signature verification successful!"
+  
+  # Get signature info
+  echo "Signature details:"
+  "$SIGNTOOL_PATH" verify /pa /v "$BINARY_PATH" | head -20
     
     echo ""
     echo "🎉 Code signing completed successfully!"
