@@ -18,11 +18,11 @@ echo "   Example: otpauth://totp/Certum?secret=ABCDEFGHIJKLMNOP&issuer=Certum"
 echo "   Status: $([ -n "${CERTUM_OTP_URI:-}" ] && echo "✅ Set" || echo "❌ Missing")"
 echo ""
 
-echo "2. CERTUM_USERID"
+echo "2. CERTUM_USERNAME"
 echo "   Description: Your Certum email address (username)"
 echo "   Format: email@domain.com"
 echo "   Example: john.doe@company.com"
-echo "   Status: $([ -n "${CERTUM_USERID:-}" ] && echo "✅ Set" || echo "❌ Missing")"
+echo "   Status: $([ -n "${CERTUM_USERNAME:-}" ] && echo "✅ Set" || echo "❌ Missing")"
 echo ""
 
 echo "3. CERTUM_CERTIFICATE_SHA1"
@@ -76,7 +76,7 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
     echo ""
     echo "Environment Check:"
     echo "  CERTUM_OTP_URI: $([ -n "${CERTUM_OTP_URI:-}" ] && echo "Present (${#CERTUM_OTP_URI} chars)" || echo "Missing")"
-    echo "  CERTUM_USERID: $([ -n "${CERTUM_USERID:-}" ] && echo "Present" || echo "Missing")"
+    echo "  CERTUM_USERNAME: $([ -n "${CERTUM_USERNAME:-}" ] && echo "Present" || echo "Missing")"
     echo "  CERTUM_CERTIFICATE_SHA1: $([ -n "${CERTUM_CERTIFICATE_SHA1:-}" ] && echo "Present" || echo "Missing")"
 else
     echo "💻 Running locally - GitHub secrets not available here"
