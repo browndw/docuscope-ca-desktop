@@ -63,33 +63,56 @@ jobs:
         run: |
           Write-Host "Locating SimplySign Desktop installation..."
           
-          # Common installation paths
-          $possiblePaths = @(
-            "${env:ProgramFiles}\SimplySign Desktop\SimplySign Desktop.exe",
-            "${env:ProgramFiles(x86)}\SimplySign Desktop\SimplySign Desktop.exe",
-            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySign Desktop.exe",
-            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySign Desktop.exe"
+          # Use the same proven logic as install-simplysign.sh
+          $installDirs = @(
+            "${env:ProgramFiles}\Certum\SimplySign Desktop",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop",
+            "${env:ProgramFiles}\SimplySign Desktop",
+            "${env:ProgramFiles(x86)}\SimplySign Desktop"
           )
           
+          $installPath = $null
           $exePath = $null
-          foreach ($path in $possiblePaths) {
-            if (Test-Path $path) {
-              $exePath = $path
-              Write-Host "✅ Found SimplySign Desktop at: $path"
-              break
+          
+          foreach ($dir in $installDirs) {
+            if (Test-Path $dir) {
+              $installPath = $dir
+              Write-Host "✅ Found SimplySign Desktop directory at: $dir"
+              
+              # Look for executable in the directory
+              $possibleExes = @(
+                "$dir\SimplySign Desktop.exe",
+                "$dir\SimplySignDesktop.exe", 
+                "$dir\simplysign.exe"
+              )
+              
+              foreach ($exe in $possibleExes) {
+                if (Test-Path $exe) {
+                  $exePath = $exe
+                  Write-Host "✅ Found executable at: $exe"
+                  break
+                }
+              }
+              
+              if ($exePath) { break }
             }
           }
           
-          if (-not $exePath) {
-            Write-Host "❌ SimplySign Desktop executable not found in standard locations"
-            
-            # Search more broadly
-            Write-Host "Searching for SimplySign*.exe files..."
-            $foundFiles = Get-ChildItem -Path "C:\Program Files*" -Recurse -Name "*SimplySign*.exe" -ErrorAction SilentlyContinue
-            if ($foundFiles) {
-              Write-Host "Found potential files:"
-              $foundFiles | ForEach-Object { Write-Host "  $_" }
+          if (-not $installPath) {
+            Write-Host "❌ SimplySign Desktop installation directory not found"
+            Write-Host "Searching for installation directories..."
+            $foundDirs = Get-ChildItem -Path "C:\Program Files*" -Recurse -Directory -Name "*SimplySign*" -ErrorAction SilentlyContinue | Select-Object -First 10
+            if ($foundDirs) {
+              Write-Host "Found potential directories:"
+              $foundDirs | ForEach-Object { Write-Host "  $_" }
             }
+            exit 1
+          }
+          
+          if (-not $exePath) {
+            Write-Host "❌ SimplySign Desktop executable not found in: $installPath"
+            Write-Host "Directory contents:"
+            Get-ChildItem $installPath | ForEach-Object { Write-Host "  $($_.Name)" }
             exit 1
           }
           
