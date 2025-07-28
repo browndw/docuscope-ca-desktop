@@ -41,22 +41,25 @@ echo "🔧 Step 2: Finding PKCS#11-compatible signing tools..."
 SIGNING_TOOL=""
 TOOL_TYPE=""
 
-# Try osslsigncode first (best PKCS#11 support)
-if find_pkcs11_signing_tool; then
-  SIGNING_TOOL="$OSSLSIGNCODE_PATH"
-  TOOL_TYPE="osslsigncode"
-  echo "✅ Will use osslsigncode for PKCS#11 signing"
-elif install_osslsigncode; then
-  SIGNING_TOOL="$OSSLSIGNCODE_PATH"
-  TOOL_TYPE="osslsigncode"
-  echo "✅ osslsigncode installed and ready"
+# FORCE signtool priority - always try signtool first for Windows compatibility
+echo "🎯 FORCING signtool priority for Windows certificate integration..."
+
+# Look for signtool first
+if find_signtool; then
+  SIGNING_TOOL="$SIGNTOOL_PATH"
+  TOOL_TYPE="signtool"
+  echo "✅ Will use signtool with smart card auto-select (PRIORITY)"
+  echo "   (osslsigncode available but signtool preferred for Windows compatibility)"
 else
-  # Fallback to signtool with smart card detection
-  echo "⚠️ osslsigncode not available, trying signtool fallback..."
-  if find_signtool; then
-    SIGNING_TOOL="$SIGNTOOL_PATH"
-    TOOL_TYPE="signtool"
-    echo "✅ Will use signtool with smart card auto-select"
+  echo "⚠️ signtool not found, falling back to osslsigncode..."
+  if find_pkcs11_signing_tool; then
+    SIGNING_TOOL="$OSSLSIGNCODE_PATH"
+    TOOL_TYPE="osslsigncode"
+    echo "✅ Will use osslsigncode for PKCS#11 signing (FALLBACK)"
+  elif install_osslsigncode; then
+    SIGNING_TOOL="$OSSLSIGNCODE_PATH"
+    TOOL_TYPE="osslsigncode"
+    echo "✅ osslsigncode installed and ready (FALLBACK)"
   else
     echo "❌ No compatible signing tools found"
     exit 1
@@ -65,17 +68,6 @@ fi
 # Step 3: Perform code signing
 echo ""
 echo "🔐 Step 3: Performing PKCS#11 code signing..."
-
-# Add certificate debugging based on tool type
-if [ "$TOOL_TYPE" == "osslsigncode" ]; then
-  echo "🔍 Debugging: Checking what certificates osslsigncode can see..."
-  echo "Available certificate stores for osslsigncode:"
-  "$SIGNING_TOOL" help 2>/dev/null || echo "osslsigncode help not available"
-  
-  echo ""
-  echo "Attempting to list certificates with osslsigncode..."
-  # Try to get certificate info - osslsigncode doesn't have a list command, so we'll try signing with verbose
-fi
 
 case "$TOOL_TYPE" in
   "osslsigncode")
