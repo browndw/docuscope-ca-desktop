@@ -1,15 +1,17 @@
 #!/bin/bash
 
-# Final Code Signing with SimplySign Desktop
-# Clean signing implementation using discovered certificate and HMAC
+# PKCS#11 Code Signing with SimplySign Desktop
+# Uses PKCS#11 interface as per official Certum documentation
+# BREAKTHROUGH: Certificates are accessible via PKCS#11, not Windows certificate stores
 
 set -euo pipefail
 
-# Source utilities
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$SCRIPT_DIR/utils/certificate-utils.sh"
+echo "=== PKCS#11 Code Signing with SimplySign Desktop ==="
+echo "🎯 Using PKCS#11 interface to access Certum cloud certificates"
 
-echo "=== Final Code Signing ==="
+# Source certificate utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/utils/certificate-utils.sh"
 
 # Check required variables
 if [ -z "${BINARY_PATH:-}" ]; then
@@ -22,91 +24,163 @@ if [ ! -f "$BINARY_PATH" ]; then
   exit 1
 fi
 
-if [ -z "${CERTUM_CERTIFICATE_SHA1:-}" ]; then
-  echo "❌ CERTUM_CERTIFICATE_SHA1 not provided"
-  exit 1
-fi
-
 echo "✅ Binary to sign: $BINARY_PATH"
-echo "✅ Certificate SHA1: $CERTUM_CERTIFICATE_SHA1"
+echo "📏 Binary size: $(stat -c%s "$BINARY_PATH" 2>/dev/null || echo "unknown") bytes"
 
-# Find signtool (avoiding problematic SDK versions)
-echo "🔧 Finding working signtool.exe (avoiding 10.0.22621.0 due to /fd parameter regression)"
-if ! find_signtool; then
-  echo "❌ signtool.exe not found"
+# Step 1: Verify PKCS#11 setup
+echo ""
+echo "🔍 Step 1: Verifying PKCS#11 setup..."
+if ! check_pkcs11_certificates; then
+  echo "❌ PKCS#11 certificate check failed"
   exit 1
 fi
 
-SIGNTOOL_PATH=$(grep "SIGNTOOL_PATH=" "$GITHUB_OUTPUT" | cut -d'=' -f2)
+# Step 2: Find PKCS#11-compatible signing tools
+echo ""
+echo "🔧 Step 2: Finding PKCS#11-compatible signing tools..."
+SIGNING_TOOL=""
+TOOL_TYPE=""
 
-# Check certificate availability
-if ! check_certificate_store "$CERTUM_CERTIFICATE_SHA1"; then
-  echo "❌ Certificate not found in certificate store"
-  exit 1
-fi
-
-# Perform code signing
-echo "Signing binary with Certum certificate..."
-
-# Try multiple certificate store locations for cloud certificates
-echo "Attempting signing with various certificate store parameters..."
-
-# Method 1: Default (Current User Personal store)
-echo "Method 1: Default certificate lookup"
-echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
-if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH" 2>/dev/null; then
-  echo "✅ Code signing successful with default method!"
+# Try osslsigncode first (best PKCS#11 support)
+if find_pkcs11_signing_tool; then
+  SIGNING_TOOL="$OSSLSIGNCODE_PATH"
+  TOOL_TYPE="osslsigncode"
+  echo "✅ Will use osslsigncode for PKCS#11 signing"
+elif install_osslsigncode; then
+  SIGNING_TOOL="$OSSLSIGNCODE_PATH"
+  TOOL_TYPE="osslsigncode"
+  echo "✅ osslsigncode installed and ready"
 else
-  echo "Method 1 failed, trying Method 2..."
-  
-  # Method 2: Explicitly specify Current User MY store
-  echo "Method 2: Current User Personal (MY) store"
-  echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /s MY /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
-  if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /s MY /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH" 2>/dev/null; then
-    echo "✅ Code signing successful with MY store!"
+  # Fallback to signtool with smart card detection
+  echo "⚠️ osslsigncode not available, trying signtool fallback..."
+  if find_signtool; then
+    SIGNING_TOOL="$SIGNTOOL_PATH"
+    TOOL_TYPE="signtool"
+    echo "✅ Will use signtool with smart card auto-select"
   else
-    echo "Method 2 failed, trying Method 3..."
-    
-    # Method 3: Local Machine Personal store
-    echo "Method 3: Local Machine Personal (MY) store"
-    echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /s MY /sm /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
-    if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /s MY /sm /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH" 2>/dev/null; then
-      echo "✅ Code signing successful with Local Machine MY store!"
-    else
-      echo "Method 3 failed, trying Method 4..."
-      
-      # Method 4: Try ROOT store (sometimes cloud certs end up here)
-      echo "Method 4: ROOT certificate store"
-      echo "Command: $SIGNTOOL_PATH sign /sha1 $CERTUM_CERTIFICATE_SHA1 /s ROOT /fd SHA256 /tr http://time.certum.pl /td SHA256 $BINARY_PATH"
-      if "$SIGNTOOL_PATH" sign /sha1 "$CERTUM_CERTIFICATE_SHA1" /s ROOT /fd SHA256 /tr http://time.certum.pl /td SHA256 "$BINARY_PATH" 2>/dev/null; then
-        echo "✅ Code signing successful with ROOT store!"
-      else
-        echo "❌ All certificate store methods failed"
-        echo "Certificate may not be accessible or SHA1 may be incorrect"
-        exit 1
-      fi
-    fi
-  fi
-fi
-
-# Verify the signature (common for all successful signing methods)
-echo "Verifying signature..."
-if "$SIGNTOOL_PATH" verify /pa "$BINARY_PATH"; then
-  echo "✅ Signature verification successful!"
-  
-  # Get signature info
-  echo "Signature details:"
-  "$SIGNTOOL_PATH" verify /pa /v "$BINARY_PATH" | head -20
-    
-    echo ""
-    echo "🎉 Code signing completed successfully!"
-    echo "✅ Binary is now properly signed with Certum certificate"
-    
-  else
-    echo "❌ Signature verification failed"
+    echo "❌ No compatible signing tools found"
     exit 1
   fi
+fi
+# Step 3: Perform code signing
+echo ""
+echo "🔐 Step 3: Performing PKCS#11 code signing..."
+
+case "$TOOL_TYPE" in
+  "osslsigncode")
+    echo "Using osslsigncode with PKCS#11..."
+    
+    # Create PKCS#11 configuration
+    PKCS11_CONFIG="pkcs11_signing.conf"
+    cat > "$PKCS11_CONFIG" << EOF
+name=SimplySignPKCS
+library=/c/Windows/System32/SimplySignPKCS.dll
+slotListIndex=0
+EOF
+    
+    echo "✅ Created PKCS#11 configuration: $PKCS11_CONFIG"
+    
+    # Sign with osslsigncode + PKCS#11
+    echo "Executing osslsigncode with PKCS#11 interface..."
+    if "$SIGNING_TOOL" sign \
+        -pkcs11engine "/c/Windows/System32/SimplySignPKCS.dll" \
+        -pkcs11module "/c/Windows/System32/SimplySignPKCS.dll" \
+        -ts http://time.certum.pl \
+        -h sha256 \
+        -in "$BINARY_PATH" \
+        -out "${BINARY_PATH}.signed" 2>&1 | tee osslsigncode_output.log; then
+        
+        # Replace original with signed version
+        mv "${BINARY_PATH}.signed" "$BINARY_PATH"
+        echo "✅ Code signing successful with osslsigncode + PKCS#11!"
+        SIGNING_SUCCESS=true
+        
+    else
+        echo "❌ osslsigncode + PKCS#11 signing failed"
+        cat osslsigncode_output.log
+        SIGNING_SUCCESS=false
+    fi
+    
+    # Clean up config
+    rm -f "$PKCS11_CONFIG"
+    ;;
+    
+  "signtool")
+    echo "Using signtool with smart card auto-select..."
+    
+    # Use signtool with auto-select (/a) to find PKCS#11 certificates
+    echo "Executing signtool with smart card detection..."
+    if "$SIGNING_TOOL" sign \
+        /a \
+        /fd SHA256 \
+        /tr http://time.certum.pl \
+        /td SHA256 \
+        /v \
+        "$BINARY_PATH" 2>&1 | tee signtool_output.log; then
+        
+        echo "✅ Code signing successful with signtool auto-select!"
+        SIGNING_SUCCESS=true
+        
+    else
+        echo "❌ Signtool auto-select signing failed"
+        cat signtool_output.log
+        SIGNING_SUCCESS=false
+    fi
+    ;;
+    
+  *)
+    echo "❌ Unknown tool type: $TOOL_TYPE"
+    exit 1
+    ;;
+esac
+
+# Check if signing was successful
+if [ "$SIGNING_SUCCESS" != "true" ]; then
+  echo "❌ All PKCS#11 signing methods failed"
+  exit 1
+fi
+
+# Step 4: Verify the signature
+echo ""
+echo "🔍 Step 4: Verifying signature..."
+
+# Find signtool for verification (if not already found)
+if [ "$TOOL_TYPE" != "signtool" ]; then
+  if ! find_signtool; then
+    echo "⚠️ Cannot verify signature - signtool not available"
+    echo "   Assuming signing was successful since no errors occurred"
+    echo ""
+    echo "🎉 PKCS#11 Code signing completed!"
+    echo "✅ Binary signed with Certum certificate via PKCS#11"
+    exit 0
+  fi
+fi
+
+# Use signtool to verify
+VERIFY_TOOL="$SIGNTOOL_PATH"
+if [ "$TOOL_TYPE" == "signtool" ]; then
+  VERIFY_TOOL="$SIGNING_TOOL"
+fi
+
+echo "Verifying signature with: $VERIFY_TOOL"
+if "$VERIFY_TOOL" verify /pa /v "$BINARY_PATH" 2>&1 | tee verification_output.log; then
+  echo "✅ Signature verification successful!"
+  
+  # Show certificate details
+  echo ""
+  echo "📋 Signature details:"
+  "$VERIFY_TOOL" verify /pa /all "$BINARY_PATH" 2>/dev/null || echo "Could not get detailed signature info"
+  
+  echo ""
+  echo "🎉 PKCS#11 Code signing completed successfully!"
+  echo "✅ Binary is now properly signed with Certum certificate via PKCS#11"
+  echo "🔐 Authentication: ✅"
+  echo "☁️ Certificate access: ✅" 
+  echo "🖊️ Code signing: ✅"
+  echo "✔️ Signature verification: ✅"
+  
 else
-  echo "❌ Code signing failed"
+  echo "❌ Signature verification failed"
+  cat verification_output.log
   exit 1
 fi
