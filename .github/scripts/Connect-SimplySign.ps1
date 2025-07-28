@@ -33,8 +33,10 @@ $Digits    = if ($q['digits'] -as [int]) { $q['digits'] -as [int] } else { 6 }
 $Period    = if ($q['period'] -as [int]) { $q['period'] -as [int] } else { 30 }
 $Algorithm = if ($q['algorithm']) { $q['algorithm'].ToUpper() } else { 'SHA1' }
 
-if ($Algorithm -ne 'SHA1') {
-    throw "This helper only implements HMAC-SHA1 (requested: $Algorithm)."
+# Validate supported algorithms
+$SupportedAlgorithms = @('SHA1', 'SHA256', 'SHA512')
+if ($Algorithm -notin $SupportedAlgorithms) {
+    throw "Unsupported algorithm: $Algorithm. Supported: $($SupportedAlgorithms -join ', ')"
 }
 
 # === 3.  TOTP GENERATOR  =====================================================
@@ -70,7 +72,22 @@ public static class Totp
         return bytes;
     }
 
-    public static string Now(string secret, int digits, int period)
+    private static HMAC GetHmacAlgorithm(string algorithm, byte[] key)
+    {
+        switch (algorithm.ToUpper())
+        {
+            case "SHA1":
+                return new HMACSHA1(key);
+            case "SHA256":
+                return new HMACSHA256(key);
+            case "SHA512":
+                return new HMACSHA512(key);
+            default:
+                throw new ArgumentException("Unsupported algorithm: " + algorithm);
+        }
+    }
+
+    public static string Now(string secret, int digits, int period, string algorithm = "SHA1")
     {
         byte[] key = Base32Decode(secret);
         long counter = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / period;
@@ -78,7 +95,12 @@ public static class Totp
         byte[] cnt = BitConverter.GetBytes(counter);
         if (BitConverter.IsLittleEndian) Array.Reverse(cnt);
 
-        byte[] hash = new HMACSHA1(key).ComputeHash(cnt);
+        byte[] hash;
+        using (var hmac = GetHmacAlgorithm(algorithm, key))
+        {
+            hash = hmac.ComputeHash(cnt);
+        }
+
         int offset = hash[hash.Length - 1] & 0x0F;
         int binary =
             ((hash[offset] & 0x7F) << 24) |
@@ -93,13 +115,13 @@ public static class Totp
 "@
 
 function Get-TotpCode {
-    param([string]$Secret,[int]$Digits=6,[int]$Period=30)
-    [Totp]::Now($Secret,$Digits,$Period)
+    param([string]$Secret,[int]$Digits=6,[int]$Period=30,[string]$Algorithm='SHA1')
+    [Totp]::Now($Secret,$Digits,$Period,$Algorithm)
 }
 
 # === 4.  LAUNCH SimplySign AND SEND CREDENTIALS  =============================
-$otp = Get-TotpCode -Secret $Base32 -Digits $Digits -Period $Period
-Write-Host "Current TOTP: $otp"
+$otp = Get-TotpCode -Secret $Base32 -Digits $Digits -Period $Period -Algorithm $Algorithm
+Write-Host "Current TOTP: $otp (using $Algorithm algorithm)"
 
 $proc = Start-Process -FilePath $ExePath -PassThru
 Write-Host "Waiting for SimplySign Desktop to appear…"
