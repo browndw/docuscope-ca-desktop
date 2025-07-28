@@ -41,7 +41,7 @@ jobs:
     - name: Configure SimplySign for Login Dialog
       run: |
         echo "=== CONFIGURING SIMPLYSIGN FOR LOGIN DIALOG ==="
-        echo "🎯 Setting up registry to force login dialog appearance..."
+        echo "Setting up registry to force login dialog appearance..."
         
         # Enhanced registry configuration for login dialog detection
         $regPaths = @(
@@ -54,7 +54,7 @@ jobs:
             try {
                 if (-not (Test-Path $regPath)) {
                     New-Item -Path $regPath -Force | Out-Null
-                    Write-Host "✅ Created registry path: $regPath"
+                    Write-Host "SUCCESS: Created registry path: $regPath"
                 }
                 
                 # Multiple login dialog configuration attempts
@@ -71,13 +71,13 @@ jobs:
                     New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
                 }
                 
-                Write-Host "✅ Configured login settings for: $regPath"
+                Write-Host "SUCCESS: Configured login settings for: $regPath"
             } catch {
-                Write-Host "⚠️ Could not configure: $regPath - $($_.Exception.Message)"
+                Write-Host "WARNING: Could not configure: $regPath - $($_.Exception.Message)"
             }
         }
         
-        echo "✅ Registry configuration completed"
+        echo "Registry configuration completed"
       shell: powershell
 
     # Step 3: Start Network Monitoring (if enabled)
@@ -85,7 +85,7 @@ jobs:
       if: inputs.enable_network_monitoring == true
       run: |
         echo "=== STARTING OAUTH2 NETWORK MONITORING ==="
-        echo "🕵️ Monitoring for requests to cloudsign.webnotarius.pl..."
+        echo "Monitoring for requests to cloudsign.webnotarius.pl..."
         
         # Start background network monitoring
         powershell -Command "
@@ -97,14 +97,14 @@ jobs:
               # Check for network connections to webnotarius
               \$connections = netstat -an | Select-String 'webnotarius'
               if (\$connections) {
-                Write-Host \"[\$(Get-Date)] 🌐 OAuth2 connection detected: \$connections\"
+                Write-Host \"[\$(Get-Date)] OAuth2 connection detected: \$connections\"
               }
               
               # Monitor DNS queries
               try {
                 \$dnsResult = nslookup cloudsign.webnotarius.pl 2>null
                 if (\$dnsResult -and \$dnsResult -notlike '*can''t find*') {
-                  Write-Host \"[\$(Get-Date)] 📡 DNS resolution successful for OAuth2 endpoint\"
+                  Write-Host \"[\$(Get-Date)] DNS resolution successful for OAuth2 endpoint\"
                 }
               } catch {}
               
@@ -112,7 +112,7 @@ jobs:
             }
           } -ArgumentList ${{ inputs.detection_timeout }}
           
-          Write-Host \"✅ Network monitoring job started (ID: \$(\$job.Id))\"
+          Write-Host \"Network monitoring job started (ID: \$(\$job.Id))\"
           \$job.Id | Out-File -FilePath 'network_monitor_job.id'
         " 2>&1 | tee network_monitor_start.log
       shell: bash
@@ -124,19 +124,19 @@ jobs:
         DEBUG_MODE: ${{ inputs.debug_mode }}
       run: |
         echo "=== COMPREHENSIVE LOGIN DIALOG DETECTION ==="
-        echo "🔍 Testing multiple detection methods in GitHub Actions environment"
-        echo "⏱️ Detection timeout: $env:DETECTION_TIMEOUT seconds"
-        echo "🐛 Debug mode: $env:DEBUG_MODE"
+        echo "Testing multiple detection methods in GitHub Actions environment"
+        echo "Detection timeout: $env:DETECTION_TIMEOUT seconds"
+        echo "Debug mode: $env:DEBUG_MODE"
         echo ""
         
         $timeout = [int]$env:DETECTION_TIMEOUT
         $debug = [bool]::Parse($env:DEBUG_MODE)
         
-        Write-Host "🎯 Executing comprehensive dialog detection script..."
+        Write-Host "Executing comprehensive dialog detection script..."
         $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds $timeout -DebugMode $debug
         
         Write-Host ""
-        Write-Host "🏁 Detection script completed with result: $result"
+        Write-Host "Detection script completed with result: $result"
         
       shell: powershell
 
@@ -148,26 +148,26 @@ jobs:
         
         if [ -f "network_monitor_job.id" ]; then
           JOB_ID=$(cat network_monitor_job.id)
-          echo "🔍 Retrieving network monitoring results from job ID: $JOB_ID"
+          echo "Retrieving network monitoring results from job ID: $JOB_ID"
           
           powershell -Command "
             try {
               \$job = Get-Job -Id $JOB_ID -ErrorAction SilentlyContinue
               if (\$job) {
-                Write-Host '📋 Network monitoring job status: ' + \$job.State
+                Write-Host 'Network monitoring job status: ' + \$job.State
                 \$results = Receive-Job -Job \$job
                 if (\$results) {
-                  Write-Host '📡 Network monitoring results:'
+                  Write-Host 'Network monitoring results:'
                   \$results | ForEach-Object { Write-Host \"   \$_\" }
                 } else {
-                  Write-Host '📡 No network activity detected during monitoring period'
+                  Write-Host 'No network activity detected during monitoring period'
                 }
                 Remove-Job -Job \$job -Force
               } else {
-                Write-Host '⚠️ Network monitoring job not found'
+                Write-Host 'Network monitoring job not found'
               }
             } catch {
-              Write-Host \"❌ Error retrieving network results: \$(\$_.Exception.Message)\"
+              Write-Host \"Error retrieving network results: \$(\$_.Exception.Message)\"
             }
           "
         else
