@@ -3,7 +3,7 @@ param(
   [bool]$DebugMode = $false
 )
 
-Write-Host "🚀 Starting SimplySign Desktop for dialog detection..."
+Write-Host "Starting SimplySign Desktop for dialog detection..."
 
 # Kill any existing instances
 Get-Process -Name "SimplySignDesktop" -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -12,13 +12,13 @@ Start-Sleep -Seconds 2
 # Start SimplySign Desktop
 $exePath = "C:\Program Files\Certum\SimplySign Desktop\SimplySignDesktop.exe"
 if (-not (Test-Path $exePath)) {
-  Write-Host "❌ SimplySign Desktop not found at: $exePath"
+  Write-Host "ERROR: SimplySign Desktop not found at: $exePath"
   exit 1
 }
 
-Write-Host "✅ Launching SimplySign Desktop from: $exePath"
+Write-Host "SUCCESS: Launching SimplySign Desktop from: $exePath"
 $proc = Start-Process -FilePath $exePath -PassThru -WindowStyle Normal
-Write-Host "✅ Process started - PID: $($proc.Id)"
+Write-Host "SUCCESS: Process started - PID: $($proc.Id)"
 
 # Initialize detection tracking
 $detectionResults = @{
@@ -34,8 +34,8 @@ $startTime = Get-Date
 $endTime = $startTime.AddSeconds($TimeoutSeconds)
 $detectionAttempts = 0
 
-Write-Host "⏱️ Detection period: $TimeoutSeconds seconds"
-Write-Host "🔍 Starting comprehensive detection loop..."
+Write-Host "Detection period: $TimeoutSeconds seconds"
+Write-Host "Starting comprehensive detection loop..."
 
 while ((Get-Date) -lt $endTime) {
   $detectionAttempts++
@@ -47,7 +47,7 @@ while ((Get-Date) -lt $endTime) {
   
   # Check if process is still alive
   if ($proc.HasExited) {
-    Write-Host "❌ SimplySign Desktop process exited with code: $($proc.ExitCode)"
+    Write-Host "ERROR: SimplySign Desktop process exited with code: $($proc.ExitCode)"
     break
   }
   
@@ -56,7 +56,7 @@ while ((Get-Date) -lt $endTime) {
     $processInfo = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
     if ($processInfo -and $processInfo.MainWindowTitle -and $processInfo.MainWindowTitle.Trim() -ne "") {
       if (-not $detectionResults.ProcessMethod) {
-        Write-Host "✅ METHOD 1 SUCCESS: Process window detected"
+        Write-Host "SUCCESS METHOD 1: Process window detected"
         Write-Host "   Window Title: '$($processInfo.MainWindowTitle)'"
         Write-Host "   Window Handle: $($processInfo.MainWindowHandle)"
         $detectionResults.ProcessMethod = $true
@@ -80,7 +80,7 @@ while ((Get-Date) -lt $endTime) {
       $windows = Get-Process | Where-Object { $_.MainWindowTitle -like "*$title*" }
       if ($windows) {
         if (-not $detectionResults.WindowTitleMethod) {
-          Write-Host "✅ METHOD 2 SUCCESS: Window title match found"
+          Write-Host "SUCCESS METHOD 2: Window title match found"
           Write-Host "   Matched title: '$title'"
           Write-Host "   Process: $($windows[0].ProcessName)"
           $detectionResults.WindowTitleMethod = $true
@@ -112,7 +112,7 @@ while ((Get-Date) -lt $endTime) {
     }
     
     if ($webViewProcesses -and -not $detectionResults.WebViewMethod) {
-      Write-Host "✅ METHOD 4 SUCCESS: WebView/Browser process detected"
+      Write-Host "SUCCESS METHOD 4: WebView/Browser process detected"
       foreach ($webProc in $webViewProcesses) {
         Write-Host "   WebView Process: $($webProc.ProcessName) (PID: $($webProc.Id))"
       }
@@ -127,7 +127,7 @@ while ((Get-Date) -lt $endTime) {
     # Check for child processes or windows spawned by SimplySign
     $childProcesses = Get-WmiObject Win32_Process | Where-Object { $_.ParentProcessId -eq $proc.Id }
     if ($childProcesses -and -not $detectionResults.ChildWindowMethod) {
-      Write-Host "✅ METHOD 5 SUCCESS: Child process detected"
+      Write-Host "SUCCESS METHOD 5: Child process detected"
       foreach ($child in $childProcesses) {
         Write-Host "   Child Process: $($child.Name) (PID: $($child.ProcessId))"
       }
@@ -141,7 +141,7 @@ while ((Get-Date) -lt $endTime) {
   try {
     $connections = netstat -an | Select-String 'webnotarius'
     if ($connections -and -not $detectionResults.NetworkMethod) {
-      Write-Host "✅ METHOD 6 SUCCESS: OAuth2 network activity detected"
+      Write-Host "SUCCESS METHOD 6: OAuth2 network activity detected"
       Write-Host "   Connections: $connections"
       $detectionResults.NetworkMethod = $true
     }
@@ -162,32 +162,32 @@ Write-Host ""
 
 $successCount = 0
 foreach ($method in $detectionResults.GetEnumerator()) {
-  $status = if ($method.Value) { "✅ SUCCESS"; $successCount++ } else { "❌ FAILED" }
+  $status = if ($method.Value) { "SUCCESS"; $successCount++ } else { "FAILED" }
   Write-Host "$status - $($method.Key)"
 }
 
 Write-Host ""
-Write-Host "📊 Success Rate: $successCount / $($detectionResults.Count) methods"
+Write-Host "Success Rate: $successCount / $($detectionResults.Count) methods"
 
 if ($successCount -eq 0) {
-  Write-Host "❌ NO DETECTION METHODS SUCCESSFUL"
+  Write-Host "NO DETECTION METHODS SUCCESSFUL"
   Write-Host "   This indicates login dialog may not appear in headless environment"
 } elseif ($successCount -lt $detectionResults.Count) {
-  Write-Host "⚠️ PARTIAL DETECTION SUCCESS"
+  Write-Host "PARTIAL DETECTION SUCCESS"
   Write-Host "   Some methods worked - authentication may be possible with correct approach"
 } else {
-  Write-Host "🎉 ALL DETECTION METHODS SUCCESSFUL"
+  Write-Host "ALL DETECTION METHODS SUCCESSFUL"
   Write-Host "   Login dialog is fully detectable in this environment"
 }
 
 # Cleanup
 if (-not $proc.HasExited) {
-  Write-Host "🧹 Stopping SimplySign Desktop process..."
+  Write-Host "Stopping SimplySign Desktop process..."
   $proc | Stop-Process -Force
 }
 
 # Save results for workflow
 $detectionResults | ConvertTo-Json | Out-File -FilePath "detection_results.json"
-Write-Host "💾 Detection results saved to detection_results.json"
+Write-Host "Detection results saved to detection_results.json"
 
 return $successCount
