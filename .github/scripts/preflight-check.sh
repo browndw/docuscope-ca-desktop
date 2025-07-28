@@ -56,18 +56,7 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
         exit 1
     fi
     
-    # Check CERTUM_CERTIFICATE_SHA1
-    if [ -n "${CERTUM_CERTIFICATE_SHA1:-}" ]; then
-        if [[ "$CERTUM_CERTIFICATE_SHA1" =~ ^[A-Fa-f0-9]{40}$ ]]; then
-            echo "   ✅ CERTUM_CERTIFICATE_SHA1: Valid SHA1 format"
-        else
-            echo "   ❌ CERTUM_CERTIFICATE_SHA1: Invalid format (should be 40 hex characters)"
-            exit 1
-        fi
-    else
-        echo "   ❌ CERTUM_CERTIFICATE_SHA1: Missing"
-        exit 1
-    fi
+    echo "   ℹ️ PKCS#11 Mode: Certificate SHA1 not required (auto-discovery via PKCS#11)"
 else
     echo "   ℹ️ Not running in GitHub Actions - secrets not available for validation"
 fi
