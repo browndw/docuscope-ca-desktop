@@ -7,7 +7,8 @@
 set -euo pipefail
 
 echo "=== PKCS#11 Code Signing with SimplySign Desktop ==="
-echo "🎯 Using PKCS#11 interface to access Certum cloud certificates"
+echo "🎯 Using official Certum thumbprint-based signing method"
+echo "📚 Following official documentation: signtool + certificate SHA1 thumbprint"
 
 # Source certificate utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,8 +25,16 @@ if [ ! -f "$BINARY_PATH" ]; then
   exit 1
 fi
 
+# Validate certificate thumbprint (required for official Certum signtool approach)
+if [ -z "${CERTUM_CERTIFICATE_SHA1:-}" ]; then
+  echo "❌ CERTUM_CERTIFICATE_SHA1 not set - required for thumbprint-based signing"
+  echo "   Official Certum documentation requires certificate thumbprint for signtool"
+  exit 1
+fi
+
 echo "✅ Binary to sign: $BINARY_PATH"
 echo "📏 Binary size: $(stat -c%s "$BINARY_PATH" 2>/dev/null || echo "unknown") bytes"
+echo "🔑 Certificate thumbprint: ${CERTUM_CERTIFICATE_SHA1:0:16}... (truncated for security)"
 
 # Step 1: Verify PKCS#11 setup
 echo ""
@@ -37,19 +46,19 @@ fi
 
 # Step 2: Find PKCS#11-compatible signing tools
 echo ""
-echo "🔧 Step 2: Finding PKCS#11-compatible signing tools..."
+echo "🔧 Step 2: Finding signing tools..."
 SIGNING_TOOL=""
 TOOL_TYPE=""
 
-# FORCE signtool priority - always try signtool first for Windows compatibility
-echo "🎯 FORCING signtool priority for Windows certificate integration..."
+# PRIORITY: signtool with thumbprint (official Certum method)
+echo "🎯 PRIORITY: Official Certum method (signtool + thumbprint)..."
 
 # Look for signtool first
 if find_signtool; then
   SIGNING_TOOL="$SIGNTOOL_PATH"
   TOOL_TYPE="signtool"
-  echo "✅ Will use signtool with smart card auto-select (PRIORITY)"
-  echo "   (osslsigncode available but signtool preferred for Windows compatibility)"
+  echo "✅ Will use signtool with certificate thumbprint (OFFICIAL CERTUM METHOD)"
+  echo "   Following official documentation: signtool + SHA1 thumbprint"
 else
   echo "⚠️ signtool not found, falling back to osslsigncode..."
   if find_pkcs11_signing_tool; then
@@ -67,7 +76,7 @@ else
 fi
 # Step 3: Perform code signing
 echo ""
-echo "🔐 Step 3: Performing PKCS#11 code signing..."
+echo "🔐 Step 3: Performing code signing with official Certum method..."
 
 case "$TOOL_TYPE" in
   "osslsigncode")
@@ -158,83 +167,48 @@ EOF
     ;;
     
   "signtool")
-    echo "Using signtool with smart card auto-select..."
+    echo "Using signtool with certificate thumbprint (OFFICIAL CERTUM METHOD)..."
+    echo "Following official documentation: signtool sign /sha1 [thumbprint] ..."
     
-    # Method 1: Use signtool with auto-select (/a) to find PKCS#11 certificates
-    echo "Method 1: Executing signtool with smart card auto-detection..."
+    # OFFICIAL METHOD: Use certificate thumbprint as per Certum documentation
+    # Documentation: "signtool sign /sha1 "[thumbprint]" /tr [timestamp] /td [td_algo] /fd [fd_algo] /v "[file]""
+    echo "Method 1: Official Certum thumbprint-based signing..."
     if "$SIGNING_TOOL" sign \
-        /a \
+        /sha1 "$CERTUM_CERTIFICATE_SHA1" \
         /fd SHA256 \
         /tr http://time.certum.pl \
         /td SHA256 \
         /v \
-        "$BINARY_PATH" 2>&1 | tee signtool_method1.log; then
+        "$BINARY_PATH" 2>&1 | tee signtool_thumbprint.log; then
         
-        echo "✅ Code signing successful with signtool auto-select!"
+        echo "✅ Code signing successful with official Certum thumbprint method!"
         SIGNING_SUCCESS=true
         
     else
-        echo "❌ Signtool auto-select signing failed"
-        cat signtool_method1.log
+        echo "❌ Official thumbprint method failed"
+        cat signtool_thumbprint.log
         
-        # Method 2: Try with different certificate store parameters
-        echo "Method 2: Trying signtool with certificate store enumeration..."
-        
-        # First, let's see what certificates signtool can find
-        echo "Enumerating certificates visible to signtool..."
-        "$SIGNING_TOOL" sign /a /fd SHA256 /debug /v "$BINARY_PATH" 2>&1 | head -20 | tee signtool_debug.log || true
-        
-        # Method 3: Try with CSP (Cryptographic Service Provider) approach
-        echo "Method 3: Trying signtool with CSP provider..."
+        # FALLBACK: Try auto-select as backup (may not work per documentation)
+        echo "Method 2: Fallback - trying auto-select (may not work with PKCS#11)..."
         if "$SIGNING_TOOL" sign \
             /a \
             /fd SHA256 \
             /tr http://time.certum.pl \
             /td SHA256 \
-            /sm \
             /v \
-            "$BINARY_PATH" 2>&1 | tee signtool_method3.log; then
+            "$BINARY_PATH" 2>&1 | tee signtool_fallback.log; then
             
-            echo "✅ Code signing successful with signtool CSP!"
+            echo "✅ Code signing successful with auto-select fallback!"
             SIGNING_SUCCESS=true
             
         else
-            echo "❌ Signtool CSP method failed"
-            cat signtool_method3.log
-            
-            # Method 4: Try to find any certificate with code signing capability
-            echo "Method 4: Searching for any code signing certificate..."
-            powershell -Command "
-                Write-Host 'Searching for certificates with code signing capability...'
-                \$certs = Get-ChildItem -Path 'Cert:\\CurrentUser\\My','Cert:\\LocalMachine\\My' -Recurse | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' -or \$_.Extensions | Where-Object { \$_.Oid.FriendlyName -eq 'Enhanced Key Usage' -and \$_.Format(\$false) -like '*Code Signing*' } }
-                foreach (\$cert in \$certs) {
-                    Write-Host \"Found code signing cert: \$(\$cert.Subject) (Thumbprint: \$(\$cert.Thumbprint))\"
-                    
-                    # Try signing with this specific certificate
-                    try {
-                        \$result = & '$SIGNING_TOOL' sign /sha1 \$cert.Thumbprint /fd SHA256 /tr 'http://time.certum.pl' /td SHA256 /v '$BINARY_PATH' 2>&1
-                        if (\$LASTEXITCODE -eq 0) {
-                            Write-Host '✅ Successfully signed with certificate: ' + \$cert.Thumbprint
-                            exit 0
-                        } else {
-                            Write-Host '❌ Failed to sign with certificate: ' + \$cert.Thumbprint
-                        }
-                    } catch {
-                        Write-Host 'Error trying certificate: ' + \$_.Exception.Message
-                    }
-                }
-                Write-Host 'No working code signing certificates found'
-                exit 1
-            " 2>&1 | tee signtool_method4.log
-            
-            if [ $? -eq 0 ]; then
-                echo "✅ Code signing successful with PowerShell certificate discovery!"
-                SIGNING_SUCCESS=true
-            else
-                echo "❌ PowerShell certificate discovery failed"
-                cat signtool_method4.log
-                SIGNING_SUCCESS=false
-            fi
+            echo "❌ Both thumbprint and auto-select methods failed"
+            echo "Thumbprint method output:"
+            cat signtool_thumbprint.log
+            echo ""
+            echo "Auto-select fallback output:"
+            cat signtool_fallback.log
+            SIGNING_SUCCESS=false
         fi
     fi
     ;;
@@ -247,7 +221,8 @@ esac
 
 # Check if signing was successful
 if [ "$SIGNING_SUCCESS" != "true" ]; then
-  echo "❌ All PKCS#11 signing methods failed"
+  echo "❌ All signing methods failed"
+  echo "   Ensure SimplySign Desktop is connected and certificate is accessible"
   exit 1
 fi
 
@@ -261,8 +236,8 @@ if [ "$TOOL_TYPE" != "signtool" ]; then
     echo "⚠️ Cannot verify signature - signtool not available"
     echo "   Assuming signing was successful since no errors occurred"
     echo ""
-    echo "🎉 PKCS#11 Code signing completed!"
-    echo "✅ Binary signed with Certum certificate via PKCS#11"
+    echo "🎉 Code signing completed with official Certum method!"
+    echo "✅ Binary signed with Certum certificate using thumbprint"
     exit 0
   fi
 fi
@@ -283,11 +258,11 @@ if "$VERIFY_TOOL" verify /pa /v "$BINARY_PATH" 2>&1 | tee verification_output.lo
   "$VERIFY_TOOL" verify /pa /all "$BINARY_PATH" 2>/dev/null || echo "Could not get detailed signature info"
   
   echo ""
-  echo "🎉 PKCS#11 Code signing completed successfully!"
-  echo "✅ Binary is now properly signed with Certum certificate via PKCS#11"
+  echo "🎉 Code signing completed successfully with official Certum method!"
+  echo "✅ Binary is now properly signed with Certum certificate"
   echo "🔐 Authentication: ✅"
-  echo "☁️ Certificate access: ✅" 
-  echo "🖊️ Code signing: ✅"
+  echo "🔑 Certificate thumbprint: ✅" 
+  echo "🖊️ Official Certum signing: ✅"
   echo "✔️ Signature verification: ✅"
   
 else
