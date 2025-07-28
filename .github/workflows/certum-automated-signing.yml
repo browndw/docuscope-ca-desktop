@@ -152,9 +152,55 @@ jobs:
         echo "⏳ Allowing connection to stabilize..."
         sleep 10
         
-        # Verify connection by checking for certificates
-        echo "🔍 Verifying certificate availability..."
-        powershell -Command "Get-ChildItem -Path 'Cert:\\CurrentUser\\My','Cert:\\LocalMachine\\My' | Select-Object Subject, Thumbprint, NotAfter | Format-Table"
+        # Comprehensive certificate debugging
+        echo "🔍 Comprehensive certificate availability check..."
+        echo ""
+        
+        echo "=== Windows Certificate Store Analysis ==="
+        powershell -Command "
+          Write-Host '� Current User Personal Store:'
+          Get-ChildItem -Path 'Cert:\\CurrentUser\\My' -ErrorAction SilentlyContinue | 
+            Select-Object Subject, Issuer, Thumbprint, HasPrivateKey, NotAfter |
+            Format-Table -AutoSize
+          
+          Write-Host '📋 Local Machine Personal Store:'
+          Get-ChildItem -Path 'Cert:\\LocalMachine\\My' -ErrorAction SilentlyContinue |
+            Select-Object Subject, Issuer, Thumbprint, HasPrivateKey, NotAfter |
+            Format-Table -AutoSize
+          
+          Write-Host '📋 Searching for Certum-related certificates:'
+          Get-ChildItem -Path 'Cert:\\CurrentUser\\*','Cert:\\LocalMachine\\*' -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { \$_.Subject -like '*Certum*' -or \$_.Issuer -like '*Certum*' -or \$_.Subject -like '*Code Signing*' } |
+            Select-Object Subject, Issuer, Thumbprint, HasPrivateKey, NotAfter |
+            Format-Table -AutoSize
+          
+          Write-Host '📋 Certificates with Code Signing capability:'
+          Get-ChildItem -Path 'Cert:\\CurrentUser\\My','Cert:\\LocalMachine\\My' -ErrorAction SilentlyContinue |
+            Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } |
+            Select-Object Subject, Issuer, Thumbprint, HasPrivateKey, NotAfter |
+            Format-Table -AutoSize
+        "
+        
+        echo ""
+        echo "=== PKCS#11 Library Check ==="
+        if [ -f "/c/Windows/System32/SimplySignPKCS.dll" ]; then
+          echo "✅ PKCS#11 library present: /c/Windows/System32/SimplySignPKCS.dll"
+          ls -la "/c/Windows/System32/SimplySignPKCS.dll"
+        else
+          echo "❌ PKCS#11 library not found"
+        fi
+        
+        echo ""
+        echo "=== SimplySign Desktop Status ==="
+        powershell -Command "
+          Write-Host 'SimplySign Desktop process status:'
+          Get-Process -Name '*SimplySign*' -ErrorAction SilentlyContinue |
+            Select-Object Name, Id, MainWindowTitle, Responding |
+            Format-Table -AutoSize
+        "
+        
+        echo ""
+        echo "🎯 Certificate debugging completed - proceeding to signing..."
         
       shell: bash
 
