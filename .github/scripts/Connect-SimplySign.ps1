@@ -8,7 +8,7 @@
 
 # === 1.  SETTINGS  ============================================================
 $OtpUri  = $env:CERTUM_OTP_URI
-$UserId  = $env:CERTUM_USERID
+$UserId  = $env:CERTUM_USERNAME
 $ExePath = $env:CERTUM_EXE_PATH
 # ============================================================================
 
