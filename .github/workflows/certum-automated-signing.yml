@@ -27,7 +27,7 @@ jobs:
     - name: Pre-flight Check
       env:
         CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
-        CERTUM_USERID: ${{ secrets.CERTUM_USERID }}
+        CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
         CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
       run: |
         echo "=== PRE-FLIGHT VALIDATION ==="
@@ -103,7 +103,7 @@ jobs:
     - name: Connect SimplySign with Automated TOTP
       env:
         CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
-        CERTUM_USERID: ${{ secrets.CERTUM_USERID }}
+        CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
         CERTUM_EXE_PATH: "C:\\Program Files\\Certum\\SimplySign Desktop\\SimplySignDesktop.exe"
       run: |
         echo "=== BREAKTHROUGH: Automated TOTP Authentication ==="
@@ -117,13 +117,13 @@ jobs:
           exit 1
         fi
         
-        if [ -z "$CERTUM_USERID" ]; then
-          echo "❌ CERTUM_USERID not provided"
+        if [ -z "$CERTUM_USERNAME" ]; then
+          echo "❌ CERTUM_USERNAME not provided"
           exit 1
         fi
         
         echo "✅ OTP URI provided (length: ${#CERTUM_OTP_URI})"
-        echo "✅ User ID: $CERTUM_USERID"
+        echo "✅ User ID: $CERTUM_USERNAME"
         echo "✅ Executable path: $CERTUM_EXE_PATH"
         echo ""
         
