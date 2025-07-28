@@ -66,83 +66,103 @@ fi
 echo ""
 echo "🔐 Step 3: Performing PKCS#11 code signing..."
 
+# Add certificate debugging based on tool type
+if [ "$TOOL_TYPE" == "osslsigncode" ]; then
+  echo "🔍 Debugging: Checking what certificates osslsigncode can see..."
+  echo "Available certificate stores for osslsigncode:"
+  "$SIGNING_TOOL" help 2>/dev/null || echo "osslsigncode help not available"
+  
+  echo ""
+  echo "Attempting to list certificates with osslsigncode..."
+  # Try to get certificate info - osslsigncode doesn't have a list command, so we'll try signing with verbose
+fi
+
 case "$TOOL_TYPE" in
   "osslsigncode")
     echo "Using osslsigncode with PKCS#11..."
     
-    # Create PKCS#11 configuration for osslsigncode
-    PKCS11_CONFIG="pkcs11_signing.conf"
-    cat > "$PKCS11_CONFIG" << EOF
-name=SimplySignPKCS
-library=/c/Windows/System32/SimplySignPKCS.dll
-slotListIndex=0
-EOF
-    
-    echo "✅ Created PKCS#11 configuration: $PKCS11_CONFIG"
-    
-    # Method 1: Try osslsigncode with PKCS#11 token approach (simplified)
-    echo "Method 1: Attempting osslsigncode with PKCS#11 token..."
+    # Method 1: Try osslsigncode with standard certificate file approach first
+    echo "Method 1: Attempting osslsigncode with certificate auto-discovery..."
     if "$SIGNING_TOOL" sign \
-        -pkcs11 "/c/Windows/System32/SimplySignPKCS.dll" \
-        -ts http://time.certum.pl \
+        -certs auto \
+        -key auto \
+        -t http://time.certum.pl \
         -h sha256 \
         -in "$BINARY_PATH" \
         -out "${BINARY_PATH}.signed" 2>&1 | tee osslsigncode_method1.log; then
         
         # Replace original with signed version
         mv "${BINARY_PATH}.signed" "$BINARY_PATH"
-        echo "✅ Code signing successful with osslsigncode PKCS#11 token!"
+        echo "✅ Code signing successful with osslsigncode auto-discovery!"
         SIGNING_SUCCESS=true
         
     else
-        echo "❌ osslsigncode PKCS#11 token method failed"
+        echo "❌ osslsigncode auto-discovery failed"
         cat osslsigncode_method1.log
         
-        # Method 2: Try alternative osslsigncode PKCS#11 syntax
-        echo "Method 2: Attempting osslsigncode with alternative PKCS#11 syntax..."
-        if "$SIGNING_TOOL" sign \
-            -pkcs11engine "/c/Windows/System32/SimplySignPKCS.dll" \
-            -key "slot_0" \
-            -ts http://time.certum.pl \
+        # Method 2: Try with PKCS#11 engine approach
+        echo "Method 2: Attempting osslsigncode with PKCS#11 engine..."
+        
+        # Create PKCS#11 configuration file for OpenSSL
+        PKCS11_CONFIG="openssl_pkcs11.conf"
+        cat > "$PKCS11_CONFIG" << EOF
+openssl_conf = openssl_init
+
+[openssl_init]
+engines = engine_section
+
+[engine_section]
+pkcs11 = pkcs11_section
+
+[pkcs11_section]
+engine_id = pkcs11
+dynamic_path = /c/Windows/System32/SimplySignPKCS.dll
+MODULE_PATH = /c/Windows/System32/SimplySignPKCS.dll
+init = 0
+EOF
+        
+        if OPENSSL_CONF="$PKCS11_CONFIG" "$SIGNING_TOOL" sign \
+            -pkcs11engine pkcs11 \
+            -pkcs11module "/c/Windows/System32/SimplySignPKCS.dll" \
+            -certs pkcs11: \
+            -key pkcs11: \
+            -t http://time.certum.pl \
             -h sha256 \
             -in "$BINARY_PATH" \
             -out "${BINARY_PATH}.signed" 2>&1 | tee osslsigncode_method2.log; then
             
             # Replace original with signed version
             mv "${BINARY_PATH}.signed" "$BINARY_PATH"
-            echo "✅ Code signing successful with osslsigncode alternative syntax!"
+            echo "✅ Code signing successful with osslsigncode PKCS#11 engine!"
             SIGNING_SUCCESS=true
             
         else
-            echo "❌ osslsigncode alternative syntax failed"
+            echo "❌ osslsigncode PKCS#11 engine failed"
             cat osslsigncode_method2.log
             
-            # Method 3: Try with certificate and key specification
-            echo "Method 3: Attempting osslsigncode with cert/key discovery..."
+            # Method 3: Try simplified approach without PKCS#11 - let osslsigncode find certificates
+            echo "Method 3: Attempting osslsigncode with Windows certificate store..."
             if "$SIGNING_TOOL" sign \
-                -pkcs11 "/c/Windows/System32/SimplySignPKCS.dll" \
-                -certs "auto" \
-                -key "auto" \
-                -ts http://time.certum.pl \
+                -t http://time.certum.pl \
                 -h sha256 \
                 -in "$BINARY_PATH" \
                 -out "${BINARY_PATH}.signed" 2>&1 | tee osslsigncode_method3.log; then
                 
                 # Replace original with signed version
                 mv "${BINARY_PATH}.signed" "$BINARY_PATH"
-                echo "✅ Code signing successful with osslsigncode cert/key discovery!"
+                echo "✅ Code signing successful with osslsigncode Windows store!"
                 SIGNING_SUCCESS=true
                 
             else
-                echo "❌ osslsigncode cert/key discovery failed"
+                echo "❌ osslsigncode Windows store failed"
                 cat osslsigncode_method3.log
                 SIGNING_SUCCESS=false
             fi
         fi
+        
+        # Clean up config
+        rm -f "$PKCS11_CONFIG"
     fi
-    
-    # Clean up config
-    rm -f "$PKCS11_CONFIG"
     ;;
     
   "signtool")
