@@ -1,0 +1,229 @@
+name: Login Dialog Detection Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      detection_timeout:
+        description: 'Detection timeout in seconds'
+        required: false
+        default: '180'
+        type: string
+      enable_network_monitoring:
+        description: 'Enable OAuth2 network monitoring'
+        required: false
+        default: true
+        type: boolean
+      debug_mode:
+        description: 'Enable verbose debugging'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  login-dialog-diagnostic:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Step 1: Install SimplySign Desktop
+    - name: Install SimplySign Desktop
+      run: |
+        echo "=== INSTALLING SIMPLYSIGN DESKTOP ==="
+        echo "🔽 Downloading and installing for diagnostic testing..."
+        chmod +x ./.github/scripts/install-simplysign.sh
+        ./.github/scripts/install-simplysign.sh
+      shell: bash
+
+    # Step 2: Configure for Login Dialog Detection
+    - name: Configure SimplySign for Login Dialog
+      run: |
+        echo "=== CONFIGURING SIMPLYSIGN FOR LOGIN DIALOG ==="
+        echo "🎯 Setting up registry to force login dialog appearance..."
+        
+        # Enhanced registry configuration for login dialog detection
+        $regPaths = @(
+            "HKCU:\Software\Certum",
+            "HKCU:\Software\SimplySignDesktop", 
+            "HKCU:\Software\Asseco"
+        )
+        
+        foreach ($regPath in $regPaths) {
+            try {
+                if (-not (Test-Path $regPath)) {
+                    New-Item -Path $regPath -Force | Out-Null
+                    Write-Host "✅ Created registry path: $regPath"
+                }
+                
+                # Multiple login dialog configuration attempts
+                $loginSettings = @{
+                    'SimplySignDesktopShowLogonDialogAfterApplicationStartup' = 'Yes'
+                    'ShowLogonDialogAfterApplicationStartup' = 'Yes'
+                    'AutoShowLogonDialog' = 'Yes'
+                    'ShowLoginDialog' = 'Yes'
+                    'ForceLoginDialog' = 'Yes'
+                    'DisplayAuthenticationDialog' = 'Yes'
+                }
+                
+                foreach ($setting in $loginSettings.GetEnumerator()) {
+                    New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
+                }
+                
+                Write-Host "✅ Configured login settings for: $regPath"
+            } catch {
+                Write-Host "⚠️ Could not configure: $regPath - $($_.Exception.Message)"
+            }
+        }
+        
+        echo "✅ Registry configuration completed"
+      shell: powershell
+
+    # Step 3: Start Network Monitoring (if enabled)
+    - name: Start OAuth2 Network Monitoring
+      if: inputs.enable_network_monitoring == true
+      run: |
+        echo "=== STARTING OAUTH2 NETWORK MONITORING ==="
+        echo "🕵️ Monitoring for requests to cloudsign.webnotarius.pl..."
+        
+        # Start background network monitoring
+        powershell -Command "
+          Write-Host 'Starting OAuth2 network capture...'
+          \$job = Start-Job -ScriptBlock {
+            param(\$duration)
+            \$endTime = (Get-Date).AddSeconds(\$duration)
+            while ((Get-Date) -lt \$endTime) {
+              # Check for network connections to webnotarius
+              \$connections = netstat -an | Select-String 'webnotarius'
+              if (\$connections) {
+                Write-Host \"[\$(Get-Date)] 🌐 OAuth2 connection detected: \$connections\"
+              }
+              
+              # Monitor DNS queries
+              try {
+                \$dnsResult = nslookup cloudsign.webnotarius.pl 2>null
+                if (\$dnsResult -and \$dnsResult -notlike '*can''t find*') {
+                  Write-Host \"[\$(Get-Date)] 📡 DNS resolution successful for OAuth2 endpoint\"
+                }
+              } catch {}
+              
+              Start-Sleep -Seconds 2
+            }
+          } -ArgumentList ${{ inputs.detection_timeout }}
+          
+          Write-Host \"✅ Network monitoring job started (ID: \$(\$job.Id))\"
+          \$job.Id | Out-File -FilePath 'network_monitor_job.id'
+        " 2>&1 | tee network_monitor_start.log
+      shell: bash
+
+    # Step 4: Comprehensive Login Dialog Detection
+    - name: Detect Login Dialog - Multiple Methods
+      env:
+        DETECTION_TIMEOUT: ${{ inputs.detection_timeout }}
+        DEBUG_MODE: ${{ inputs.debug_mode }}
+      run: |
+        echo "=== COMPREHENSIVE LOGIN DIALOG DETECTION ==="
+        echo "🔍 Testing multiple detection methods in GitHub Actions environment"
+        echo "⏱️ Detection timeout: $env:DETECTION_TIMEOUT seconds"
+        echo "🐛 Debug mode: $env:DEBUG_MODE"
+        echo ""
+        
+        $timeout = [int]$env:DETECTION_TIMEOUT
+        $debug = [bool]::Parse($env:DEBUG_MODE)
+        
+        Write-Host "🎯 Executing comprehensive dialog detection script..."
+        $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds $timeout -DebugMode $debug
+        
+        Write-Host ""
+        Write-Host "🏁 Detection script completed with result: $result"
+        
+      shell: powershell
+
+    # Step 5: Stop Network Monitoring and Collect Results
+    - name: Collect Network Monitoring Results
+      if: inputs.enable_network_monitoring == true
+      run: |
+        echo "=== COLLECTING NETWORK MONITORING RESULTS ==="
+        
+        if [ -f "network_monitor_job.id" ]; then
+          JOB_ID=$(cat network_monitor_job.id)
+          echo "🔍 Retrieving network monitoring results from job ID: $JOB_ID"
+          
+          powershell -Command "
+            try {
+              \$job = Get-Job -Id $JOB_ID -ErrorAction SilentlyContinue
+              if (\$job) {
+                Write-Host '📋 Network monitoring job status: ' + \$job.State
+                \$results = Receive-Job -Job \$job
+                if (\$results) {
+                  Write-Host '📡 Network monitoring results:'
+                  \$results | ForEach-Object { Write-Host \"   \$_\" }
+                } else {
+                  Write-Host '📡 No network activity detected during monitoring period'
+                }
+                Remove-Job -Job \$job -Force
+              } else {
+                Write-Host '⚠️ Network monitoring job not found'
+              }
+            } catch {
+              Write-Host \"❌ Error retrieving network results: \$(\$_.Exception.Message)\"
+            }
+          "
+        else
+          echo "⚠️ Network monitor job ID not found"
+        fi
+      shell: bash
+
+    # Step 6: Upload Diagnostic Results
+    - name: Upload Detection Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: login-dialog-detection-results
+        path: |
+          detection_results.json
+          network_monitor_start.log
+          .github/scripts/detect-login-dialog.ps1
+          *.log
+        retention-days: 7
+        compression-level: 9
+
+    # Step 7: Generate Summary Report
+    - name: Generate Diagnostic Summary
+      if: always()
+      run: |
+        echo "=== LOGIN DIALOG DETECTION DIAGNOSTIC SUMMARY ==="
+        echo "Date: $(date)"
+        echo "Environment: GitHub Actions Windows Runner"
+        echo "Detection timeout: ${{ inputs.detection_timeout }} seconds"
+        echo "Network monitoring: ${{ inputs.enable_network_monitoring }}"
+        echo ""
+        
+        if [ -f "detection_results.json" ]; then
+          echo "📋 Detection Results:"
+          cat detection_results.json | python -m json.tool 2>/dev/null || cat detection_results.json
+          echo ""
+        fi
+        
+        echo "🎯 Key Questions Answered:"
+        echo "1. Does SimplySign Desktop start successfully in GitHub Actions? [Check process launch]"
+        echo "2. Does a login dialog actually appear? [Check detection methods]"  
+        echo "3. Is it a native dialog or web view? [Check WebView detection]"
+        echo "4. Are there OAuth2 network requests? [Check network monitoring]"
+        echo "5. How long does initialization take? [Check timing in logs]"
+        echo ""
+        
+        echo "💡 Next Steps Based on Results:"
+        echo "- If no detection: Login dialog doesn't appear in headless mode"
+        echo "- If WebView detected: Need web automation instead of window automation" 
+        echo "- If network detected: OAuth2 flow is active, could bypass GUI"
+        echo "- If process issues: Need to fix SimplySign startup configuration"
+        echo ""
+        
+        echo "🔗 Related Files:"
+        echo "- detection_results.json: Detailed detection method results"
+        echo "- dialog_detection.ps1: Full detection script for reference"
+        echo "- *.log: Various monitoring and debug logs"
+        
+      shell: bash
