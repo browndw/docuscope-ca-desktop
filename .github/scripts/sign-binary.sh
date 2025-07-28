@@ -70,7 +70,7 @@ case "$TOOL_TYPE" in
   "osslsigncode")
     echo "Using osslsigncode with PKCS#11..."
     
-    # Create PKCS#11 configuration
+    # Create PKCS#11 configuration for osslsigncode
     PKCS11_CONFIG="pkcs11_signing.conf"
     cat > "$PKCS11_CONFIG" << EOF
 name=SimplySignPKCS
@@ -80,25 +80,65 @@ EOF
     
     echo "✅ Created PKCS#11 configuration: $PKCS11_CONFIG"
     
-    # Sign with osslsigncode + PKCS#11
-    echo "Executing osslsigncode with PKCS#11 interface..."
+    # Method 1: Try osslsigncode with PKCS#11 token approach (simplified)
+    echo "Method 1: Attempting osslsigncode with PKCS#11 token..."
     if "$SIGNING_TOOL" sign \
-        -pkcs11engine "/c/Windows/System32/SimplySignPKCS.dll" \
-        -pkcs11module "/c/Windows/System32/SimplySignPKCS.dll" \
+        -pkcs11 "/c/Windows/System32/SimplySignPKCS.dll" \
         -ts http://time.certum.pl \
         -h sha256 \
         -in "$BINARY_PATH" \
-        -out "${BINARY_PATH}.signed" 2>&1 | tee osslsigncode_output.log; then
+        -out "${BINARY_PATH}.signed" 2>&1 | tee osslsigncode_method1.log; then
         
         # Replace original with signed version
         mv "${BINARY_PATH}.signed" "$BINARY_PATH"
-        echo "✅ Code signing successful with osslsigncode + PKCS#11!"
+        echo "✅ Code signing successful with osslsigncode PKCS#11 token!"
         SIGNING_SUCCESS=true
         
     else
-        echo "❌ osslsigncode + PKCS#11 signing failed"
-        cat osslsigncode_output.log
-        SIGNING_SUCCESS=false
+        echo "❌ osslsigncode PKCS#11 token method failed"
+        cat osslsigncode_method1.log
+        
+        # Method 2: Try alternative osslsigncode PKCS#11 syntax
+        echo "Method 2: Attempting osslsigncode with alternative PKCS#11 syntax..."
+        if "$SIGNING_TOOL" sign \
+            -pkcs11engine "/c/Windows/System32/SimplySignPKCS.dll" \
+            -key "slot_0" \
+            -ts http://time.certum.pl \
+            -h sha256 \
+            -in "$BINARY_PATH" \
+            -out "${BINARY_PATH}.signed" 2>&1 | tee osslsigncode_method2.log; then
+            
+            # Replace original with signed version
+            mv "${BINARY_PATH}.signed" "$BINARY_PATH"
+            echo "✅ Code signing successful with osslsigncode alternative syntax!"
+            SIGNING_SUCCESS=true
+            
+        else
+            echo "❌ osslsigncode alternative syntax failed"
+            cat osslsigncode_method2.log
+            
+            # Method 3: Try with certificate and key specification
+            echo "Method 3: Attempting osslsigncode with cert/key discovery..."
+            if "$SIGNING_TOOL" sign \
+                -pkcs11 "/c/Windows/System32/SimplySignPKCS.dll" \
+                -certs "auto" \
+                -key "auto" \
+                -ts http://time.certum.pl \
+                -h sha256 \
+                -in "$BINARY_PATH" \
+                -out "${BINARY_PATH}.signed" 2>&1 | tee osslsigncode_method3.log; then
+                
+                # Replace original with signed version
+                mv "${BINARY_PATH}.signed" "$BINARY_PATH"
+                echo "✅ Code signing successful with osslsigncode cert/key discovery!"
+                SIGNING_SUCCESS=true
+                
+            else
+                echo "❌ osslsigncode cert/key discovery failed"
+                cat osslsigncode_method3.log
+                SIGNING_SUCCESS=false
+            fi
+        fi
     fi
     
     # Clean up config
@@ -108,23 +148,82 @@ EOF
   "signtool")
     echo "Using signtool with smart card auto-select..."
     
-    # Use signtool with auto-select (/a) to find PKCS#11 certificates
-    echo "Executing signtool with smart card detection..."
+    # Method 1: Use signtool with auto-select (/a) to find PKCS#11 certificates
+    echo "Method 1: Executing signtool with smart card auto-detection..."
     if "$SIGNING_TOOL" sign \
         /a \
         /fd SHA256 \
         /tr http://time.certum.pl \
         /td SHA256 \
         /v \
-        "$BINARY_PATH" 2>&1 | tee signtool_output.log; then
+        "$BINARY_PATH" 2>&1 | tee signtool_method1.log; then
         
         echo "✅ Code signing successful with signtool auto-select!"
         SIGNING_SUCCESS=true
         
     else
         echo "❌ Signtool auto-select signing failed"
-        cat signtool_output.log
-        SIGNING_SUCCESS=false
+        cat signtool_method1.log
+        
+        # Method 2: Try with different certificate store parameters
+        echo "Method 2: Trying signtool with certificate store enumeration..."
+        
+        # First, let's see what certificates signtool can find
+        echo "Enumerating certificates visible to signtool..."
+        "$SIGNING_TOOL" sign /a /fd SHA256 /debug /v "$BINARY_PATH" 2>&1 | head -20 | tee signtool_debug.log || true
+        
+        # Method 3: Try with CSP (Cryptographic Service Provider) approach
+        echo "Method 3: Trying signtool with CSP provider..."
+        if "$SIGNING_TOOL" sign \
+            /a \
+            /fd SHA256 \
+            /tr http://time.certum.pl \
+            /td SHA256 \
+            /sm \
+            /v \
+            "$BINARY_PATH" 2>&1 | tee signtool_method3.log; then
+            
+            echo "✅ Code signing successful with signtool CSP!"
+            SIGNING_SUCCESS=true
+            
+        else
+            echo "❌ Signtool CSP method failed"
+            cat signtool_method3.log
+            
+            # Method 4: Try to find any certificate with code signing capability
+            echo "Method 4: Searching for any code signing certificate..."
+            powershell -Command "
+                Write-Host 'Searching for certificates with code signing capability...'
+                \$certs = Get-ChildItem -Path 'Cert:\\CurrentUser\\My','Cert:\\LocalMachine\\My' -Recurse | Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' -or \$_.Extensions | Where-Object { \$_.Oid.FriendlyName -eq 'Enhanced Key Usage' -and \$_.Format(\$false) -like '*Code Signing*' } }
+                foreach (\$cert in \$certs) {
+                    Write-Host \"Found code signing cert: \$(\$cert.Subject) (Thumbprint: \$(\$cert.Thumbprint))\"
+                    
+                    # Try signing with this specific certificate
+                    try {
+                        \$result = & '$SIGNING_TOOL' sign /sha1 \$cert.Thumbprint /fd SHA256 /tr 'http://time.certum.pl' /td SHA256 /v '$BINARY_PATH' 2>&1
+                        if (\$LASTEXITCODE -eq 0) {
+                            Write-Host '✅ Successfully signed with certificate: ' + \$cert.Thumbprint
+                            exit 0
+                        } else {
+                            Write-Host '❌ Failed to sign with certificate: ' + \$cert.Thumbprint
+                        }
+                    } catch {
+                        Write-Host 'Error trying certificate: ' + \$_.Exception.Message
+                    }
+                }
+                Write-Host 'No working code signing certificates found'
+                exit 1
+            " 2>&1 | tee signtool_method4.log
+            
+            if [ $? -eq 0 ]; then
+                echo "✅ Code signing successful with PowerShell certificate discovery!"
+                SIGNING_SUCCESS=true
+            else
+                echo "❌ PowerShell certificate discovery failed"
+                cat signtool_method4.log
+                SIGNING_SUCCESS=false
+            fi
+        fi
     fi
     ;;
     
