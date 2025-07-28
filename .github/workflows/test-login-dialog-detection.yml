@@ -130,10 +130,10 @@ jobs:
         echo ""
         
         $timeout = [int]$env:DETECTION_TIMEOUT
-        $debug = [System.Convert]::ToBoolean($env:DEBUG_MODE)
+        $debug = if ($env:DEBUG_MODE -eq "true") { $true } else { $false }
         
         Write-Host "Executing comprehensive dialog detection script..."
-        $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds $timeout -DebugMode:$debug
+        $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds $timeout -DebugMode $debug
         
         Write-Host ""
         Write-Host "Detection script completed with result: $result"
