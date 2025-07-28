@@ -1,7 +1,10 @@
 param(
   [int]$TimeoutSeconds = 180,
-  [bool]$DebugMode = $false
+  [string]$DebugMode = "false"
 )
+
+# Convert string to boolean
+$DebugModeBoolean = ($DebugMode -eq "true" -or $DebugMode -eq "True" -or $DebugMode -eq $true)
 
 Write-Host "Starting SimplySign Desktop for dialog detection..."
 
@@ -41,7 +44,7 @@ while ((Get-Date) -lt $endTime) {
   $detectionAttempts++
   $elapsed = ((Get-Date) - $startTime).TotalSeconds
   
-  if ($DebugMode -or ($detectionAttempts % 10 -eq 0)) {
+  if ($DebugModeBoolean -or ($detectionAttempts % 10 -eq 0)) {
     Write-Host "[$([int]$elapsed)s] Detection attempt $detectionAttempts..."
   }
   
@@ -63,7 +66,7 @@ while ((Get-Date) -lt $endTime) {
       }
     }
   } catch {
-    if ($DebugMode) { Write-Host "   Method 1 error: $($_.Exception.Message)" }
+    if ($DebugModeBoolean) { Write-Host "   Method 1 error: $($_.Exception.Message)" }
   }
   
   # METHOD 2: Window Title Enumeration
@@ -88,7 +91,7 @@ while ((Get-Date) -lt $endTime) {
       }
     }
   } catch {
-    if ($DebugMode) { Write-Host "   Method 2 error: $($_.Exception.Message)" }
+    if ($DebugModeBoolean) { Write-Host "   Method 2 error: $($_.Exception.Message)" }
   }
   
   # METHOD 3: All Windows Enumeration
@@ -99,7 +102,7 @@ while ((Get-Date) -lt $endTime) {
       $detectionResults.AllWindowsMethod = $false  # Placeholder - not implemented
     }
   } catch {
-    if ($DebugMode) { Write-Host "   Method 3 error: $($_.Exception.Message)" }
+    if ($DebugModeBoolean) { Write-Host "   Method 3 error: $($_.Exception.Message)" }
   }
   
   # METHOD 4: Web View Detection
@@ -119,7 +122,7 @@ while ((Get-Date) -lt $endTime) {
       $detectionResults.WebViewMethod = $true
     }
   } catch {
-    if ($DebugMode) { Write-Host "   Method 4 error: $($_.Exception.Message)" }
+    if ($DebugModeBoolean) { Write-Host "   Method 4 error: $($_.Exception.Message)" }
   }
   
   # METHOD 5: Child Window Detection
@@ -134,7 +137,7 @@ while ((Get-Date) -lt $endTime) {
       $detectionResults.ChildWindowMethod = $true
     }
   } catch {
-    if ($DebugMode) { Write-Host "   Method 5 error: $($_.Exception.Message)" }
+    if ($DebugModeBoolean) { Write-Host "   Method 5 error: $($_.Exception.Message)" }
   }
   
   # METHOD 6: Network Activity Detection
@@ -146,7 +149,7 @@ while ((Get-Date) -lt $endTime) {
       $detectionResults.NetworkMethod = $true
     }
   } catch {
-    if ($DebugMode) { Write-Host "   Method 6 error: $($_.Exception.Message)" }
+    if ($DebugModeBoolean) { Write-Host "   Method 6 error: $($_.Exception.Message)" }
   }
   
   # Brief pause between detection attempts
