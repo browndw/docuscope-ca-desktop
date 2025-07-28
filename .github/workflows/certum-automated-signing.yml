@@ -238,6 +238,10 @@ jobs:
 
     # Step 5: Code Sign the Binary
     - name: Sign Binary with PKCS#11
+      env:
+        CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
+        CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+        CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
       run: |
         echo "=== PKCS#11 CODE SIGNING TEST ==="
         echo "🎯 Testing the complete PKCS#11 breakthrough pipeline"
