@@ -247,10 +247,7 @@ foreach ($regPath in $regPaths) {
 }
 
 Write-Host ""
-Write-Host "=== LAUNCHING SIMPLYSIGN WITH TOTP AUTHENTICATION ==="
-$otp = Get-TotpCode -Secret $Base32 -Digits $Digits -Period $Period -Algorithm $Algorithm
-Write-Host "Current TOTP: $otp (using $Algorithm algorithm)"
-
+Write-Host "=== LAUNCHING SIMPLYSIGN DESKTOP ==="
 Write-Host "Launching SimplySign Desktop..."
 Write-Host "Executable path: $ExePath"
 
@@ -278,16 +275,25 @@ if ($proc.HasExited) {
     throw "SimplySign Desktop failed to start properly"
 }
 
+Write-Host ""
+Write-Host "=== GENERATING FRESH TOTP AND INJECTING CREDENTIALS ==="
+Write-Host "⏰ Generating TOTP just before injection to maximize freshness..."
+
+# Generate fresh TOTP right before injection (minimize expiration risk)
+$otp = Get-TotpCode -Secret $Base32 -Digits $Digits -Period $Period -Algorithm $Algorithm
+Write-Host "Fresh TOTP: $otp (using $Algorithm algorithm)"
+Write-Host "⚡ Injecting credentials immediately..."
+
 Write-Host "Process is running. Attempting to find login window..."
 
 $wshell = New-Object -ComObject WScript.Shell
 
-# Strategy 1: Try to find the auto-login dialog (if config worked)
+# Simplified window detection to avoid hanging
 $windowFound = $false
 $attempts = 0
-$maxAttempts = 30
+$maxAttempts = 15  # Reduced from 30 to avoid long hangs
 
-# Look for login dialog window titles (based on your research)
+# Look for login dialog window titles
 $loginWindowTitles = @(
     'SimplySign Desktop',
     'Connect to SimplySign',
@@ -328,63 +334,24 @@ while (-not $windowFound -and $attempts -lt $maxAttempts) {
         throw "SimplySign Desktop process terminated unexpectedly"
     }
     
-    # Strategy 2: Manual dialog trigger (fallback for headless environment)
-    if ($attempts -eq 10) {
-        Write-Host "Auto-login dialog not detected. Attempting manual trigger..."
-        
-        # Try right-clicking system tray and triggering connect manually
-        # This might work even in headless environments
-        $wshell.SendKeys("%(TAB)")  # Alt+Tab to cycle windows
-        Start-Sleep -Milliseconds 500
-        
-        # Try common keyboard shortcuts for SimplySign
-        $wshell.SendKeys("^+c")     # Ctrl+Shift+C (common connect shortcut)
-        Start-Sleep -Milliseconds 500
-        
-        # Or try opening context menu and navigating
-        $wshell.SendKeys("{F10}")   # Context menu
-        Start-Sleep -Milliseconds 500
-        $wshell.SendKeys("c")       # 'C' for Connect
-        Start-Sleep -Milliseconds 500
-    }
-    
-    # Wait before next attempt
+    # Wait before next attempt (no problematic SendKeys)
     Start-Sleep -Milliseconds 1000
 }
 
 if (-not $windowFound) {
-    # Final debugging - get process details
-    Write-Host "Failed to find login window. Debugging information:"
-    Write-Host "Process ID: $($proc.Id)"
-    Write-Host "Process Status: $(if ($proc.HasExited) { 'Exited' } else { 'Running' })"
-    
-    try {
-        $processInfo = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
-        if ($processInfo) {
-            Write-Host "Process Details:"
-            Write-Host "  Name: $($processInfo.ProcessName)"
-            Write-Host "  Main Window Title: '$($processInfo.MainWindowTitle)'"
-            Write-Host "  Has Main Window: $($processInfo.MainWindowHandle -ne 0)"
-        }
-    } catch {
-        Write-Host "Could not get process details: $($_.Exception.Message)"
-    }
-    
-    # In headless environments, we might need to proceed without window detection
-    Write-Host "⚠️ Login window not detected. Attempting blind credential injection..."
-    Write-Host "This may work if the login dialog is present but not detectable in headless mode."
-    
-    # Try sending credentials anyway (might work in headless)
+    # In headless environments, proceed with blind credential injection
+    Write-Host "⚠️ Login window not detected after $maxAttempts attempts."
+    Write-Host "Proceeding with blind credential injection for headless environment..."
     $windowFound = $true
 }
 
 # Window has focus or proceeding with blind injection → send the credentials
 if ($windowFound) {
-    Write-Host "Sending credentials to detected or assumed login window..."
+    Write-Host "Sending TOTP to login window (username should be prefilled)..."
     Start-Sleep -Milliseconds 400
-    $wshell.SendKeys("$UserId{TAB}$otp{ENTER}")
-    Write-Host "`n✅ Credentials sent: Username + TOTP"
-    Write-Host "   Username: $UserId"
+    # Original blog post approach: username is prefilled, just send TOTP + ENTER
+    $wshell.SendKeys("$otp{ENTER}")
+    Write-Host "`n✅ Credentials sent: TOTP only (username prefilled)"
     Write-Host "   TOTP: $otp"
     Write-Host "`n⏳ Waiting for authentication to complete..."
     Start-Sleep -Seconds 5
