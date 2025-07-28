@@ -98,7 +98,44 @@ jobs:
         ./.github/scripts/install-simplysign.sh
       shell: bash
 
-    # Step 3: BREAKTHROUGH - Automated TOTP Authentication
+    # Step 3: Setup Signing Tools (Before Authentication)
+    - name: Setup PKCS#11 Signing Tools
+      run: |
+        echo "=== Setting Up Code Signing Tools ==="
+        echo "🔧 Preparing signtool and PKCS#11-compatible tools before authentication"
+        
+        # Source the certificate utilities
+        SCRIPT_DIR="./.github/scripts"
+        source "$SCRIPT_DIR/utils/certificate-utils.sh"
+        
+        # Find signtool first (priority for official Certum method)
+        if find_signtool; then
+          echo "✅ signtool ready for official Certum thumbprint method"
+        else
+          echo "⚠️ signtool not found - will rely on fallback methods"
+        fi
+        
+        # Check for PKCS#11-compatible tools as backup
+        if find_pkcs11_signing_tool; then
+          echo "✅ Found osslsigncode for PKCS#11 signing (backup method)"
+        elif install_osslsigncode; then
+          echo "✅ osslsigncode installed successfully (backup method)"
+        else
+          echo "⚠️ No PKCS#11 tools available - signtool will be primary method"
+        fi
+        
+        # Verify PKCS#11 library exists (for when authentication happens)
+        if [ -f "/c/Windows/System32/SimplySignPKCS.dll" ]; then
+          echo "✅ PKCS#11 library present and ready"
+        else
+          echo "❌ PKCS#11 library not found - SimplySign Desktop installation issue"
+          exit 1
+        fi
+        
+        echo "🎯 All signing tools prepared - ready for authentication"
+      shell: bash
+
+    # Step 4: BREAKTHROUGH - Automated TOTP Authentication
     - name: Connect SimplySign with Automated TOTP
       env:
         CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
@@ -204,47 +241,16 @@ jobs:
         
       shell: bash
 
-    # Step 4: Verify Signing Tools
-    - name: Setup PKCS#11 Signing Tools
-      run: |
-        echo "=== Setting Up PKCS#11 Code Signing Tools ==="
-        echo "🔧 Finding PKCS#11-compatible signing tools (osslsigncode or signtool)"
-        
-        # Source the certificate utilities
-        SCRIPT_DIR="./.github/scripts"
-        source "$SCRIPT_DIR/utils/certificate-utils.sh"
-        
-        # Check PKCS#11 setup
-        if check_pkcs11_certificates; then
-          echo "✅ PKCS#11 certificate access verified"
-        else
-          echo "⚠️ PKCS#11 certificate check had issues, but continuing..."
-        fi
-        
-        # Find PKCS#11-compatible tools
-        if find_pkcs11_signing_tool; then
-          echo "✅ Found osslsigncode for PKCS#11 signing"
-        elif install_osslsigncode; then
-          echo "✅ osslsigncode installed successfully"
-        elif find_signtool; then
-          echo "✅ Found signtool for fallback smart card signing"
-        else
-          echo "❌ No compatible signing tools found"
-          exit 1
-        fi
-        
-        echo "🎯 PKCS#11 signing tools ready"
-      shell: bash
-
-    # Step 5: Code Sign the Binary
-    - name: Sign Binary with PKCS#11
+    # Step 5: Code Sign the Binary (Official Certum Method First)
+    - name: Sign Binary with Official Certum Method
       env:
         CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
         CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
         CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
       run: |
-        echo "=== PKCS#11 CODE SIGNING TEST ==="
-        echo "🎯 Testing the complete PKCS#11 breakthrough pipeline"
+        echo "=== OFFICIAL CERTUM CODE SIGNING ==="
+        echo "🎯 Using exact command from official documentation"
+        echo "📚 Command: signtool sign /sha1 [thumbprint] /tr [timestamp] /td [td_algo] /fd [fd_algo] /v [file]"
         echo ""
         
         # Verify we have the binary to sign
@@ -253,28 +259,135 @@ jobs:
           exit 1
         fi
         
-        echo "✅ Binary to sign: $BINARY_PATH"
-        echo "📏 Binary size: $(stat -c%s "$BINARY_PATH" 2>/dev/null || echo "unknown") bytes"
-        echo ""
-        
-        # Execute the PKCS#11 signing script
-        chmod +x ./.github/scripts/sign-binary.sh
-        ./.github/scripts/sign-binary.sh
-        
-        echo ""
-        if [ $? -eq 0 ]; then
-          echo "🎉 PKCS#11 BREAKTHROUGH SUCCESSFUL!"
-          echo "✅ Complete automated Certum PKCS#11 signing pipeline working!"
-          echo "🔐 TOTP authentication ✅"
-          echo "☁️ PKCS#11 certificate access ✅" 
-          echo "🖊️ Code signing ✅"
-          echo "✔️ Signature verification ✅"
-          echo ""
-          echo "🚀 Ready for production use!"
-        else
-          echo "❌ PKCS#11 signing failed - investigating..."
+        if [ -z "$CERTUM_CERTIFICATE_SHA1" ]; then
+          echo "❌ CERTUM_CERTIFICATE_SHA1 not set"
           exit 1
         fi
+        
+        echo "✅ Binary to sign: $BINARY_PATH"
+        echo "📏 Binary size: $(stat -c%s "$BINARY_PATH" 2>/dev/null || echo "unknown") bytes"
+        echo "🔑 Certificate thumbprint: ${CERTUM_CERTIFICATE_SHA1:0:16}... (truncated for security)"
+        echo ""
+        
+        # Source certificate utilities to find signtool
+        SCRIPT_DIR="./.github/scripts"
+        source "$SCRIPT_DIR/utils/certificate-utils.sh"
+        
+        # Find signtool
+        if ! find_signtool; then
+          echo "❌ signtool not found - cannot use official Certum method"
+          exit 1
+        fi
+        
+        echo "✅ Using signtool: $SIGNTOOL_PATH"
+        echo ""
+        
+        # OFFICIAL CERTUM METHOD - Exact syntax from documentation
+        echo "🔐 Attempting official Certum signing method..."
+        echo "Command: signtool sign /sha1 \"$CERTUM_CERTIFICATE_SHA1\" /tr http://time.certum.pl /td SHA256 /fd SHA256 /v \"$BINARY_PATH\""
+        
+        if "$SIGNTOOL_PATH" sign \
+            /sha1 "$CERTUM_CERTIFICATE_SHA1" \
+            /tr http://time.certum.pl \
+            /td SHA256 \
+            /fd SHA256 \
+            /v \
+            "$BINARY_PATH" 2>&1 | tee official_certum_signing.log; then
+            
+          echo ""
+          echo "🎉 SUCCESS! Official Certum signing method worked!"
+          echo "✅ Binary signed using exact documentation command"
+          
+          # Verify the signature
+          echo ""
+          echo "🔍 Verifying signature..."
+          if "$SIGNTOOL_PATH" verify /pa /v "$BINARY_PATH" 2>&1 | tee signature_verification.log; then
+            echo "✅ Signature verification successful!"
+            
+            # Show signature details
+            echo ""
+            echo "📋 Signature details:"
+            "$SIGNTOOL_PATH" verify /pa /all "$BINARY_PATH" 2>/dev/null || echo "Could not get detailed signature info"
+            
+            echo ""
+            echo "🎉 COMPLETE SUCCESS! Official Certum method working perfectly!"
+            echo "✅ Authentication: ✅"
+            echo "✅ Certificate access: ✅"
+            echo "✅ Official signing: ✅"
+            echo "✅ Signature verification: ✅"
+            echo ""
+            echo "🚀 Ready for production use!"
+            SIGNING_SUCCESS=true
+            
+          else
+            echo "❌ Signature verification failed"
+            cat signature_verification.log
+            SIGNING_SUCCESS=false
+          fi
+          
+        else
+          echo "❌ Official Certum signing method failed"
+          cat official_certum_signing.log
+          SIGNING_SUCCESS=false
+          
+          echo ""
+          echo "🔄 Falling back to alternative signing methods..."
+          
+          # FALLBACK 1: Try without specific timestamp algorithm
+          echo "Fallback 1: Trying without /td parameter..."
+          if "$SIGNTOOL_PATH" sign \
+              /sha1 "$CERTUM_CERTIFICATE_SHA1" \
+              /tr http://time.certum.pl \
+              /fd SHA256 \
+              /v \
+              "$BINARY_PATH" 2>&1 | tee fallback1_signing.log; then
+              
+            echo "✅ Fallback method 1 successful!"
+            SIGNING_SUCCESS=true
+            
+          else
+            echo "❌ Fallback method 1 failed"
+            cat fallback1_signing.log
+            
+            # FALLBACK 2: Try auto-select method
+            echo "Fallback 2: Trying auto-select method..."
+            if "$SIGNTOOL_PATH" sign \
+                /a \
+                /fd SHA256 \
+                /tr http://time.certum.pl \
+                /v \
+                "$BINARY_PATH" 2>&1 | tee fallback2_signing.log; then
+                
+              echo "✅ Fallback method 2 (auto-select) successful!"
+              SIGNING_SUCCESS=true
+              
+            else
+              echo "❌ All signing methods failed"
+              echo "Official method output:"
+              cat official_certum_signing.log
+              echo ""
+              echo "Fallback 1 output:"
+              cat fallback1_signing.log
+              echo ""
+              echo "Fallback 2 output:"
+              cat fallback2_signing.log
+              SIGNING_SUCCESS=false
+            fi
+          fi
+        fi
+        
+        # Final result
+        if [ "$SIGNING_SUCCESS" = "true" ]; then
+          echo ""
+          echo "🎉 CODE SIGNING SUCCESSFUL!"
+          echo "✅ Binary is now properly signed with Certum certificate"
+        else
+          echo ""
+          echo "❌ All code signing methods failed"
+          echo "   Check that SimplySign Desktop is connected and certificate is accessible"
+          exit 1
+        fi
+        
       shell: bash
 
     # Step 6: Upload Results
