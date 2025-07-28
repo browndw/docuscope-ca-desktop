@@ -43,16 +43,16 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
         exit 1
     fi
     
-    # Check CERTUM_USERID
-    if [ -n "${CERTUM_USERID:-}" ]; then
-        if [[ "$CERTUM_USERID" == *@* ]]; then
-            echo "   ✅ CERTUM_USERID: Valid email format"
+    # Check CERTUM_USERNAME
+    if [ -n "${CERTUM_USERNAME:-}" ]; then
+        if [[ "$CERTUM_USERNAME" == *@* ]]; then
+            echo "   ✅ CERTUM_USERNAME: Valid email format"
         else
-            echo "   ❌ CERTUM_USERID: Should be an email address"
+            echo "   ❌ CERTUM_USERNAME: Should be an email address"
             exit 1
         fi
     else
-        echo "   ❌ CERTUM_USERID: Missing"
+        echo "   ❌ CERTUM_USERNAME: Missing"
         exit 1
     fi
     
