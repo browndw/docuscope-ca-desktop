@@ -29,9 +29,9 @@ try {
 }
 
 $Base32    = $q['secret']
-$Digits    = ($q['digits']  -as [int]) ?? 6
-$Period    = ($q['period']  -as [int]) ?? 30
-$Algorithm = (($q['algorithm']) ?? 'SHA1').ToUpper()
+$Digits    = if ($q['digits'] -as [int]) { $q['digits'] -as [int] } else { 6 }
+$Period    = if ($q['period'] -as [int]) { $q['period'] -as [int] } else { 30 }
+$Algorithm = if ($q['algorithm']) { $q['algorithm'].ToUpper() } else { 'SHA1' }
 
 if ($Algorithm -ne 'SHA1') {
     throw "This helper only implements HMAC-SHA1 (requested: $Algorithm)."
