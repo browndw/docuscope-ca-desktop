@@ -42,9 +42,9 @@ jobs:
             Write-Host "Terminating: $($_.ProcessName) (PID: $($_.Id))"
             try {
               $_ | Stop-Process -Force
-              Write-Host "✅ Successfully terminated PID $($_.Id)"
+              Write-Host "Successfully terminated PID $($_.Id)"
             } catch {
-              Write-Host "⚠️ Could not terminate PID $($_.Id): $($_.Exception.Message)"
+              Write-Host "Could not terminate PID $($_.Id): $($_.Exception.Message)"
             }
           }
           
@@ -54,13 +54,13 @@ jobs:
           # Verify cleanup
           $remainingProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
           if ($remainingProcesses) {
-            Write-Host "❌ Warning: $($remainingProcesses.Count) processes still running"
+            Write-Host "Warning: $($remainingProcesses.Count) processes still running"
             $remainingProcesses | ForEach-Object { Write-Host "  Still running: $($_.ProcessName) (PID: $($_.Id))" }
           } else {
-            Write-Host "✅ All SimplySign processes terminated successfully"
+            Write-Host "All SimplySign processes terminated successfully"
           }
         } else {
-          Write-Host "✅ No existing SimplySign processes found"
+          Write-Host "No existing SimplySign processes found"
         }
         
         # Clean any existing registry configuration
@@ -75,14 +75,14 @@ jobs:
           if (Test-Path $regPath) {
             try {
               Remove-Item -Path $regPath -Recurse -Force -ErrorAction SilentlyContinue
-              Write-Host "✅ Cleaned registry path: $regPath"
+              Write-Host "Cleaned registry path: $regPath"
             } catch {
-              Write-Host "⚠️ Could not clean registry path: $regPath"
+              Write-Host "Could not clean registry path: $regPath"
             }
           }
         }
         
-        Write-Host "✅ Environment cleanup completed"
+        Write-Host "Environment cleanup completed"
       shell: powershell
 
     # Step 1: Take Registry Snapshot BEFORE Installation
@@ -110,15 +110,15 @@ jobs:
             $exitCode = $LASTEXITCODE
             
             if ($exitCode -eq 0) {
-              Write-Host "✅ Exported: $regPath -> $fileName"
+              Write-Host "Exported: $regPath -> $fileName"
             } else {
               # Registry key doesn't exist yet - this is expected before installation
-              Write-Host "⚪ Registry key not found (expected): $regPath"
+              Write-Host "Registry key not found (expected): $regPath"
               # Create empty baseline file for comparison later
               "Windows Registry Editor Version 5.00`r`n`r`n; Registry key did not exist before installation`r`n" | Out-File -FilePath $fileName -Encoding ASCII
             }
           } catch {
-            Write-Host "⚠️ Could not export $regPath : $($_.Exception.Message)"
+            Write-Host "Could not export $regPath : $($_.Exception.Message)"
             "Windows Registry Editor Version 5.00`r`n`r`n; Export failed: $($_.Exception.Message)`r`n" | Out-File -FilePath $fileName -Encoding ASCII
           }
         }
@@ -127,7 +127,7 @@ jobs:
         Write-Host "Capturing running processes before installation..."
         Get-Process | Select-Object Name, Id, ProcessName | Export-Csv -Path "processes_before.csv" -NoTypeInformation
         
-        Write-Host "✅ Pre-installation snapshot completed"
+        Write-Host "Pre-installation snapshot completed"
         Get-ChildItem -Name "before_*.reg" | ForEach-Object { Write-Host "  Created: $_" }
         
         # Ensure script exits successfully regardless of registry key existence
@@ -138,7 +138,7 @@ jobs:
     - name: Install SimplySign Desktop  
       run: |
         echo "=== INSTALLING SIMPLYSIGN DESKTOP ==="
-        echo "🔽 Downloading and installing for diagnostic testing..."
+        echo "Downloading and installing for diagnostic testing..."
         echo "Using stable version 9.1.5.52 as configured in install-simplysign.sh"
         chmod +x ./.github/scripts/install-simplysign.sh
         ./.github/scripts/install-simplysign.sh
@@ -169,14 +169,14 @@ jobs:
             $exitCode = $LASTEXITCODE
             
             if ($exitCode -eq 0) {
-              Write-Host "✅ Exported: $regPath -> $fileName"
+              Write-Host "Exported: $regPath -> $fileName"
             } else {
               # Registry key still doesn't exist after installation
-              Write-Host "⚪ Registry key still not found: $regPath"
+              Write-Host "Registry key still not found: $regPath"
               "Windows Registry Editor Version 5.00`r`n`r`n; Registry key did not exist after installation`r`n" | Out-File -FilePath $fileName -Encoding ASCII
             }
           } catch {
-            Write-Host "⚠️ Could not export $regPath : $($_.Exception.Message)"
+            Write-Host "Could not export $regPath : $($_.Exception.Message)"
             "Windows Registry Editor Version 5.00`r`n`r`n; Export failed: $($_.Exception.Message)`r`n" | Out-File -FilePath $fileName -Encoding ASCII
           }
         }
@@ -191,13 +191,144 @@ jobs:
         exit 0
       shell: powershell
 
-    # Step 4: Analyze Registry Changes
+    # Step 4: Start SimplySign to Create User Configuration
+    - name: Initialize SimplySign User Configuration
+      run: |
+        Write-Host "=== INITIALIZING SIMPLYSIGN USER CONFIGURATION ==="
+        Write-Host "Starting SimplySign to allow it to create user-specific settings..."
+        Write-Host ""
+        
+        # Locate SimplySign executable
+        $possiblePaths = @(
+            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySign Desktop.exe",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySign Desktop.exe"
+        )
+        
+        $exePath = $null
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+                $exePath = $path
+                Write-Host "Found SimplySign Desktop at: $path"
+                break
+            }
+        }
+        
+        if (-not $exePath) {
+            Write-Host "Could not locate SimplySign Desktop executable"
+            Write-Host "Installation may have failed or executable is in unexpected location"
+            exit 1
+        }
+        
+        Write-Host "Starting SimplySign Desktop for 30 seconds to initialize user configuration..."
+        try {
+            # Start SimplySign in normal mode (not hidden) to ensure full initialization
+            $process = Start-Process -FilePath $exePath -PassThru
+            Write-Host "Started SimplySign Desktop (PID: $($process.Id))"
+            
+            # Wait 30 seconds for full initialization and user config creation
+            Write-Host "Waiting 30 seconds for initialization and user configuration creation..."
+            Start-Sleep -Seconds 30
+            
+            # Check if process is still running
+            if (-not $process.HasExited) {
+                Write-Host "SimplySign is running and stable after 30 seconds"
+                
+                # Stop the process gracefully
+                try {
+                    $process | Stop-Process -Force
+                    Write-Host "Gracefully terminated SimplySign"
+                } catch {
+                    Write-Host "Error terminating process: $($_.Exception.Message)"
+                }
+                
+                # Verify termination
+                Start-Sleep -Seconds 2
+                $remainingProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
+                if ($remainingProcesses) {
+                    Write-Host "Some SimplySign processes still running:"
+                    $remainingProcesses | ForEach-Object { 
+                        Write-Host "   PID $($_.Id): $($_.ProcessName)"
+                        try {
+                            $_ | Stop-Process -Force
+                            Write-Host "   Force terminated PID $($_.Id)"
+                        } catch {
+                            Write-Host "   Could not terminate PID $($_.Id)"
+                        }
+                    }
+                } else {
+                    Write-Host "All SimplySign processes terminated cleanly"
+                }
+            } else {
+                Write-Host "SimplySign process exited during initialization (Exit Code: $($process.ExitCode))"
+                Write-Host "This may still have created user configuration files"
+            }
+            
+        } catch {
+            Write-Host "Error starting SimplySign: $($_.Exception.Message)"
+            Write-Host "Will continue analysis in case partial configuration was created"
+        }
+        
+        Write-Host ""
+        Write-Host "User configuration initialization completed"
+        Write-Host "Now taking updated registry snapshot to capture any new user settings..."
+      shell: powershell
+
+    # Step 5: Take Registry Snapshot AFTER User Initialization
+    - name: Take Post-User-Init Registry Snapshot
+      run: |
+        Write-Host "=== TAKING POST-USER-INITIALIZATION REGISTRY SNAPSHOT ==="
+        Write-Host "Capturing registry state after SimplySign user initialization..."
+        
+        # Export same registry sections after user initialization
+        $regPaths = @(
+          "HKCU\Software\Certum",
+          "HKCU\Software\SimplySignDesktop", 
+          "HKCU\Software\Asseco",
+          "HKLM\SOFTWARE\Certum",
+          "HKLM\SOFTWARE\SimplySignDesktop",
+          "HKLM\SOFTWARE\Asseco"
+        )
+        
+        Write-Host "Exporting registry sections after user initialization..."
+        foreach ($regPath in $regPaths) {
+          $fileName = "after_user_init_" + ($regPath -replace "\\", "_" -replace ":", "") + ".reg"
+          try {
+            # Use cmd to run reg export and capture both stdout and stderr
+            $output = cmd /c "reg export `"$regPath`" `"$fileName`" /y 2>&1"
+            $exitCode = $LASTEXITCODE
+            
+            if ($exitCode -eq 0) {
+              Write-Host "Exported: $regPath -> $fileName"
+            } else {
+              # Registry key still doesn't exist after user initialization
+              Write-Host "Registry key still not found: $regPath"
+              "Windows Registry Editor Version 5.00`r`n`r`n; Registry key did not exist after user initialization`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+            }
+          } catch {
+            Write-Host "Could not export $regPath : $($_.Exception.Message)"
+            "Windows Registry Editor Version 5.00`r`n`r`n; Export failed: $($_.Exception.Message)`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+          }
+        }
+        
+        Write-Host "Post-user-initialization snapshot completed"
+        Get-ChildItem -Name "after_user_init_*.reg" | ForEach-Object { Write-Host "  Created: $_" }
+        
+        # Ensure script exits successfully regardless of registry key existence  
+        exit 0
+      shell: powershell
+
+    # Step 6: Analyze Registry Changes
     - name: Analyze Registry Changes
       run: |
         Write-Host "=== ANALYZING REGISTRY CHANGES ==="
-        Write-Host "Comparing before/after registry snapshots to find what SimplySign actually sets..."
+        Write-Host "Comparing before/after installation AND after user initialization to find settings..."
         
-        # Compare each registry section
+        # Compare each registry section - now we have 3 snapshots:
+        # 1. before_* (before installation)
+        # 2. after_* (after installation, before user init)  
+        # 3. after_user_init_* (after user initialization)
         $regSections = @(
           "HKCU_Software_Certum",
           "HKCU_Software_SimplySignDesktop", 
@@ -207,104 +338,121 @@ jobs:
           "HKLM_SOFTWARE_Asseco"
         )
         
-        $changesFound = $false
+        $installChangesFound = $false
+        $userInitChangesFound = $false
         
         foreach ($section in $regSections) {
           $beforeFile = "before_$section.reg"
-          $afterFile = "after_$section.reg"
+          $afterInstallFile = "after_$section.reg"
+          $afterUserInitFile = "after_user_init_$section.reg"
           
-          if ((Test-Path $beforeFile) -and (Test-Path $afterFile)) {
-            Write-Host ""
-            Write-Host "=== ANALYZING: $section ==="
-            
+          Write-Host ""
+          Write-Host "=== ANALYZING: $section ==="
+          
+          # Compare installation changes (before -> after install)
+          if ((Test-Path $beforeFile) -and (Test-Path $afterInstallFile)) {
             $beforeContent = Get-Content $beforeFile -Raw
-            $afterContent = Get-Content $afterFile -Raw
+            $afterInstallContent = Get-Content $afterInstallFile -Raw
             
-            if ($beforeContent -ne $afterContent) {
-              Write-Host "CHANGES DETECTED in $section"
-              $changesFound = $true
+            if ($beforeContent -ne $afterInstallContent) {
+              Write-Host "INSTALLATION CHANGES DETECTED in $section"
+              $installChangesFound = $true
               
-              # Try to extract meaningful differences
               $beforeLines = Get-Content $beforeFile
-              $afterLines = Get-Content $afterFile
+              $afterInstallLines = Get-Content $afterInstallFile
+              $installChanges = Compare-Object $beforeLines $afterInstallLines | Where-Object { $_.SideIndicator -eq "=>" }
               
-              # Find new lines (in after but not in before)
-              $newLines = Compare-Object $beforeLines $afterLines | Where-Object { $_.SideIndicator -eq "=>" }
-              
-              if ($newLines) {
-                Write-Host "  NEW REGISTRY ENTRIES:"
-                foreach ($line in $newLines) {
+              if ($installChanges) {
+                Write-Host "  NEW ENTRIES FROM INSTALLATION:"
+                foreach ($line in $installChanges) {
                   $content = $line.InputObject
-                  if ($content -match '^".*"=') {
+                  if ($content -match '^".*"=' -and $content -notmatch "^;") {
+                    Write-Host "    $content"
+                  }
+                }
+              }
+            }
+          }
+          
+          # Compare user initialization changes (after install -> after user init)
+          if ((Test-Path $afterInstallFile) -and (Test-Path $afterUserInitFile)) {
+            $afterInstallContent = Get-Content $afterInstallFile -Raw
+            $afterUserInitContent = Get-Content $afterUserInitFile -Raw
+            
+            if ($afterInstallContent -ne $afterUserInitContent) {
+              Write-Host "USER INITIALIZATION CHANGES DETECTED in $section"
+              $userInitChangesFound = $true
+              
+              $afterInstallLines = Get-Content $afterInstallFile
+              $afterUserInitLines = Get-Content $afterUserInitFile
+              $userInitChanges = Compare-Object $afterInstallLines $afterUserInitLines | Where-Object { $_.SideIndicator -eq "=>" }
+              
+              if ($userInitChanges) {
+                Write-Host "  NEW ENTRIES FROM USER INITIALIZATION:"
+                foreach ($line in $userInitChanges) {
+                  $content = $line.InputObject
+                  if ($content -match '^".*"=' -and $content -notmatch "^;") {
                     Write-Host "    $content"
                     
                     # Look for dialog/cloud/login related entries
-                    if ($content -match "(dialog|cloud|login|logon|connect|auth)" -and $content -notmatch "^;") {
-                      Write-Host "    POTENTIAL LOGIN TRIGGER:"
-                      Write-Host "      $content"
+                    if ($content -match "(dialog|cloud|login|logon|connect|auth|show)" -and $content -notmatch "^;") {
+                      Write-Host "       POTENTIAL LOGIN TRIGGER:"
+                      Write-Host "       $content"
                     }
                     
                     # Look specifically for the macOS equivalent setting we found
                     if ($content -match "ShowLogonDialogAfterApplicationStartup" -or 
                         $content -match "ShowLogonDialog.*Startup" -or
                         $content -match "SimplySignDesktopShowLogonDialog") {
-                      Write-Host "    🎯 FOUND WINDOWS EQUIVALENT OF MACOS SETTING:"
-                      Write-Host "      macOS: SimplySignDesktopShowLogonDialogAfterApplicationStartup"
-                      Write-Host "      Windows: $content"
+                      Write-Host "       FOUND WINDOWS EQUIVALENT OF MACOS SETTING:"
+                      Write-Host "       macOS: SimplySignDesktopShowLogonDialogAfterApplicationStartup"
+                      Write-Host "       Windows: $content"
                     }
                   }
                 }
               }
-              
-              # Save detailed diff to file
-              $diffFile = "registry_changes_$section.txt"
-              Compare-Object $beforeLines $afterLines | Out-File $diffFile
-              Write-Host "  Detailed diff saved to: $diffFile"
-              
             } else {
-              Write-Host "  No changes in $section"
+              Write-Host "  No user initialization changes in $section"
             }
-          } else {
-            Write-Host "  Missing files for $section comparison"
           }
-        }
-        
-        if (-not $changesFound) {
-          Write-Host ""
-          Write-Host "NO REGISTRY CHANGES DETECTED"
-          Write-Host "This could mean:"
-          Write-Host "  1. SimplySign doesn't create registry entries during installation"
-          Write-Host "  2. Registry entries are created on first run, not during install"
-          Write-Host "  3. We're looking in the wrong registry locations"
-        } else {
-          Write-Host ""
-          Write-Host "Registry changes detected and analyzed"
-          Write-Host "Look for lines marked with POTENTIAL LOGIN TRIGGER above"
-        }
-        
-        # Process changes
-        Write-Host ""
-        Write-Host "=== PROCESS CHANGES ==="
-        if ((Test-Path "processes_before.csv") -and (Test-Path "processes_after.csv")) {
-          $processesBefore = Import-Csv "processes_before.csv"
-          $processesAfter = Import-Csv "processes_after.csv"
           
-          $newProcesses = Compare-Object $processesBefore $processesAfter -Property Name | Where-Object { $_.SideIndicator -eq "=>" }
-          if ($newProcesses) {
-            Write-Host "New processes after installation:"
-            $newProcesses | ForEach-Object { Write-Host "  + $($_.Name)" }
-          } else {
-            Write-Host "No new processes detected"
+          # Save detailed diffs
+          if ((Test-Path $beforeFile) -and (Test-Path $afterUserInitFile)) {
+            $beforeLines = Get-Content $beforeFile
+            $afterUserInitLines = Get-Content $afterUserInitFile
+            $fullDiff = Compare-Object $beforeLines $afterUserInitLines
+            if ($fullDiff) {
+              $diffFile = "full_changes_$section.txt"
+              $fullDiff | Out-File $diffFile
+              Write-Host "  Full diff saved to: $diffFile"
+            }
           }
         }
         
+        Write-Host ""
+        Write-Host "=== SUMMARY ==="
+        if ($installChangesFound) {
+          Write-Host "Installation created registry entries (system-wide configuration)"
+        } else {
+          Write-Host "No installation registry changes detected"
+        }
+        
+        if ($userInitChangesFound) {
+          Write-Host "User initialization created additional registry entries (user-specific settings)"
+          Write-Host "   Look for lines marked 'POTENTIAL LOGIN TRIGGER' above"
+        } else {
+          Write-Host "   No user initialization registry changes detected"
+          Write-Host "   This suggests settings may be stored in files, not registry"
+        }
+        
+        Write-Host ""
         Write-Host "Registry analysis completed"
         
         # Ensure script exits successfully
         exit 0
       shell: powershell
 
-    # Step 5: Start SimplySign and Search for Default Setting Location
+    # Step 7: Find Default SimplySignDesktopShowLogonDialogAfterApplicationStartup Location
     - name: Find Default SimplySignDesktopShowLogonDialogAfterApplicationStartup Location
       run: |
         Write-Host "=== FINDING DEFAULT SETTING LOCATION ==="
@@ -508,7 +656,7 @@ jobs:
         Write-Host "Registry search completed"
       shell: powershell
 
-    # Step 6: Modify Found Setting (if located)
+    # Step 8: Modify Found Setting (if located)
     - name: Modify SimplySignDesktopShowLogonDialogAfterApplicationStartup Setting
       run: |
         Write-Host "=== MODIFYING FOUND SETTING ==="
@@ -678,7 +826,7 @@ jobs:
         }
       shell: powershell
 
-    # Step 7: Test Modified Setting
+    # Step 9: Test Modified Setting
     - name: Test SimplySign with Modified Setting
       run: |
         Write-Host "=== TESTING MODIFIED SETTING ==="
@@ -743,7 +891,7 @@ jobs:
         Write-Host "Next step: Run login dialog detection to see if it worked"
       shell: powershell
 
-    # Step 8: Start Network Monitoring (if enabled)
+    # Step 10: Start Network Monitoring (if enabled)
     - name: Start OAuth2 Network Monitoring
       if: inputs.enable_network_monitoring == true
       run: |
@@ -780,7 +928,7 @@ jobs:
         " 2>&1 | tee network_monitor_start.log
       shell: bash
 
-    # Step 9: Login Dialog Detection After Setting Modification
+    # Step 11: Login Dialog Detection After Setting Modification
     - name: Detect Login Dialog - Multiple Methods + Command Testing
       env:
         DETECTION_TIMEOUT: ${{ inputs.detection_timeout }}
@@ -913,7 +1061,7 @@ jobs:
         
       shell: powershell
 
-    # Step 10: Stop Network Monitoring and Collect Results
+    # Step 12: Stop Network Monitoring and Collect Results
     - name: Collect Network Monitoring Results
       if: inputs.enable_network_monitoring == true
       run: |
@@ -948,7 +1096,7 @@ jobs:
         fi
       shell: bash
 
-    # Step 11: Upload Diagnostic Results
+    # Step 13: Upload Diagnostic Results
     - name: Upload Detection Results
       if: always()
       uses: actions/upload-artifact@v4
@@ -961,11 +1109,12 @@ jobs:
           *.log
           *.reg
           registry_changes_*.txt
+          full_changes_*.txt
           processes_*.csv
         retention-days: 7
         compression-level: 9
 
-    # Step 12: Generate Summary Report
+    # Step 14: Generate Summary Report
     - name: Generate Diagnostic Summary
       if: always()
       run: |
