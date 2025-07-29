@@ -17,7 +17,7 @@
 param(
     [int]$ProcessId = 0,
     [int]$TimeoutSeconds = 60,
-    [switch]$DebugMode
+    [switch]$DebugMode = $true  # Enable debug mode by default
 )
 
 $ErrorActionPreference = "Continue"
@@ -213,112 +213,104 @@ function Handle-UpdateDialog {
     Write-Host "Checking for update dialogs..."
     
     foreach ($window in $Windows) {
-        if ($DebugMode) {
-            Write-Host "Examining window: '$($window.Title)' [$($window.ClassName)] Size: $($window.Width)x$($window.Height)"
-        }
+        Write-Host "Examining window: '$($window.Title)' [$($window.ClassName)] Size: $($window.Width)x$($window.Height)"
+        Write-Host "  Handle: $($window.Handle) Visible: $($window.Visible)"
         
-        # Look for update-related dialogs - be more aggressive in detection
+        # Target the EXACT update dialog pattern we know:
+        # - Title: "SimplySign Desktop"
+        # - Class: "#32770" 
+        # - Size: ~328x166 (small dialog)
+        # - Has "Yes" and "No" buttons
         $isUpdateDialog = $false
         
-        # Check title patterns
-        if ($window.Title -like "*update*" -or 
-            $window.Title -like "*version*" -or 
-            $window.Title -like "*download*" -or
-            $window.Title -like "*SimplySign*") {
+        if ($window.Title -eq "SimplySign Desktop" -and 
+            $window.ClassName -eq "#32770" -and 
+            $window.Width -gt 300 -and $window.Width -lt 400 -and
+            $window.Height -gt 150 -and $window.Height -lt 200 -and
+            $window.Visible) {
+            
             $isUpdateDialog = $true
-        }
-        
-        # Check class patterns for standard Windows dialogs
-        if ($window.ClassName -like "*#32770*" -or 
-            $window.ClassName -like "*Dialog*" -or 
-            $window.ClassName -like "*MessageBox*") {
-            # For standard dialog boxes, assume it might be an update dialog if it's small
-            if ($window.Width -lt 500 -and $window.Height -lt 300) {
-                $isUpdateDialog = $true
-            }
+            Write-Host "  ✓ CONFIRMED: This matches the exact update dialog pattern!"
         }
         
         if ($isUpdateDialog) {
-            Write-Host "Found potential update dialog: '$($window.Title)' [$($window.ClassName)]"
+            Write-Host "🎯 TARGETING UPDATE DIALOG: '$($window.Title)' [$($window.ClassName)]"
             Write-Host "  Position: ($($window.Left),$($window.Top)) Size: $($window.Width)x$($window.Height)"
             
+            $dialogDismissed = $false
+            $windowHandle = [IntPtr]$window.Handle
+            
             try {
-                # Method 1: Try UI Automation to find buttons
-                $automation = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$window.Handle)
+                # Method 1: Focus the dialog first
+                Write-Host "Method 1: Activating update dialog..."
+                Add-Type @"
+                    using System;
+                    using System.Runtime.InteropServices;
+                    public class DialogFocusAPI {
+                        [DllImport("user32.dll")]
+                        public static extern bool SetForegroundWindow(IntPtr hWnd);
+                        [DllImport("user32.dll")]
+                        public static extern bool BringWindowToTop(IntPtr hWnd);
+                        [DllImport("user32.dll")]
+                        public static extern bool SetActiveWindow(IntPtr hWnd);
+                    }
+"@
+                [DialogFocusAPI]::BringWindowToTop($windowHandle)
+                [DialogFocusAPI]::SetForegroundWindow($windowHandle)
+                [DialogFocusAPI]::SetActiveWindow($windowHandle)
+                Start-Sleep -Milliseconds 500
+                Write-Host "  ✓ Dialog activated"
+                
+            } catch {
+                Write-Host "  ✗ Dialog activation failed: $($_.Exception.Message)"
+            }
+            
+            # Method 2: Direct "No" button targeting via UI Automation
+            try {
+                Write-Host "Method 2: Searching for 'No' button via UI Automation..."
+                $automation = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
                 
                 if ($automation) {
-                    Write-Host "Analyzing dialog with UI Automation..."
-                    
-                    # Get all descendants to see what's in the dialog
-                    $allElements = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-                    Write-Host "Found $($allElements.Count) UI elements in dialog"
-                    
-                    # Debug: List all elements found
-                    if ($DebugMode) {
-                        foreach ($element in $allElements) {
-                            try {
-                                $controlType = $element.Current.ControlType.ProgrammaticName
-                                $name = $element.Current.Name
-                                $className = $element.Current.ClassName
-                                Write-Host "  Element: $controlType '$name' [$className]"
-                            } catch {
-                                Write-Host "  Element: (could not read properties)"
-                            }
-                        }
-                    }
-                    
-                    # Look for buttons specifically
+                    # Find all buttons
                     $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
                     $buttons = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
                     
-                    Write-Host "Found $($buttons.Count) button(s) in dialog"
+                    Write-Host "  Found $($buttons.Count) button(s) in update dialog"
                     
-                    $buttonClicked = $false
                     foreach ($button in $buttons) {
                         try {
                             $buttonName = $button.Current.Name
                             $buttonId = $button.Current.AutomationId
-                            Write-Host "  Button: '$buttonName' [ID: $buttonId]"
+                            Write-Host "    Button found: '$buttonName' [ID: $buttonId]"
                             
-                            # Look for "No", "Cancel", "Skip", "Later", or empty buttons (often the second button is "No")
-                            if ($buttonName -like "*No*" -or 
-                                $buttonName -like "*Cancel*" -or 
-                                $buttonName -like "*Skip*" -or 
-                                $buttonName -like "*Later*" -or
-                                $buttonName -like "*Remind*" -or
-                                $buttonName -eq "" -or
-                                $buttonId -eq "2" -or
-                                $buttonId -eq "7") {  # Common IDs for "No" and "Cancel"
+                            # Look specifically for "No" button
+                            if ($buttonName -eq "No" -or $buttonName -eq "&No" -or $buttonId -eq "7") {
+                                Write-Host "    🎯 Found 'No' button - clicking it!"
                                 
-                                Write-Host "Attempting to click '$buttonName' button (ID: $buttonId)..."
-                                
-                                # Try to get the invoke pattern
+                                # Try InvokePattern
                                 try {
                                     $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
                                     if ($invokePattern) {
                                         $invokePattern.Invoke()
-                                        Write-Host "Successfully clicked button via InvokePattern"
-                                        $buttonClicked = $true
+                                        Write-Host "    ✓ Successfully clicked 'No' button via InvokePattern"
+                                        $dialogDismissed = $true
                                         Start-Sleep -Seconds 2
                                         break
                                     }
                                 } catch {
-                                    Write-Host "InvokePattern failed: $($_.Exception.Message)"
+                                    Write-Host "    ✗ InvokePattern failed: $($_.Exception.Message)"
                                 }
                                 
-                                # Try clicking via bounding rectangle
+                                # Try coordinate click as backup
                                 try {
                                     $rect = $button.Current.BoundingRectangle
                                     $centerX = $rect.Left + ($rect.Width / 2)
                                     $centerY = $rect.Top + ($rect.Height / 2)
                                     
-                                    Write-Host "Trying to click at coordinates ($centerX, $centerY)..."
-                                    
-                                    # Use Windows API to click
                                     Add-Type @"
                                         using System;
                                         using System.Runtime.InteropServices;
-                                        public class MouseAPI {
+                                        public class NoButtonClickAPI {
                                             [DllImport("user32.dll")]
                                             public static extern bool SetCursorPos(int x, int y);
                                             [DllImport("user32.dll")]
@@ -328,80 +320,118 @@ function Handle-UpdateDialog {
                                         }
 "@
                                     
-                                    [MouseAPI]::SetCursorPos([int]$centerX, [int]$centerY)
+                                    [NoButtonClickAPI]::SetCursorPos([int]$centerX, [int]$centerY)
                                     Start-Sleep -Milliseconds 100
-                                    [MouseAPI]::mouse_event([MouseAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
-                                    [MouseAPI]::mouse_event([MouseAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                                    [NoButtonClickAPI]::mouse_event([NoButtonClickAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                                    [NoButtonClickAPI]::mouse_event([NoButtonClickAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
                                     
-                                    Write-Host "Clicked at coordinates"
-                                    $buttonClicked = $true
+                                    Write-Host "    ✓ Clicked 'No' button at coordinates ($centerX, $centerY)"
+                                    $dialogDismissed = $true
                                     Start-Sleep -Seconds 2
                                     break
                                     
                                 } catch {
-                                    Write-Host "Coordinate click failed: $($_.Exception.Message)"
+                                    Write-Host "    ✗ Coordinate click failed: $($_.Exception.Message)"
                                 }
                             }
                         } catch {
-                            Write-Host "Could not analyze button: $($_.Exception.Message)"
+                            Write-Host "    ✗ Could not analyze button: $($_.Exception.Message)"
                         }
-                    }
-                    
-                    if ($buttonClicked) {
-                        return $true
                     }
                 }
                 
             } catch {
-                Write-Host "UI Automation failed: $($_.Exception.Message)"
+                Write-Host "  ✗ UI Automation failed: $($_.Exception.Message)"
             }
             
-            # Method 2: Try keyboard shortcuts
-            Write-Host "Trying keyboard shortcuts to dismiss dialog..."
+            if (-not $dialogDismissed) {
+                # Method 3: Keyboard shortcut for "No" button
+                Write-Host "Method 3: Using keyboard to select 'No' button..."
+                
+                try {
+                    Add-Type -AssemblyName System.Windows.Forms
+                    
+                    # Since "Yes" is default and focused, Tab once to get to "No", then press Enter
+                    Write-Host "  Pressing Tab to move to 'No' button..."
+                    [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
+                    Start-Sleep -Milliseconds 300
+                    
+                    Write-Host "  Pressing Enter to click 'No' button..."
+                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                    Start-Sleep -Seconds 1
+                    
+                    Write-Host "    ✓ Tab+Enter sequence sent to select 'No'"
+                    $dialogDismissed = $true
+                    
+                } catch {
+                    Write-Host "  ✗ Keyboard method failed: $($_.Exception.Message)"
+                }
+            }
             
-            # Focus the window first
-            try {
-                Add-Type @"
-                    using System;
-                    using System.Runtime.InteropServices;
-                    public class WindowAPI2 {
-                        [DllImport("user32.dll")]
-                        public static extern bool SetForegroundWindow(IntPtr hWnd);
-                        [DllImport("user32.dll")]
-                        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-                    }
+            if (-not $dialogDismissed) {
+                # Method 4: Direct Windows message to simulate "No" button (ID 7)
+                Write-Host "Method 4: Sending WM_COMMAND for 'No' button (ID 7)..."
+                
+                try {
+                    Add-Type @"
+                        using System;
+                        using System.Runtime.InteropServices;
+                        public class NoButtonMessageAPI {
+                            [DllImport("user32.dll")]
+                            public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+                            public const uint WM_COMMAND = 0x0111;
+                            public const int IDNO = 7;
+                        }
 "@
-                [WindowAPI2]::SetForegroundWindow([IntPtr]$window.Handle)
-                [WindowAPI2]::ShowWindow([IntPtr]$window.Handle, 1)
-                Start-Sleep -Milliseconds 500
+                    
+                    # Send WM_COMMAND with IDNO (7) to simulate clicking "No" button
+                    [NoButtonMessageAPI]::SendMessage($windowHandle, [NoButtonMessageAPI]::WM_COMMAND, [IntPtr][NoButtonMessageAPI]::IDNO, [IntPtr]::Zero)
+                    Write-Host "  ✓ Sent WM_COMMAND for 'No' button"
+                    $dialogDismissed = $true
+                    Start-Sleep -Seconds 2
+                    
+                } catch {
+                    Write-Host "  ✗ Windows message method failed: $($_.Exception.Message)"
+                }
+            }
+            
+            if (-not $dialogDismissed) {
+                # Method 5: Try "N" key (mnemonic for "No")
+                Write-Host "Method 5: Trying 'N' key (mnemonic for No)..."
                 
-                # Try different key combinations
-                Add-Type -AssemblyName System.Windows.Forms
+                try {
+                    Add-Type -AssemblyName System.Windows.Forms
+                    [System.Windows.Forms.SendKeys]::SendWait("N")
+                    Write-Host "  ✓ Sent 'N' key"
+                    $dialogDismissed = $true
+                    Start-Sleep -Seconds 1
+                    
+                } catch {
+                    Write-Host "  ✗ 'N' key method failed: $($_.Exception.Message)"
+                }
+            }
+            
+            if ($dialogDismissed) {
+                Write-Host "🎉 UPDATE DIALOG DISMISSAL ATTEMPTED!"
+                Write-Host "  Waiting 3 seconds for dialog to close..."
+                Start-Sleep -Seconds 3
                 
-                # Try "N" for No
-                Write-Host "Sending 'N' key for No..."
-                [System.Windows.Forms.SendKeys]::SendWait("N")
-                Start-Sleep -Seconds 1
-                
-                # Try Escape
-                Write-Host "Sending Escape key..."
-                [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
-                Start-Sleep -Seconds 1
-                
-                # Try Alt+F4
-                Write-Host "Sending Alt+F4..."
-                [System.Windows.Forms.SendKeys]::SendWait("%{F4}")
-                Start-Sleep -Seconds 1
-                
-                # Try Tab+Enter (assuming No is second button)
-                Write-Host "Sending Tab+Enter..."
-                [System.Windows.Forms.SendKeys]::SendWait("{TAB}{ENTER}")
-                Start-Sleep -Seconds 1
-                
-                return $true
-                
-            } catch {
-                Write-Host "Keyboard method failed: $($_.Exception.Message)"
+                # Verify the dialog was actually dismissed
+                try {
+                    $checkWindow = Get-WindowInfo -WindowHandle $windowHandle
+                    if (-not $checkWindow.Visible) {
+                        Write-Host "  ✅ CONFIRMED: Update dialog successfully dismissed!"
+                        return $true
+                    } else {
+                        Write-Host "  ⚠️  Dialog still visible, but dismissal was attempted"
+                        return $true  # Still return true to avoid infinite retry
+                    }
+                } catch {
+                    Write-Host "  ✅ Dialog handle no longer valid - likely dismissed!"
+                    return $true
+                }
+            } else {
+                Write-Host "  ❌ All dismissal methods failed for this dialog"
             }
         }
     }
