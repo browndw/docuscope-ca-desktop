@@ -255,19 +255,65 @@ public class CloseDialogAPI {
     public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")]
     public static extern bool SetActiveWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
     public const uint WM_CLOSE = 0x0010;
+    public const uint WM_DESTROY = 0x0002;
+    public const uint WM_SYSCOMMAND = 0x0112;
+    public const uint SC_CLOSE = 0xF060;
 }
 "@
                 # First activate the dialog
-                [CloseDialogAPI]::BringWindowToTop($windowHandle)
-                [CloseDialogAPI]::SetForegroundWindow($windowHandle)
-                [CloseDialogAPI]::SetActiveWindow($windowHandle)
-                Start-Sleep -Milliseconds 300
+                Write-Host "  Activating dialog at handle $($window.Handle)..."
+                $activated = [CloseDialogAPI]::BringWindowToTop($windowHandle)
+                Write-Host "    BringWindowToTop result: $activated"
                 
-                # Send WM_CLOSE message
-                [CloseDialogAPI]::SendMessage($windowHandle, [CloseDialogAPI]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
-                Write-Host "  Sent WM_CLOSE message to dialog"
-                $dialogDismissed = $true
+                $foreground = [CloseDialogAPI]::SetForegroundWindow($windowHandle)
+                Write-Host "    SetForegroundWindow result: $foreground"
+                
+                $active = [CloseDialogAPI]::SetActiveWindow($windowHandle)
+                Write-Host "    SetActiveWindow result: $active"
+                
+                Start-Sleep -Milliseconds 500
+                
+                # Check if window is still valid
+                $isValid = [CloseDialogAPI]::IsWindow($windowHandle)
+                Write-Host "    Window still valid: $isValid"
+                
+                if ($isValid) {
+                    # Try multiple close methods
+                    Write-Host "  Sending WM_CLOSE..."
+                    $closeResult = [CloseDialogAPI]::SendMessage($windowHandle, [CloseDialogAPI]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+                    Write-Host "    WM_CLOSE result: $closeResult"
+                    
+                    Start-Sleep -Milliseconds 500
+                    
+                    # Check if still valid after WM_CLOSE
+                    $stillValid = [CloseDialogAPI]::IsWindow($windowHandle)
+                    Write-Host "    Window still valid after WM_CLOSE: $stillValid"
+                    
+                    if ($stillValid) {
+                        Write-Host "  Sending WM_SYSCOMMAND SC_CLOSE..."
+                        $sysclose = [CloseDialogAPI]::SendMessage($windowHandle, [CloseDialogAPI]::WM_SYSCOMMAND, [IntPtr][CloseDialogAPI]::SC_CLOSE, [IntPtr]::Zero)
+                        Write-Host "    WM_SYSCOMMAND result: $sysclose"
+                        
+                        Start-Sleep -Milliseconds 500
+                        
+                        $finalValid = [CloseDialogAPI]::IsWindow($windowHandle)
+                        Write-Host "    Window still valid after SC_CLOSE: $finalValid"
+                        
+                        if (-not $finalValid) {
+                            Write-Host "  SUCCESS: Dialog dismissed via WM_SYSCOMMAND"
+                            $dialogDismissed = $true
+                        }
+                    } else {
+                        Write-Host "  SUCCESS: Dialog dismissed via WM_CLOSE"
+                        $dialogDismissed = $true
+                    }
+                } else {
+                    Write-Host "  Window handle became invalid during activation"
+                }
+                
                 Start-Sleep -Seconds 2
                 
             } catch {
@@ -283,6 +329,9 @@ public class CloseDialogAPI {
                     $closeButtonX = $window.Right - 20
                     $closeButtonY = $window.Top + 10
                     
+                    Write-Host "  Calculated close button position: ($closeButtonX, $closeButtonY)"
+                    Write-Host "  Dialog bounds: Left=$($window.Left) Top=$($window.Top) Right=$($window.Right) Bottom=$($window.Bottom)"
+                    
                     Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -291,17 +340,34 @@ public class CloseButtonAPI {
     public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
     public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     public const uint MOUSEEVENTF_LEFTUP = 0x04;
+    
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT {
+        public int X;
+        public int Y;
+    }
 }
 "@
                     
+                    # Move cursor and verify position
                     [CloseButtonAPI]::SetCursorPos($closeButtonX, $closeButtonY)
-                    Start-Sleep -Milliseconds 100
+                    Start-Sleep -Milliseconds 200
+                    
+                    # Verify cursor position
+                    $cursorPos = New-Object CloseButtonAPI+POINT
+                    [CloseButtonAPI]::GetCursorPos([ref]$cursorPos)
+                    Write-Host "  Cursor moved to: ($($cursorPos.X), $($cursorPos.Y))"
+                    
+                    # Perform click
                     [CloseButtonAPI]::mouse_event([CloseButtonAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                    Start-Sleep -Milliseconds 50
                     [CloseButtonAPI]::mouse_event([CloseButtonAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
                     
-                    Write-Host "  Clicked close button 'X' at coordinates ($closeButtonX, $closeButtonY)"
+                    Write-Host "  Performed click at close button coordinates"
                     $dialogDismissed = $true
                     Start-Sleep -Seconds 2
                     
