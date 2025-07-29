@@ -241,33 +241,115 @@ function Handle-UpdateDialog {
             $windowHandle = [IntPtr]$window.Handle
             
             try {
-                # Method 1: Focus the dialog first
-                Write-Host "Method 1: Activating update dialog..."
+                # Method 0: WM_CLOSE message (most reliable for dialogs)
+                Write-Host "Method 0: Sending WM_CLOSE message to dialog..."
                 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
-public class DialogFocusAPI {
+public class CloseDialogAPI {
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")]
     public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")]
     public static extern bool SetActiveWindow(IntPtr hWnd);
+    public const uint WM_CLOSE = 0x0010;
 }
 "@
-                [DialogFocusAPI]::BringWindowToTop($windowHandle)
-                [DialogFocusAPI]::SetForegroundWindow($windowHandle)
-                [DialogFocusAPI]::SetActiveWindow($windowHandle)
-                Start-Sleep -Milliseconds 500
-                Write-Host "  Dialog activated"
+                # First activate the dialog
+                [CloseDialogAPI]::BringWindowToTop($windowHandle)
+                [CloseDialogAPI]::SetForegroundWindow($windowHandle)
+                [CloseDialogAPI]::SetActiveWindow($windowHandle)
+                Start-Sleep -Milliseconds 300
+                
+                # Send WM_CLOSE message
+                [CloseDialogAPI]::SendMessage($windowHandle, [CloseDialogAPI]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+                Write-Host "  Sent WM_CLOSE message to dialog"
+                $dialogDismissed = $true
+                Start-Sleep -Seconds 2
                 
             } catch {
-                Write-Host "  Dialog activation failed: $($_.Exception.Message)"
+                Write-Host "  WM_CLOSE method failed: $($_.Exception.Message)"
             }
             
-            # Method 2: Direct "No" button targeting via UI Automation
-            try {
-                Write-Host "Method 2: Searching for 'No' button via UI Automation..."
+            if (-not $dialogDismissed) {
+                # Method 1: Click the "X" close button (calculated coordinates)
+                Write-Host "Method 1: Clicking 'X' close button at calculated coordinates..."
+                
+                try {
+                    # Calculate close button position (typically 20px from right edge, 10px from top)
+                    $closeButtonX = $window.Right - 20
+                    $closeButtonY = $window.Top + 10
+                    
+                    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class CloseButtonAPI {
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
+    public const uint MOUSEEVENTF_LEFTUP = 0x04;
+}
+"@
+                    
+                    [CloseButtonAPI]::SetCursorPos($closeButtonX, $closeButtonY)
+                    Start-Sleep -Milliseconds 100
+                    [CloseButtonAPI]::mouse_event([CloseButtonAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                    [CloseButtonAPI]::mouse_event([CloseButtonAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                    
+                    Write-Host "  Clicked close button 'X' at coordinates ($closeButtonX, $closeButtonY)"
+                    $dialogDismissed = $true
+                    Start-Sleep -Seconds 2
+                    
+                } catch {
+                    Write-Host "  Close button click failed: $($_.Exception.Message)"
+                }
+            }
+            
+            if (-not $dialogDismissed) {
+                # Method 2: Click the "No" button (calculated coordinates)
+                Write-Host "Method 2: Clicking 'No' button at calculated coordinates..."
+                
+                try {
+                    # Calculate "No" button position (same distance from corner as close button)
+                    $noButtonX = $window.Right - 20
+                    $noButtonY = $window.Bottom - 20
+                    
+                    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class NoButtonCoordAPI {
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
+    public const uint MOUSEEVENTF_LEFTUP = 0x04;
+}
+"@
+                    
+                    [NoButtonCoordAPI]::SetCursorPos($noButtonX, $noButtonY)
+                    Start-Sleep -Milliseconds 100
+                    [NoButtonCoordAPI]::mouse_event([NoButtonCoordAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                    [NoButtonCoordAPI]::mouse_event([NoButtonCoordAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                    
+                    Write-Host "  Clicked 'No' button at coordinates ($noButtonX, $noButtonY)"
+                    $dialogDismissed = $true
+                    Start-Sleep -Seconds 2
+                    
+                } catch {
+                    Write-Host "  No button coordinate click failed: $($_.Exception.Message)"
+                }
+            }
+            
+            if (-not $dialogDismissed) {
+                # Method 3: Direct "No" button targeting via UI Automation
+                try {
+                    Write-Host "Method 3: Searching for 'No' button via UI Automation..."
                 $automation = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
                 
                 if ($automation) {
@@ -345,8 +427,8 @@ public class NoButtonClickAPI {
             }
             
             if (-not $dialogDismissed) {
-                # Method 3: Keyboard shortcut for "No" button
-                Write-Host "Method 3: Using keyboard to select 'No' button..."
+                # Method 4: Keyboard shortcut for "No" button
+                Write-Host "Method 4: Using keyboard to select 'No' button..."
                 
                 try {
                     Add-Type -AssemblyName System.Windows.Forms
@@ -369,8 +451,8 @@ public class NoButtonClickAPI {
             }
             
             if (-not $dialogDismissed) {
-                # Method 4: Direct Windows message to simulate "No" button (ID 7)
-                Write-Host "Method 4: Sending WM_COMMAND for 'No' button (ID 7)..."
+                # Method 5: Direct Windows message to simulate "No" button (ID 7)
+                Write-Host "Method 5: Sending WM_COMMAND for 'No' button (ID 7)..."
                 
                 try {
                     Add-Type @"
@@ -396,8 +478,8 @@ public class NoButtonMessageAPI {
             }
             
             if (-not $dialogDismissed) {
-                # Method 5: Try "N" key (mnemonic for "No")
-                Write-Host "Method 5: Trying 'N' key (mnemonic for No)..."
+                # Method 6: Try "N" key (mnemonic for "No")
+                Write-Host "Method 6: Trying 'N' key (mnemonic for No)..."
                 
                 try {
                     Add-Type -AssemblyName System.Windows.Forms
