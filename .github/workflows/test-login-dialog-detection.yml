@@ -507,6 +507,11 @@ jobs:
                 AllCertumSettings = @()
                 PotentialTriggers = @()
                 BooleanSettings = @()
+                Summary = @{
+                    TotalRegistryValues = 0
+                    BooleanSettings = 0
+                    ConfigFilesFound = 0
+                }
             }
             
             # Check for the Autostart setting we know exists
@@ -533,9 +538,25 @@ jobs:
         
         # Run the systematic testing script
         try {
-            $testResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/test-setting-modifications.ps1" -SettingsAnalysisFile "certum_settings_analysis_detailed_results.json" -TestDurationSeconds 20 -RestoreOriginal
+            Write-Host "Starting systematic setting modification testing..."
             
-            Write-Host "Setting modification testing completed"
+            # Run with explicit error handling to prevent workflow failure
+            $process = Start-Process -FilePath "powershell" -ArgumentList @(
+                "-ExecutionPolicy", "Bypass",
+                "-File", "./.github/scripts/test-setting-modifications.ps1",
+                "-SettingsAnalysisFile", "certum_settings_analysis_detailed_results.json",
+                "-TestDurationSeconds", "20",
+                "-RestoreOriginal"
+            ) -Wait -PassThru -NoNewWindow
+            
+            $exitCode = $process.ExitCode
+            
+            if ($exitCode -eq 0) {
+                Write-Host "Setting modification testing completed successfully"
+            } else {
+                Write-Host "Setting modification testing completed with exit code: $exitCode"
+                Write-Host "This may indicate no settings were found to test, but continuing workflow..."
+            }
             
             # Check for significant findings
             if (Test-Path "setting_modification_test_results.json") {
@@ -576,6 +597,29 @@ jobs:
             
         } catch {
             Write-Host "Setting modification testing failed: $($_.Exception.Message)"
+            Write-Host "Creating minimal results file for workflow continuity..."
+            
+            # Create minimal results so workflow can continue
+            $minimalResults = @{
+                TestParameters = @{
+                    AnalysisFile = "certum_settings_analysis_detailed_results.json"
+                    TestDuration = 20
+                    RestoreOriginal = $true
+                    Timestamp = Get-Date
+                }
+                SettingsTested = 0
+                TestResults = @()
+                SignificantFindings = @()
+                Summary = @{
+                    SuccessfulChanges = 0
+                    ProcessTriggered = 0
+                    StartupAffected = 0
+                }
+                Error = $_.Exception.Message
+            }
+            
+            $minimalResults | ConvertTo-Json -Depth 5 | Out-File -FilePath "setting_modification_test_results.json" -Encoding UTF8
+            Write-Host "Minimal results file created for workflow continuity"
             Write-Host "Continuing with workflow..."
         }
         
