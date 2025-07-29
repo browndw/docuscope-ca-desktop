@@ -194,8 +194,8 @@ jobs:
     # Step 4: Analyze Registry Changes
     - name: Analyze Registry Changes
       run: |
-        echo "=== ANALYZING REGISTRY CHANGES ==="
-        echo "Comparing before/after registry snapshots to find what SimplySign actually sets..."
+        Write-Host "=== ANALYZING REGISTRY CHANGES ==="
+        Write-Host "Comparing before/after registry snapshots to find what SimplySign actually sets..."
         
         # Compare each registry section
         $regSections = @(
