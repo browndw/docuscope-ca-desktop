@@ -363,7 +363,7 @@ $results.Summary = @{
     RecommendedActions = @()
 }
 
-Write-Host "📊 ANALYSIS RESULTS:"
+Write-Host "ANALYSIS RESULTS:"
 Write-Host "  Total registry values found: $($results.Summary.TotalRegistryValues)"
 Write-Host "  Boolean-like settings: $($results.Summary.BooleanSettings)"
 Write-Host "  Potential login triggers: $($results.Summary.PotentialLoginTriggers)"
@@ -451,7 +451,7 @@ $summaryContent | Out-File -FilePath $summaryFile -Encoding UTF8
 Write-Host "Summary report saved to: $summaryFile"
 
 Write-Host ""
-Write-Host "✅ ANALYSIS COMPLETE"
+Write-Host "ANALYSIS COMPLETE"
 Write-Host "Review the generated files for detailed findings and next steps."
 
 # Return key findings for the workflow
