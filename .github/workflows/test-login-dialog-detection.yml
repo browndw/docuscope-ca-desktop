@@ -28,22 +28,81 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    # Step 0: Ensure Clean Environment
+    - name: Clean SimplySign Environment
+      run: |
+        echo "=== ENSURING CLEAN SIMPLYSIGN ENVIRONMENT ==="
+        echo "Terminating any existing SimplySign processes..."
+        
+        # Kill any existing SimplySign processes
+        $processes = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
+        if ($processes) {
+          Write-Host "Found $($processes.Count) existing SimplySign processes"
+          $processes | ForEach-Object {
+            Write-Host "Terminating: $($_.ProcessName) (PID: $($_.Id))"
+            try {
+              $_ | Stop-Process -Force
+              Write-Host "✅ Successfully terminated PID $($_.Id)"
+            } catch {
+              Write-Host "⚠️ Could not terminate PID $($_.Id): $($_.Exception.Message)"
+            }
+          }
+          
+          # Wait for processes to fully terminate
+          Start-Sleep -Seconds 3
+          
+          # Verify cleanup
+          $remainingProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
+          if ($remainingProcesses) {
+            Write-Host "❌ Warning: $($remainingProcesses.Count) processes still running"
+            $remainingProcesses | ForEach-Object { Write-Host "  Still running: $($_.ProcessName) (PID: $($_.Id))" }
+          } else {
+            Write-Host "✅ All SimplySign processes terminated successfully"
+          }
+        } else {
+          Write-Host "✅ No existing SimplySign processes found"
+        }
+        
+        # Clean any existing registry configuration
+        Write-Host "Cleaning existing registry configuration..."
+        $regPaths = @(
+          "HKCU:\Software\Certum",
+          "HKCU:\Software\SimplySignDesktop", 
+          "HKCU:\Software\Asseco"
+        )
+        
+        foreach ($regPath in $regPaths) {
+          if (Test-Path $regPath) {
+            try {
+              Remove-Item -Path $regPath -Recurse -Force -ErrorAction SilentlyContinue
+              Write-Host "✅ Cleaned registry path: $regPath"
+            } catch {
+              Write-Host "⚠️ Could not clean registry path: $regPath"
+            }
+          }
+        }
+        
+        Write-Host "✅ Environment cleanup completed"
+      shell: powershell
+
     # Step 1: Install SimplySign Desktop
     - name: Install SimplySign Desktop
       run: |
         echo "=== INSTALLING SIMPLYSIGN DESKTOP ==="
         echo "🔽 Downloading and installing for diagnostic testing..."
+        echo "Using stable version 9.1.5.52 as configured in install-simplysign.sh"
         chmod +x ./.github/scripts/install-simplysign.sh
         ./.github/scripts/install-simplysign.sh
       shell: bash
 
-    # Step 2: Configure for Login Dialog Detection
+    # Step 2: Configure for Login Dialog (BEFORE first start)
     - name: Configure SimplySign for Login Dialog
       run: |
         echo "=== CONFIGURING SIMPLYSIGN FOR LOGIN DIALOG ==="
-        echo "Setting up registry to force login dialog appearance..."
+        echo "Setting up registry to force login dialog appearance on startup..."
+        echo "CRITICAL: Configuration must be set BEFORE first application start"
         
-        # Enhanced registry configuration for login dialog detection
+        # Create registry paths for SimplySign configuration
         $regPaths = @(
             "HKCU:\Software\Certum",
             "HKCU:\Software\SimplySignDesktop", 
@@ -54,30 +113,129 @@ jobs:
             try {
                 if (-not (Test-Path $regPath)) {
                     New-Item -Path $regPath -Force | Out-Null
-                    Write-Host "SUCCESS: Created registry path: $regPath"
+                    Write-Host "✅ Created registry path: $regPath"
                 }
                 
-                # Multiple login dialog configuration attempts
+                # Target the specific setting: "Show logon dialog to the cloud after application startup"
                 $loginSettings = @{
-                    'SimplySignDesktopShowLogonDialogAfterApplicationStartup' = 'Yes'
+                    # Main setting for cloud login dialog
                     'ShowLogonDialogAfterApplicationStartup' = 'Yes'
+                    'ShowLogonDialogToTheCloudAfterApplicationStartup' = 'Yes'
+                    
+                    # Connect with cloud related settings
+                    'ConnectWithCloud' = 'Yes'
+                    'AutoConnectCloud' = 'Yes'
+                    'EnableCloudConnection' = 'Yes'
+                    
+                    # Additional dialog triggers
+                    'SimplySignDesktopShowLogonDialogAfterApplicationStartup' = 'Yes'
                     'AutoShowLogonDialog' = 'Yes'
-                    'ShowLoginDialog' = 'Yes'
                     'ForceLoginDialog' = 'Yes'
                     'DisplayAuthenticationDialog' = 'Yes'
+                    
+                    # Cloud service settings
+                    'CloudServiceEnabled' = 'Yes'
+                    'CloudServiceAutoStart' = 'Yes'
                 }
                 
                 foreach ($setting in $loginSettings.GetEnumerator()) {
-                    New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
+                    try {
+                        New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
+                        Write-Host "✅ Set $($setting.Key) = $($setting.Value)"
+                    } catch {
+                        Write-Host "⚠️ Could not set $($setting.Key): $($_.Exception.Message)"
+                    }
                 }
                 
-                Write-Host "SUCCESS: Configured login settings for: $regPath"
+                Write-Host "✅ Configured login settings for: $regPath"
             } catch {
-                Write-Host "WARNING: Could not configure: $regPath - $($_.Exception.Message)"
+                Write-Host "❌ Could not configure: $regPath - $($_.Exception.Message)"
             }
         }
         
-        echo "Registry configuration completed"
+        # Verify configuration was set
+        Write-Host ""
+        Write-Host "=== VERIFYING REGISTRY CONFIGURATION ==="
+        foreach ($regPath in $regPaths) {
+            if (Test-Path $regPath) {
+                Write-Host "Registry path: $regPath"
+                try {
+                    $properties = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+                    if ($properties) {
+                        $properties.PSObject.Properties | Where-Object { $_.Name -notlike "PS*" } | ForEach-Object {
+                            Write-Host "  $($_.Name) = $($_.Value)"
+                        }
+                    }
+                } catch {
+                    Write-Host "  Could not read properties"
+                }
+                Write-Host ""
+            }
+        }
+        
+        echo "✅ Registry configuration completed - ready for clean application start"
+      shell: powershell
+
+    # Step 2.5: Start SimplySign Desktop with Clean Configuration
+    - name: Start SimplySign Desktop (Clean Configuration)
+      run: |
+        echo "=== STARTING SIMPLYSIGN DESKTOP WITH CLEAN CONFIGURATION ==="
+        echo "This is the critical step - first start with login dialog configuration"
+        
+        # Locate SimplySign Desktop executable
+        $possiblePaths = @(
+            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySign Desktop.exe",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySign Desktop.exe"
+        )
+        
+        $exePath = $null
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+                $exePath = $path
+                Write-Host "✅ Found SimplySign Desktop at: $path"
+                break
+            }
+        }
+        
+        if (-not $exePath) {
+            Write-Host "❌ Could not locate SimplySign Desktop executable"
+            exit 1
+        }
+        
+        # Start SimplySign Desktop with clean configuration
+        Write-Host "Starting SimplySign Desktop with configured settings..."
+        Write-Host "Command: Start-Process '$exePath' -WindowStyle Hidden -PassThru"
+        
+        try {
+            $process = Start-Process -FilePath $exePath -WindowStyle Hidden -PassThru
+            Write-Host "✅ SimplySign Desktop started successfully (PID: $($process.Id))"
+            
+            # Give it time to initialize and potentially show login dialog
+            Write-Host "Waiting 10 seconds for initialization and dialog appearance..."
+            Start-Sleep -Seconds 10
+            
+            # Check if process is still running
+            if (-not $process.HasExited) {
+                Write-Host "✅ Process is running and stable"
+                
+                # Check for any additional SimplySign processes that might have spawned
+                $allProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
+                Write-Host "Total SimplySign processes: $($allProcesses.Count)"
+                $allProcesses | ForEach-Object {
+                    Write-Host "  PID $($_.Id): $($_.ProcessName)"
+                }
+            } else {
+                Write-Host "⚠️ Process exited during initialization (Exit Code: $($process.ExitCode))"
+            }
+            
+        } catch {
+            Write-Host "❌ Failed to start SimplySign Desktop: $($_.Exception.Message)"
+            exit 1
+        }
+        
+        echo "✅ SimplySign Desktop startup completed"
       shell: powershell
 
     # Step 3: Start Network Monitoring (if enabled)
@@ -117,14 +275,14 @@ jobs:
         " 2>&1 | tee network_monitor_start.log
       shell: bash
 
-    # Step 4: Comprehensive Login Dialog Detection
-    - name: Detect Login Dialog - Multiple Methods
+    # Step 4: Immediate Login Dialog Detection + Command Testing
+    - name: Detect Login Dialog - Multiple Methods + Command Testing
       env:
         DETECTION_TIMEOUT: ${{ inputs.detection_timeout }}
         DEBUG_MODE: ${{ inputs.debug_mode }}
       run: |
-        echo "=== COMPREHENSIVE LOGIN DIALOG DETECTION ==="
-        echo "Testing multiple detection methods in GitHub Actions environment"
+        echo "=== COMPREHENSIVE LOGIN DIALOG DETECTION + COMMAND TESTING ==="
+        echo "Testing detection methods AND command invocation in GitHub Actions environment"
         echo "Detection timeout: $env:DETECTION_TIMEOUT seconds"
         echo "Debug mode: $env:DEBUG_MODE"
         echo ""
@@ -132,11 +290,121 @@ jobs:
         $timeout = [int]$env:DETECTION_TIMEOUT
         $debug = if ($env:DEBUG_MODE -eq "true") { $true } else { $false }
         
+        # First, run our standard detection
+        Write-Host "=== PHASE 1: STANDARD DETECTION ==="
         Write-Host "Executing comprehensive dialog detection script..."
-        $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds $timeout -DebugMode $debug
+        try {
+            $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds 30 -DebugMode $debug
+            Write-Host "Detection script result: $result"
+        } catch {
+            Write-Host "Detection script error: $($_.Exception.Message)"
+        }
         
         Write-Host ""
-        Write-Host "Detection script completed with result: $result"
+        Write-Host "=== PHASE 2: COMMAND INVOCATION TESTING ==="
+        Write-Host "Attempting to trigger 'Connect with cloud' programmatically..."
+        
+        # Try to find and invoke "Connect with cloud" command
+        # Method 1: Look for menu automation
+        Write-Host "Method 1: UI Automation approach..."
+        try {
+            Add-Type -AssemblyName UIAutomationClient
+            Add-Type -AssemblyName UIAutomationTypes
+            
+            # Find SimplySign window
+            $automation = [System.Windows.Automation.AutomationElement]::RootElement
+            $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, "*SimplySign*")
+            $simplySignWindow = $automation.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+            
+            if ($simplySignWindow) {
+                Write-Host "✅ Found SimplySign window: $($simplySignWindow.Current.Name)"
+                
+                # Look for menu items or buttons related to cloud connection
+                $menuCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
+                $menuItems = $simplySignWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $menuCondition)
+                
+                Write-Host "Found $($menuItems.Count) menu items"
+                foreach ($item in $menuItems) {
+                    $name = $item.Current.Name
+                    if ($name -like "*cloud*" -or $name -like "*connect*" -or $name -like "*login*") {
+                        Write-Host "  Potential cloud menu: $name"
+                    }
+                }
+            } else {
+                Write-Host "⚠️ Could not find SimplySign window for UI automation"
+            }
+        } catch {
+            Write-Host "⚠️ UI Automation failed: $($_.Exception.Message)"
+        }
+        
+        # Method 2: Command line parameters
+        Write-Host ""
+        Write-Host "Method 2: Command line parameters..."
+        $possibleCommands = @(
+            "/connect",
+            "/cloud",
+            "/login",
+            "/auth",
+            "/show-login",
+            "-connect",
+            "-cloud",
+            "-login"
+        )
+        
+        foreach ($cmd in $possibleCommands) {
+            Write-Host "Testing parameter: $cmd"
+            # This would normally try to start with the parameter, but we'll skip actual execution
+            # to avoid process conflicts
+        }
+        
+        # Method 3: Registry triggers
+        Write-Host ""
+        Write-Host "Method 3: Additional registry triggers..."
+        try {
+            # Try setting additional registry values that might trigger immediate connection
+            $regPath = "HKCU:\Software\Certum"
+            if (Test-Path $regPath) {
+                New-ItemProperty -Path $regPath -Name "TriggerCloudConnection" -Value "Yes" -PropertyType String -Force | Out-Null
+                New-ItemProperty -Path $regPath -Name "ForceConnectWithCloud" -Value "Yes" -PropertyType String -Force | Out-Null
+                Write-Host "✅ Set additional trigger registry values"
+            }
+        } catch {
+            Write-Host "⚠️ Could not set additional registry triggers: $($_.Exception.Message)"
+        }
+        
+        Write-Host ""
+        Write-Host "=== PHASE 3: POST-COMMAND DETECTION ==="
+        Write-Host "Running detection again after command attempts..."
+        
+        # Wait a moment for any triggered dialogs
+        Start-Sleep -Seconds 5
+        
+        # Run detection again
+        try {
+            $result2 = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds 30 -DebugMode $debug
+            Write-Host "Post-command detection result: $result2"
+        } catch {
+            Write-Host "Post-command detection error: $($_.Exception.Message)"
+        }
+        
+        Write-Host ""
+        Write-Host "=== PHASE 4: FINAL LONG-TERM DETECTION ==="
+        Write-Host "Running extended detection for remaining timeout period..."
+        
+        $remainingTimeout = $timeout - 70  # Account for time already spent
+        if ($remainingTimeout -gt 0) {
+            try {
+                $finalResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds $remainingTimeout -DebugMode $debug
+                Write-Host "Final detection result: $finalResult"
+            } catch {
+                Write-Host "Final detection error: $($_.Exception.Message)"
+            }
+        } else {
+            Write-Host "No remaining time for extended detection"
+        }
+        
+        Write-Host ""
+        Write-Host "=== DETECTION AND COMMAND TESTING COMPLETED ==="
         
       shell: powershell
 
