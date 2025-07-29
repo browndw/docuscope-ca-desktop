@@ -697,47 +697,47 @@ jobs:
         foreach ($path in $possiblePaths) {
             if (Test-Path $path) {
                 $exePath = $path
-                Write-Host "✅ Found SimplySign at: $path"
+                Write-Host "Found SimplySign at: $path"
                 break
             }
         }
         
         if (-not $exePath) {
-            Write-Host "❌ Could not locate SimplySign executable"
+            Write-Host "Could not locate SimplySign executable"
             exit 1
         }
         
         # Start SimplySign with modified setting
-        Write-Host "🚀 Starting SimplySign with SimplySignDesktopShowLogonDialogAfterApplicationStartup = Yes..."
+        Write-Host "Starting SimplySign with SimplySignDesktopShowLogonDialogAfterApplicationStartup = Yes..."
         try {
             $process = Start-Process -FilePath $exePath -WindowStyle Hidden -PassThru
-            Write-Host "✅ Started SimplySign (PID: $($process.Id))"
+            Write-Host "Started SimplySign (PID: $($process.Id))"
             
             # Give it time to initialize and potentially show login dialog
-            Write-Host "⏰ Waiting 15 seconds for initialization and login dialog..."
+            Write-Host "Waiting 15 seconds for initialization and login dialog..."
             Start-Sleep -Seconds 15
             
             # Check process status
             if (-not $process.HasExited) {
-                Write-Host "✅ Process is running and stable"
+                Write-Host "Process is running and stable"
                 
                 # Check for multiple processes
                 $allProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
-                Write-Host "📊 Total SimplySign processes: $($allProcesses.Count)"
+                Write-Host "Total SimplySign processes: $($allProcesses.Count)"
                 $allProcesses | ForEach-Object {
                     Write-Host "   PID $($_.Id): $($_.ProcessName)"
                 }
             } else {
-                Write-Host "⚠️ Process exited during initialization (Exit Code: $($process.ExitCode))"
+                Write-Host "Process exited during initialization (Exit Code: $($process.ExitCode))"
             }
             
         } catch {
-            Write-Host "❌ Failed to start SimplySign: $($_.Exception.Message)"
+            Write-Host "Failed to start SimplySign: $($_.Exception.Message)"
             exit 1
         }
         
         Write-Host ""
-        Write-Host "🎯 CRITICAL TEST COMPLETED"
+        Write-Host "CRITICAL TEST COMPLETED"
         Write-Host "=========================="
         Write-Host "SimplySign started with SimplySignDesktopShowLogonDialogAfterApplicationStartup = Yes"
         Write-Host "Next step: Run login dialog detection to see if it worked"
@@ -822,7 +822,7 @@ jobs:
             $simplySignWindow = $automation.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
             
             if ($simplySignWindow) {
-                Write-Host "✅ Found SimplySign window: $($simplySignWindow.Current.Name)"
+                Write-Host "Found SimplySign window: $($simplySignWindow.Current.Name)"
                 
                 # Look for menu items or buttons related to cloud connection
                 $menuCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
@@ -836,10 +836,10 @@ jobs:
                     }
                 }
             } else {
-                Write-Host "⚠️ Could not find SimplySign window for UI automation"
+                Write-Host "Could not find SimplySign window for UI automation"
             }
         } catch {
-            Write-Host "⚠️ UI Automation failed: $($_.Exception.Message)"
+            Write-Host "UI Automation failed: $($_.Exception.Message)"
         }
         
         # Method 2: Command line parameters
@@ -871,10 +871,10 @@ jobs:
             if (Test-Path $regPath) {
                 New-ItemProperty -Path $regPath -Name "TriggerCloudConnection" -Value "Yes" -PropertyType String -Force | Out-Null
                 New-ItemProperty -Path $regPath -Name "ForceConnectWithCloud" -Value "Yes" -PropertyType String -Force | Out-Null
-                Write-Host "✅ Set additional trigger registry values"
+                Write-Host "Set additional trigger registry values"
             }
         } catch {
-            Write-Host "⚠️ Could not set additional registry triggers: $($_.Exception.Message)"
+            Write-Host "Could not set additional registry triggers: $($_.Exception.Message)"
         }
         
         Write-Host ""
@@ -944,7 +944,7 @@ jobs:
             }
           "
         else
-          echo "⚠️ Network monitor job ID not found"
+          echo "Network monitor job ID not found"
         fi
       shell: bash
 
@@ -977,12 +977,12 @@ jobs:
         echo ""
         
         if [ -f "detection_results.json" ]; then
-          echo "📋 Detection Results:"
+          echo "Detection Results:"
           cat detection_results.json | python -m json.tool 2>/dev/null || cat detection_results.json
           echo ""
         fi
         
-        echo "🎯 Key Questions Answered:"
+        echo "Key Questions Answered:"
         echo "1. Does SimplySign Desktop start successfully in GitHub Actions? [Check process launch]"
         echo "2. Does a login dialog actually appear? [Check detection methods]"  
         echo "3. Is it a native dialog or web view? [Check WebView detection]"
@@ -990,7 +990,7 @@ jobs:
         echo "5. How long does initialization take? [Check timing in logs]"
         echo ""
         
-        echo "💡 Next Steps Based on Results:"
+        echo "Next Steps Based on Results:"
         echo "- If no detection: Login dialog doesn't appear in headless mode"
         echo "- If WebView detected: Need web automation instead of window automation" 
         echo "- If network detected: OAuth2 flow is active, could bypass GUI"
