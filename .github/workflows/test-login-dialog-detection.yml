@@ -475,18 +475,18 @@ jobs:
                         Write-Host "   - $($trigger.Name) = $($trigger.Value) [$($trigger.RegPath)]"
                     }
                 } else {
-                    Write-Host "ℹ️ No obvious potential triggers found, but analysis generated comprehensive data"
+                    Write-Host "ℹNo obvious potential triggers found, but analysis generated comprehensive data"
                 }
                 
                 Write-Host ""
-                Write-Host "📊 Analysis Summary:"
+                Write-Host "   Analysis Summary:"
                 Write-Host "   Total registry values: $($analysisData.Summary.TotalRegistryValues)"
                 Write-Host "   Boolean settings: $($analysisData.Summary.BooleanSettings)" 
                 Write-Host "   Config files found: $($analysisData.Summary.ConfigFilesFound)"
             }
             
         } catch {
-            Write-Host "❌ Settings analysis failed: $($_.Exception.Message)"
+            Write-Host "Settings analysis failed: $($_.Exception.Message)"
             # Continue with workflow even if analysis fails
         }
       shell: powershell
@@ -500,7 +500,7 @@ jobs:
         
         # Check if we have analysis results to work with
         if (-not (Test-Path "certum_settings_analysis_detailed_results.json")) {
-            Write-Host "⚠️ No analysis results found - creating minimal test set"
+            Write-Host "No analysis results found - creating minimal test set"
             
             # Create a minimal set focusing on known registry location
             $minimalTestData = @{
@@ -535,7 +535,7 @@ jobs:
         try {
             $testResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/test-setting-modifications.ps1" -SettingsAnalysisFile "certum_settings_analysis_detailed_results.json" -TestDurationSeconds 20 -RestoreOriginal $true
             
-            Write-Host "✅ Setting modification testing completed"
+            Write-Host "Setting modification testing completed"
             
             # Check for significant findings
             if (Test-Path "setting_modification_test_results.json") {
@@ -543,7 +543,7 @@ jobs:
                 
                 if ($testData.SignificantFindings -and $testData.SignificantFindings.Count -gt 0) {
                     Write-Host ""
-                    Write-Host "🚨 SIGNIFICANT FINDINGS - Settings that affected behavior:"
+                    Write-Host "SIGNIFICANT FINDINGS - Settings that affected behavior:"
                     foreach ($finding in $testData.SignificantFindings) {
                         Write-Host "   Setting: $($finding.SettingName)"
                         Write-Host "   Change: $($finding.OriginalValue) → $($finding.NewValue)"
@@ -556,10 +556,10 @@ jobs:
                     # Save the most promising setting for next phase
                     $mostPromising = $testData.SignificantFindings[0]
                     $mostPromising | ConvertTo-Json | Out-File -FilePath "most_promising_setting.json" -Encoding UTF8
-                    Write-Host "💡 Most promising setting saved for final testing phase"
+                    Write-Host "Most promising setting saved for final testing phase"
                     
                 } else {
-                    Write-Host "ℹ️ No settings showed obvious login dialog triggering behavior"
+                    Write-Host "ℹNo settings showed obvious login dialog triggering behavior"
                     Write-Host "This suggests the login dialog may be controlled by:"
                     Write-Host "   1. File-based configuration (not registry)"
                     Write-Host "   2. User interaction triggers"
@@ -567,7 +567,7 @@ jobs:
                 }
                 
                 Write-Host ""
-                Write-Host "📊 Testing Summary:"
+                Write-Host "   Testing Summary:"
                 Write-Host "   Settings tested: $($testData.SettingsTested)"
                 Write-Host "   Successful changes: $($testData.Summary.SuccessfulChanges)"
                 Write-Host "   Process triggers: $($testData.Summary.ProcessTriggered)"
@@ -575,7 +575,7 @@ jobs:
             }
             
         } catch {
-            Write-Host "❌ Setting modification testing failed: $($_.Exception.Message)"
+            Write-Host "Setting modification testing failed: $($_.Exception.Message)"
             Write-Host "Continuing with workflow..."
         }
         
@@ -606,18 +606,18 @@ jobs:
                 # Apply the setting
                 if (Test-Path $promisingSetting.RegPath) {
                     Set-ItemProperty -Path $promisingSetting.RegPath -Name $promisingSetting.SettingName -Value $promisingSetting.NewValue
-                    Write-Host "✅ Setting applied successfully"
+                    Write-Host "Setting applied successfully"
                     $appliedSetting = $true
                     $settingDetails = "$($promisingSetting.SettingName) = $($promisingSetting.NewValue)"
                 } else {
-                    Write-Host "❌ Registry path not accessible: $($promisingSetting.RegPath)"
+                    Write-Host "Registry path not accessible: $($promisingSetting.RegPath)"
                 }
                 
             } catch {
-                Write-Host "❌ Failed to apply promising setting: $($_.Exception.Message)"
+                Write-Host "Failed to apply promising setting: $($_.Exception.Message)"
             }
         } else {
-            Write-Host "ℹ️ No promising setting found from previous analysis"
+            Write-Host "ℹNo promising setting found from previous analysis"
             
             # Fallback - try the Autostart setting if it exists
             try {
@@ -625,9 +625,9 @@ jobs:
                 if (Test-Path $certumPath) {
                     $autostartValue = Get-ItemProperty -Path $certumPath -Name "Autostart" -ErrorAction SilentlyContinue
                     if ($autostartValue -and $autostartValue.Autostart -eq 0) {
-                        Write-Host "🔄 Fallback: Trying Autostart setting (0 → 1)"
+                        Write-Host "Fallback: Trying Autostart setting (0 → 1)"
                         Set-ItemProperty -Path $certumPath -Name "Autostart" -Value 1
-                        Write-Host "✅ Autostart setting changed to 1"
+                        Write-Host "Autostart setting changed to 1"
                         $appliedSetting = $true
                         $settingDetails = "Autostart = 1"
                     }
@@ -639,7 +639,7 @@ jobs:
         
         if ($appliedSetting) {
             Write-Host ""
-            Write-Host "🧪 TESTING SIMPLYSIGN WITH MODIFIED SETTING"
+            Write-Host "TESTING SIMPLYSIGN WITH MODIFIED SETTING"
             Write-Host "Setting applied: $settingDetails"
             Write-Host "Starting SimplySign to see if login dialog appears..."
             
@@ -661,7 +661,7 @@ jobs:
                 try {
                     # Start SimplySign with the modified setting
                     $process = Start-Process -FilePath $exePath -PassThru
-                    Write-Host "▶️ Started SimplySign (PID: $($process.Id)) with modified setting"
+                    Write-Host "▶Started SimplySign (PID: $($process.Id)) with modified setting"
                     
                     # Wait longer than usual to see if login dialog appears
                     Write-Host "⏳ Waiting 30 seconds for potential login dialog..."
@@ -669,13 +669,13 @@ jobs:
                     
                     # Check process status and look for additional processes
                     $allProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
-                    Write-Host "📊 SimplySign processes after setting change:"
+                    Write-Host "SimplySign processes after setting change:"
                     $allProcesses | ForEach-Object {
                         Write-Host "   PID $($_.Id): $($_.ProcessName)"
                     }
                     
                     if ($allProcesses.Count -gt 1) {
-                        Write-Host "🎯 Multiple processes detected - setting may have triggered additional behavior!"
+                        Write-Host "Multiple processes detected - setting may have triggered additional behavior!"
                     }
                     
                     # Clean up processes
@@ -684,13 +684,13 @@ jobs:
                     }
                     
                 } catch {
-                    Write-Host "❌ Error testing with modified setting: $($_.Exception.Message)"
+                    Write-Host "Error testing with modified setting: $($_.Exception.Message)"
                 }
             } else {
-                Write-Host "❌ SimplySign executable not found"
+                Write-Host "SimplySign executable not found"
             }
         } else {
-            Write-Host "⚠️ No setting was applied - proceeding with default configuration"
+            Write-Host "No setting was applied - proceeding with default configuration"
         }
         
         Write-Host ""
@@ -934,17 +934,17 @@ jobs:
         # Collect results from log file
         if [ -f "network_monitor_results.log" ]; then
           echo ""
-          echo "📊 NETWORK MONITORING RESULTS:"
+          echo "NETWORK MONITORING RESULTS:"
           echo "=============================="
           cat network_monitor_results.log
           
           # Check for any OAuth2 activity
           if grep -q "OAuth2 connection detected\|DNS resolution successful" network_monitor_results.log; then
             echo ""
-            echo "🌐 OAuth2 network activity detected during monitoring!"
+            echo "OAuth2 network activity detected during monitoring!"
           else
             echo ""
-            echo "ℹ️ No OAuth2 network activity detected during monitoring period"
+            echo "No OAuth2 network activity detected during monitoring period"
           fi
           
           # Count activities
@@ -952,12 +952,12 @@ jobs:
           DNS_COUNT=$(grep -c "DNS resolution successful" network_monitor_results.log 2>/dev/null || echo "0")
           
           echo ""
-          echo "📈 Activity Summary:"
+          echo "  Activity Summary:"
           echo "  OAuth2 connections detected: $CONNECTION_COUNT"
           echo "  DNS resolutions detected: $DNS_COUNT"
           
         else
-          echo "⚠️ Network monitoring results file not found"
+          echo "Network monitoring results file not found"
           echo "Monitoring may not have started properly or results were not saved"
           
           # Check if there's any startup log
@@ -1013,39 +1013,39 @@ jobs:
         echo ""
         
         echo "🔍 ANALYSIS PHASES COMPLETED:"
-        echo "1. ✅ SimplySign installation and initialization"
-        echo "2. ✅ Registry monitoring (before/after snapshots)"
-        echo "3. ✅ Comprehensive Certum settings analysis"
-        echo "4. ✅ Systematic setting modification testing"
-        echo "5. ✅ Enhanced login dialog detection"
+        echo "1. SimplySign installation and initialization"
+        echo "2. Registry monitoring (before/after snapshots)"
+        echo "3. Comprehensive Certum settings analysis"
+        echo "4. Systematic setting modification testing"
+        echo "5. Enhanced login dialog detection"
         echo ""
         
         # Check for settings analysis results
         if [ -f "certum_settings_analysis_detailed_results.json" ]; then
-          echo "📊 SETTINGS ANALYSIS RESULTS:"
-          echo "  ✓ Settings analysis completed - check JSON file for details"
+          echo "SETTINGS ANALYSIS RESULTS:"
+          echo "   Settings analysis completed - check JSON file for details"
           if grep -q "PotentialTriggers" certum_settings_analysis_detailed_results.json; then
-            echo "  🎯 Potential login triggers found in analysis"
+            echo "  Potential login triggers found in analysis"
           else
             echo "  - No obvious potential triggers identified"
           fi
         else
-          echo "⚠️  No settings analysis results found"
+          echo "No settings analysis results found"
         fi
         
         echo ""
         
         # Check for modification test results
         if [ -f "setting_modification_test_results.json" ]; then
-          echo "🧪 SETTING MODIFICATION TEST RESULTS:"
+          echo "SETTING MODIFICATION TEST RESULTS:"
           echo "  ✓ Setting modification tests completed"
           if grep -q "SignificantFindings" setting_modification_test_results.json; then
-            echo "  🚨 Significant findings detected - check results file"
+            echo "  Significant findings detected - check results file"
           else
             echo "  - No significant behavior changes detected"
           fi
         else
-          echo "⚠️  No modification test results found"
+          echo "No modification test results found"
         fi
         
         echo ""
@@ -1054,21 +1054,21 @@ jobs:
         if [ -f "detection_results.json" ]; then
           echo "🎯 LOGIN DIALOG DETECTION RESULTS:"
           if grep -q '"detected": *true' detection_results.json; then
-            echo "  ✅ Login dialog detected!"
+            echo "  Login dialog detected!"
           else
-            echo "  ❌ No login dialog detected"
+            echo "  No login dialog detected"
           fi
         else
-          echo "⚠️  No detection results found"
+          echo "No detection results found"
         fi
         
         echo ""
-        echo "📁 GENERATED FILES:"
+        echo "GENERATED FILES:"
         echo "Analysis and test files created during this run:"
         ls -la *.json *.txt *.reg 2>/dev/null | head -10 || echo "  No analysis files found"
         
         echo ""
-        echo "🎯 KEY INSIGHTS SUMMARY:"
+        echo "KEY INSIGHTS SUMMARY:"
         echo "========================="
         
         # Determine overall outcome
@@ -1084,16 +1084,16 @@ jobs:
         fi
         
         if [ "$SETTINGS_FOUND" = true ] && [ "$DETECTION_SUCCESS" = true ]; then
-          echo "🎉 SUCCESS: Found settings that trigger login dialog!"
+          echo "   SUCCESS: Found settings that trigger login dialog!"
           echo "   Recommendation: Use the identified settings in production workflow"
         elif [ "$SETTINGS_FOUND" = true ]; then
-          echo "🔍 PARTIAL SUCCESS: Found behavior-affecting settings"
+          echo "   PARTIAL SUCCESS: Found behavior-affecting settings"
           echo "   Recommendation: Further test these settings for login dialog control"
         elif [ "$DETECTION_SUCCESS" = true ]; then
-          echo "🎯 DETECTION SUCCESS: Login dialog appeared without setting changes"
+          echo "   DETECTION SUCCESS: Login dialog appeared without setting changes"
           echo "   Recommendation: Current configuration may already be sufficient"
         else
-          echo "❌ NO OBVIOUS LOGIN TRIGGERS FOUND"
+          echo "NO OBVIOUS LOGIN TRIGGERS FOUND"
           echo "   Possible explanations:"
           echo "   1. Login dialog controlled by config files (not registry)"
           echo "   2. Requires user interaction to trigger"
@@ -1109,7 +1109,7 @@ jobs:
         fi
         
         echo ""
-        echo "📋 NEXT STEPS:"
+        echo "NEXT STEPS:"
         echo "=============="
         echo "1. Download and review 'comprehensive-login-analysis-results' artifact"
         echo "2. Check detailed JSON files for specific findings"
@@ -1117,7 +1117,7 @@ jobs:
         echo "4. If no triggers found: Explore alternative approaches (files, UI automation)"
         echo "5. Consider testing in interactive (non-headless) environment"
         echo ""
-        echo "🔗 ARTIFACT FILES:"
+        echo "ARTIFACT FILES:"
         echo "All analysis results uploaded as 'comprehensive-login-analysis-results'"
         echo "Key files to review:"
         echo "  - certum_settings_analysis_detailed_results.json"
