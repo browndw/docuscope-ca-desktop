@@ -1,0 +1,333 @@
+name: SimplySign Login Dialog UI Detection
+
+on:
+  workflow_dispatch:
+    inputs:
+      detection_timeout:
+        description: 'Detection timeout in seconds'
+        required: false
+        default: '120'
+        type: string
+      debug_mode:
+        description: 'Enable verbose debugging'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  ui-detection:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Step 1: Clean Environment
+    - name: Clean SimplySign Environment
+      run: |
+        Write-Host "=== CLEANING SIMPLYSIGN ENVIRONMENT ==="
+        Write-Host "Terminating any existing SimplySign processes..."
+        
+        $processes = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
+        if ($processes) {
+          Write-Host "Found $($processes.Count) existing SimplySign processes"
+          $processes | ForEach-Object {
+            Write-Host "Terminating: $($_.ProcessName) (PID: $($_.Id))"
+            try {
+              $_ | Stop-Process -Force
+              Write-Host "Successfully terminated PID $($_.Id)"
+            } catch {
+              Write-Host "Could not terminate PID $($_.Id): $($_.Exception.Message)"
+            }
+          }
+          Start-Sleep -Seconds 3
+        } else {
+          Write-Host "No existing SimplySign processes found"
+        }
+        
+        Write-Host "Environment cleanup completed"
+      shell: powershell
+
+    # Step 2: Install SimplySign Desktop
+    - name: Install SimplySign Desktop
+      run: |
+        echo "=== INSTALLING SIMPLYSIGN DESKTOP ==="
+        echo "Installing for UI detection testing..."
+        chmod +x ./.github/scripts/install-simplysign.sh
+        ./.github/scripts/install-simplysign.sh
+      shell: bash
+
+    # Step 3: Start Network Monitoring
+    - name: Start OAuth2 Network Monitoring
+      shell: powershell
+      run: |
+        Write-Host "=== STARTING OAUTH2 NETWORK MONITORING ==="
+        Write-Host "Monitoring for OAuth2 activity to confirm login dialog state..."
+        
+        # Start monitoring using existing detection script if available
+        if (Test-Path "./.github/scripts/detect-login-dialog.ps1") {
+            Write-Host "Using existing login dialog detection script for network monitoring..."
+            Start-Job -ScriptBlock {
+                param($timeout)
+                powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds $timeout -DebugMode $false
+            } -ArgumentList ${{ inputs.detection_timeout }} | Out-Null
+        } else {
+            Write-Host "Starting simple DNS monitoring..."
+            
+            # Create and start simple monitoring
+            Start-Job -ScriptBlock {
+                param($timeout)
+                $endTime = (Get-Date).AddSeconds($timeout)
+                $dnsCount = 0
+                while ((Get-Date) -lt $endTime) {
+                    try {
+                        $dnsResult = nslookup cloudsign.webnotarius.pl 2>$null
+                        if ($dnsResult -and $dnsResult -notlike "*can't find*") {
+                            $dnsCount++
+                            Write-Host "DNS resolution successful for OAuth2 endpoint"
+                        }
+                    } catch {}
+                    Start-Sleep -Seconds 2
+                }
+                Write-Host "Network monitoring completed. DNS queries: $dnsCount"
+                $dnsCount | Out-File -FilePath "network_monitor_results.log" -Encoding UTF8
+            } -ArgumentList ${{ inputs.detection_timeout }} | Out-Null
+        }
+        
+        Write-Host "Network monitoring started in background"
+
+    # Step 4: Launch SimplySign and Detect Login Dialog
+    - name: Launch SimplySign and Detect UI Elements
+      env:
+        DETECTION_TIMEOUT: ${{ inputs.detection_timeout }}
+        DEBUG_MODE: ${{ inputs.debug_mode }}
+      run: |
+        Write-Host "=== LAUNCHING SIMPLYSIGN FOR UI DETECTION ==="
+        Write-Host "Detection timeout: $env:DETECTION_TIMEOUT seconds"
+        Write-Host "Debug mode: $env:DEBUG_MODE"
+        Write-Host ""
+        
+        $timeout = [int]$env:DETECTION_TIMEOUT
+        $debug = if ($env:DEBUG_MODE -eq "true") { $true } else { $false }
+        
+        # Locate SimplySign executable
+        $possiblePaths = @(
+            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySignDesktop.exe"
+        )
+        
+        $exePath = $null
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+                $exePath = $path
+                Write-Host "Found SimplySign Desktop at: $path"
+                break
+            }
+        }
+        
+        if (-not $exePath) {
+            Write-Host "Could not locate SimplySign Desktop executable"
+            exit 1
+        }
+        
+        Write-Host "Starting SimplySign Desktop for UI analysis..."
+        try {
+            # Start SimplySign
+            $process = Start-Process -FilePath $exePath -PassThru
+            Write-Host "Started SimplySign Desktop (PID: $($process.Id))"
+            
+            # Wait a moment for the window to appear
+            Start-Sleep -Seconds 5
+            
+            # Run UI detection script
+            Write-Host "Running comprehensive UI element detection..."
+            $uiResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-ui-elements.ps1" -ProcessId $process.Id -TimeoutSeconds $timeout -DebugMode $debug
+            Write-Host "UI detection completed"
+            
+            # Keep process running during detection
+            Start-Sleep -Seconds 10
+            
+            # Clean up
+            if (-not $process.HasExited) {
+                $process | Stop-Process -Force
+                Write-Host "Terminated SimplySign process"
+            }
+            
+        } catch {
+            Write-Host "Error during SimplySign UI detection: $($_.Exception.Message)"
+        }
+        
+        Write-Host "UI detection phase completed"
+      shell: powershell
+
+    # Step 5: Collect Network Monitoring Results
+    - name: Collect Network Monitoring Results
+      run: |
+        echo "=== COLLECTING NETWORK MONITORING RESULTS ==="
+        
+        # Check if monitoring process is still running
+        if [ -f "network_monitor.pid" ]; then
+          MONITOR_PID=$(cat network_monitor.pid)
+          echo "Checking network monitoring process (PID: $MONITOR_PID)..."
+          
+          if ps -p $MONITOR_PID > /dev/null 2>&1; then
+            echo "Network monitoring still running - waiting for completion..."
+            sleep 10
+            
+            # If still running, terminate it
+            if ps -p $MONITOR_PID > /dev/null 2>&1; then
+              echo "Terminating network monitoring process..."
+              kill $MONITOR_PID 2>/dev/null || true
+              sleep 2
+            fi
+          else
+            echo "Network monitoring process has completed"
+          fi
+        fi
+        
+        # Collect results from log file
+        if [ -f "network_monitor_results.log" ]; then
+          echo ""
+          echo "NETWORK MONITORING RESULTS:"
+          echo "=============================="
+          cat network_monitor_results.log
+          
+          # Check for OAuth2 activity
+          if grep -q "OAuth2 connection detected\|DNS resolution successful" network_monitor_results.log; then
+            echo ""
+            echo "OAuth2 network activity detected during monitoring!"
+          else
+            echo ""
+            echo "No OAuth2 network activity detected during monitoring period"
+          fi
+          
+          # Count activities
+          CONNECTION_COUNT=$(grep -c "OAuth2 connection detected" network_monitor_results.log 2>/dev/null || echo "0")
+          DNS_COUNT=$(grep -c "DNS resolution successful" network_monitor_results.log 2>/dev/null || echo "0")
+          
+          echo ""
+          echo "  Activity Summary:"
+          echo "  OAuth2 connections detected: $CONNECTION_COUNT"
+          echo "  DNS resolutions detected: $DNS_COUNT"
+          
+        else
+          echo "Network monitoring results file not found"
+        fi
+        
+        echo ""
+        echo "Network monitoring analysis completed"
+      shell: bash
+
+    # Step 6: Upload Results
+    - name: Upload UI Detection Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ui-detection-results
+        path: |
+          ui_detection_results.json
+          ui_elements_detailed.json
+          window_hierarchy.json
+          screenshots/*.png
+          network_monitor_results.log
+          network_monitor_start.log
+          *.log
+        retention-days: 7
+        compression-level: 9
+
+    # Step 7: Generate Summary Report
+    - name: Generate UI Detection Summary
+      if: always()
+      run: |
+        echo "=== UI DETECTION SUMMARY REPORT ==="
+        echo "Date: $(date)"
+        echo "Environment: GitHub Actions Windows Runner"
+        echo "Detection timeout: ${{ inputs.detection_timeout }} seconds"
+        echo ""
+        
+        echo "DETECTION PHASES COMPLETED:"
+        echo "1. SimplySign Desktop installation"
+        echo "2. OAuth2 network monitoring"
+        echo "3. Window and UI element detection"
+        echo "4. Credential injection point analysis"
+        echo ""
+        
+        # Check for UI detection results
+        if [ -f "ui_detection_results.json" ]; then
+          echo "UI DETECTION RESULTS:"
+          echo "  UI detection completed - check JSON files for details"
+          
+          # Look for key findings
+          if grep -q "loginDialog" ui_detection_results.json; then
+            echo "  Login dialog detected!"
+          fi
+          
+          if grep -q "usernameField" ui_detection_results.json; then
+            echo "  Username field found!"
+          fi
+          
+          if grep -q "passwordField" ui_detection_results.json; then
+            echo "  Password field found!"
+          fi
+          
+          if grep -q "webBrowser" ui_detection_results.json; then
+            echo "  Web browser control detected!"
+          fi
+          
+        else
+          echo "No UI detection results found"
+        fi
+        
+        echo ""
+        
+        # Check for network activity
+        if [ -f "network_monitor_results.log" ]; then
+          if grep -q "DNS resolution successful" network_monitor_results.log; then
+            echo "NETWORK ACTIVITY: OAuth2 communication detected"
+            echo "  This confirms the login dialog is active and attempting cloud connection"
+          else
+            echo "NETWORK ACTIVITY: No OAuth2 communication detected"
+          fi
+        fi
+        
+        echo ""
+        echo "KEY FINDINGS:"
+        echo "============="
+        
+        # Determine overall success
+        UI_DETECTED=false
+        NETWORK_ACTIVE=false
+        
+        if [ -f "ui_detection_results.json" ] && grep -q "loginDialog\|usernameField\|passwordField" ui_detection_results.json; then
+          UI_DETECTED=true
+        fi
+        
+        if [ -f "network_monitor_results.log" ] && grep -q "DNS resolution successful" network_monitor_results.log; then
+          NETWORK_ACTIVE=true
+        fi
+        
+        if [ "$UI_DETECTED" = true ] && [ "$NETWORK_ACTIVE" = true ]; then
+          echo "  SUCCESS: Login dialog UI elements detected with active OAuth2 communication!"
+          echo "  Next step: Implement credential injection using detected UI elements"
+        elif [ "$UI_DETECTED" = true ]; then
+          echo "  PARTIAL SUCCESS: UI elements detected but no network activity"
+          echo "  The detected window may not be the active login dialog"
+        elif [ "$NETWORK_ACTIVE" = true ]; then
+          echo "  PARTIAL SUCCESS: OAuth2 activity detected but UI elements not found"
+          echo "  Login dialog is active but may use non-standard controls"
+        else
+          echo "  NO LOGIN DIALOG DETECTED"
+          echo "  Either no dialog appeared or detection methods need refinement"
+        fi
+        
+        echo ""
+        echo "NEXT STEPS:"
+        echo "==========="
+        echo "1. Download and review 'ui-detection-results' artifact"
+        echo "2. Examine UI element hierarchy in JSON files"
+        echo "3. Check screenshots for visual confirmation"
+        echo "4. If elements found: Implement credential injection script"
+        echo "5. If not found: Enhance detection methods or try alternative approaches"
+        
+      shell: bash
