@@ -240,7 +240,8 @@ jobs:
                     
                     # Look for dialog/cloud/login related entries
                     if ($content -match "(dialog|cloud|login|logon|connect|auth)" -and $content -notmatch "^;") {
-                      Write-Host ("    POTENTIAL LOGIN TRIGGER: " + $content)
+                      Write-Host "    POTENTIAL LOGIN TRIGGER:"
+                      Write-Host "      $content"
                     }
                   }
                 }
