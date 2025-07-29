@@ -533,7 +533,7 @@ jobs:
         
         # Run the systematic testing script
         try {
-            $testResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/test-setting-modifications.ps1" -SettingsAnalysisFile "certum_settings_analysis_detailed_results.json" -TestDurationSeconds 20 -RestoreOriginal $true
+            $testResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/test-setting-modifications.ps1" -SettingsAnalysisFile "certum_settings_analysis_detailed_results.json" -TestDurationSeconds 20 -RestoreOriginal:$true
             
             Write-Host "Setting modification testing completed"
             
