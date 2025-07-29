@@ -244,16 +244,16 @@ function Handle-UpdateDialog {
                 # Method 1: Focus the dialog first
                 Write-Host "Method 1: Activating update dialog..."
                 Add-Type @"
-                    using System;
-                    using System.Runtime.InteropServices;
-                    public class DialogFocusAPI {
-                        [DllImport("user32.dll")]
-                        public static extern bool SetForegroundWindow(IntPtr hWnd);
-                        [DllImport("user32.dll")]
-                        public static extern bool BringWindowToTop(IntPtr hWnd);
-                        [DllImport("user32.dll")]
-                        public static extern bool SetActiveWindow(IntPtr hWnd);
-                    }
+using System;
+using System.Runtime.InteropServices;
+public class DialogFocusAPI {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool SetActiveWindow(IntPtr hWnd);
+}
 "@
                 [DialogFocusAPI]::BringWindowToTop($windowHandle)
                 [DialogFocusAPI]::SetForegroundWindow($windowHandle)
@@ -308,16 +308,16 @@ function Handle-UpdateDialog {
                                     $centerY = $rect.Top + ($rect.Height / 2)
                                     
                                     Add-Type @"
-                                        using System;
-                                        using System.Runtime.InteropServices;
-                                        public class NoButtonClickAPI {
-                                            [DllImport("user32.dll")]
-                                            public static extern bool SetCursorPos(int x, int y);
-                                            [DllImport("user32.dll")]
-                                            public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
-                                            public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
-                                            public const uint MOUSEEVENTF_LEFTUP = 0x04;
-                                        }
+using System;
+using System.Runtime.InteropServices;
+public class NoButtonClickAPI {
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
+    public const uint MOUSEEVENTF_LEFTUP = 0x04;
+}
 "@
                                     
                                     [NoButtonClickAPI]::SetCursorPos([int]$centerX, [int]$centerY)
@@ -374,14 +374,14 @@ function Handle-UpdateDialog {
                 
                 try {
                     Add-Type @"
-                        using System;
-                        using System.Runtime.InteropServices;
-                        public class NoButtonMessageAPI {
-                            [DllImport("user32.dll")]
-                            public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-                            public const uint WM_COMMAND = 0x0111;
-                            public const int IDNO = 7;
-                        }
+using System;
+using System.Runtime.InteropServices;
+public class NoButtonMessageAPI {
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    public const uint WM_COMMAND = 0x0111;
+    public const int IDNO = 7;
+}
 "@
                     
                     # Send WM_COMMAND with IDNO (7) to simulate clicking "No" button
