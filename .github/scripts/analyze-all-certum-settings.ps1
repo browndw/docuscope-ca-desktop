@@ -82,11 +82,11 @@ function Search-RegistryForTerms {
                         RootPath = $RootPath
                         Results = $filteredOutput
                     }
-                    Write-Host "    ✓ Found matches for '$term'"
+                    Write-Host "    Found matches for '$term'"
                 }
             }
         } catch {
-            Write-Host "    ✗ Search failed for '$term': $($_.Exception.Message)"
+            Write-Host "    Search failed for '$term': $($_.Exception.Message)"
         }
     }
     
@@ -189,7 +189,7 @@ function Search-ConfigFiles {
                                         Size = $file.Length
                                         LastModified = $file.LastWriteTime
                                     }
-                                    Write-Host "  ✓ Found '$term' in: $($file.Name)"
+                                    Write-Host "  Found '$term' in: $($file.Name)"
                                     break  # Don't duplicate file entries
                                 }
                             }
@@ -371,7 +371,7 @@ Write-Host "  Config files with keywords: $($results.Summary.ConfigFilesFound)"
 Write-Host "  Registry search hits: $($results.Summary.RegistrySearchHits)"
 
 Write-Host ""
-Write-Host "🎯 RECOMMENDED ACTIONS:"
+Write-Host "RECOMMENDED ACTIONS:"
 
 if ($potentialTriggers.Count -gt 0) {
     Write-Host "  1. TEST BOOLEAN SETTINGS - Found $($potentialTriggers.Count) promising candidates:"
