@@ -221,7 +221,7 @@ jobs:
             $afterContent = Get-Content $afterFile -Raw
             
             if ($beforeContent -ne $afterContent) {
-              Write-Host "🔍 CHANGES DETECTED in $section"
+              Write-Host "CHANGES DETECTED in $section"
               $changesFound = $true
               
               # Try to extract meaningful differences
