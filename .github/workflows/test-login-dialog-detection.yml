@@ -623,6 +623,9 @@ jobs:
           network_monitor_start.log
           .github/scripts/detect-login-dialog.ps1
           *.log
+          *.reg
+          registry_changes_*.txt
+          processes_*.csv
         retention-days: 7
         compression-level: 9
 
