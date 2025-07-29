@@ -85,8 +85,50 @@ jobs:
         Write-Host "✅ Environment cleanup completed"
       shell: powershell
 
-    # Step 1: Install SimplySign Desktop
-    - name: Install SimplySign Desktop
+    # Step 1: Take Registry Snapshot BEFORE Installation
+    - name: Take Pre-Installation Registry Snapshot
+      run: |
+        echo "=== TAKING PRE-INSTALLATION REGISTRY SNAPSHOT ==="
+        echo "Capturing registry state before SimplySign installation..."
+        
+        # Export relevant registry sections to files
+        $regPaths = @(
+          "HKCU\Software\Certum",
+          "HKCU\Software\SimplySignDesktop", 
+          "HKCU\Software\Asseco",
+          "HKLM\SOFTWARE\Certum",
+          "HKLM\SOFTWARE\SimplySignDesktop",
+          "HKLM\SOFTWARE\Asseco"
+        )
+        
+        Write-Host "Exporting registry sections before installation..."
+        foreach ($regPath in $regPaths) {
+          $fileName = "before_" + ($regPath -replace "\\", "_" -replace ":", "") + ".reg"
+          try {
+            $result = reg export $regPath $fileName /y 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "✅ Exported: $regPath -> $fileName"
+            } else {
+              Write-Host "⚠️ No data or access denied for: $regPath"
+              # Create empty file to mark as checked
+              "Windows Registry Editor Version 5.00`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+            }
+          } catch {
+            Write-Host "⚠️ Could not export $regPath : $($_.Exception.Message)"
+            "Windows Registry Editor Version 5.00`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+          }
+        }
+        
+        # Also capture process list before installation
+        Write-Host "Capturing running processes before installation..."
+        Get-Process | Select-Object Name, Id, ProcessName | Export-Csv -Path "processes_before.csv" -NoTypeInformation
+        
+        Write-Host "✅ Pre-installation snapshot completed"
+        Get-ChildItem -Name "before_*.reg" | ForEach-Object { Write-Host "  Created: $_" }
+      shell: powershell
+
+    # Step 2: Install SimplySign Desktop
+    - name: Install SimplySign Desktop  
       run: |
         echo "=== INSTALLING SIMPLYSIGN DESKTOP ==="
         echo "🔽 Downloading and installing for diagnostic testing..."
@@ -95,88 +137,197 @@ jobs:
         ./.github/scripts/install-simplysign.sh
       shell: bash
 
-    # Step 2: Configure for Login Dialog (BEFORE first start)
+    # Step 3: Take Registry Snapshot AFTER Installation
+    - name: Take Post-Installation Registry Snapshot
+      run: |
+        echo "=== TAKING POST-INSTALLATION REGISTRY SNAPSHOT ==="
+        echo "Capturing registry state after SimplySign installation..."
+        
+        # Export same registry sections after installation
+        $regPaths = @(
+          "HKCU\Software\Certum",
+          "HKCU\Software\SimplySignDesktop", 
+          "HKCU\Software\Asseco",
+          "HKLM\SOFTWARE\Certum",
+          "HKLM\SOFTWARE\SimplySignDesktop",
+          "HKLM\SOFTWARE\Asseco"
+        )
+        
+        Write-Host "Exporting registry sections after installation..."
+        foreach ($regPath in $regPaths) {
+          $fileName = "after_" + ($regPath -replace "\\", "_" -replace ":", "") + ".reg"
+          try {
+            $result = reg export $regPath $fileName /y 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "✅ Exported: $regPath -> $fileName"
+            } else {
+              Write-Host "⚠️ No data or access denied for: $regPath"
+              "Windows Registry Editor Version 5.00`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+            }
+          } catch {
+            Write-Host "⚠️ Could not export $regPath : $($_.Exception.Message)"
+            "Windows Registry Editor Version 5.00`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+          }
+        }
+        
+        # Capture process list after installation
+        Get-Process | Select-Object Name, Id, ProcessName | Export-Csv -Path "processes_after.csv" -NoTypeInformation
+        
+        Write-Host "✅ Post-installation snapshot completed"
+        Get-ChildItem -Name "after_*.reg" | ForEach-Object { Write-Host "  Created: $_" }
+      shell: powershell
+
+    # Step 4: Analyze Registry Changes
+    - name: Analyze Registry Changes
+      run: |
+        echo "=== ANALYZING REGISTRY CHANGES ==="
+        echo "Comparing before/after registry snapshots to find what SimplySign actually sets..."
+        
+        # Compare each registry section
+        $regSections = @(
+          "HKCU_Software_Certum",
+          "HKCU_Software_SimplySignDesktop", 
+          "HKCU_Software_Asseco",
+          "HKLM_SOFTWARE_Certum",
+          "HKLM_SOFTWARE_SimplySignDesktop",
+          "HKLM_SOFTWARE_Asseco"
+        )
+        
+        $changesFound = $false
+        
+        foreach ($section in $regSections) {
+          $beforeFile = "before_$section.reg"
+          $afterFile = "after_$section.reg"
+          
+          if ((Test-Path $beforeFile) -and (Test-Path $afterFile)) {
+            Write-Host ""
+            Write-Host "=== ANALYZING: $section ==="
+            
+            $beforeContent = Get-Content $beforeFile -Raw
+            $afterContent = Get-Content $afterFile -Raw
+            
+            if ($beforeContent -ne $afterContent) {
+              Write-Host "🔍 CHANGES DETECTED in $section"
+              $changesFound = $true
+              
+              # Try to extract meaningful differences
+              $beforeLines = Get-Content $beforeFile
+              $afterLines = Get-Content $afterFile
+              
+              # Find new lines (in after but not in before)
+              $newLines = Compare-Object $beforeLines $afterLines | Where-Object { $_.SideIndicator -eq "=>" }
+              
+              if ($newLines) {
+                Write-Host "  NEW REGISTRY ENTRIES:"
+                foreach ($line in $newLines) {
+                  $content = $line.InputObject
+                  if ($content -match '^".*"=') {
+                    Write-Host "    $content"
+                    
+                    # Look for dialog/cloud/login related entries
+                    if ($content -match "(dialog|cloud|login|logon|connect|auth)" -and $content -notmatch "^;") {
+                      Write-Host "    ⭐ POTENTIAL LOGIN TRIGGER: $content"
+                    }
+                  }
+                }
+              }
+              
+              # Save detailed diff to file
+              $diffFile = "registry_changes_$section.txt"
+              Compare-Object $beforeLines $afterLines | Out-File $diffFile
+              Write-Host "  📄 Detailed diff saved to: $diffFile"
+              
+            } else {
+              Write-Host "⚪ No changes in $section"
+            }
+          } else {
+            Write-Host "⚠️ Missing files for $section comparison"
+          }
+        }
+        
+        if (-not $changesFound) {
+          Write-Host ""
+          Write-Host "❌ NO REGISTRY CHANGES DETECTED"
+          Write-Host "This could mean:"
+          Write-Host "  1. SimplySign doesn't create registry entries during installation"
+          Write-Host "  2. Registry entries are created on first run, not during install"
+          Write-Host "  3. We're looking in the wrong registry locations"
+        } else {
+          Write-Host ""
+          Write-Host "✅ Registry changes detected and analyzed"
+          Write-Host "Look for lines marked with ⭐ POTENTIAL LOGIN TRIGGER above"
+        }
+        
+        # Process changes
+        Write-Host ""
+        Write-Host "=== PROCESS CHANGES ==="
+        if ((Test-Path "processes_before.csv") -and (Test-Path "processes_after.csv")) {
+          $processesBefore = Import-Csv "processes_before.csv"
+          $processesAfter = Import-Csv "processes_after.csv"
+          
+          $newProcesses = Compare-Object $processesBefore $processesAfter -Property Name | Where-Object { $_.SideIndicator -eq "=>" }
+          if ($newProcesses) {
+            Write-Host "New processes after installation:"
+            $newProcesses | ForEach-Object { Write-Host "  + $($_.Name)" }
+          } else {
+            Write-Host "No new processes detected"
+          }
+        }
+        
+        echo "✅ Registry analysis completed"
+      shell: powershell
+
+    # Step 5: Configure Based on Discovered Settings (if any found)
     - name: Configure SimplySign for Login Dialog
       run: |
         echo "=== CONFIGURING SIMPLYSIGN FOR LOGIN DIALOG ==="
-        echo "Setting up registry to force login dialog appearance on startup..."
-        echo "CRITICAL: Configuration must be set BEFORE first application start"
+        echo "Setting registry keys to trigger login dialog on startup..."
+        echo "Using targeted approach based on common login dialog patterns"
         
-        # Create registry paths for SimplySign configuration
-        $regPaths = @(
-            "HKCU:\Software\Certum",
-            "HKCU:\Software\SimplySignDesktop", 
-            "HKCU:\Software\Asseco"
-        )
+        # Only configure the primary registry path for now
+        $regPath = "HKCU:\Software\Certum"
         
-        foreach ($regPath in $regPaths) {
+        try {
+          if (-not (Test-Path $regPath)) {
+            New-Item -Path $regPath -Force | Out-Null
+            Write-Host "✅ Created registry path: $regPath"
+          }
+          
+          # Test the most likely login dialog triggers one at a time
+          $targetSettings = @{
+            # Based on UI text you mentioned: "Show logon dialog to the cloud after application startup"
+            'ShowLogonDialogToTheCloudAfterApplicationStartup' = 'Yes'
+          }
+          
+          foreach ($setting in $targetSettings.GetEnumerator()) {
             try {
-                if (-not (Test-Path $regPath)) {
-                    New-Item -Path $regPath -Force | Out-Null
-                    Write-Host "✅ Created registry path: $regPath"
-                }
-                
-                # Target the specific setting: "Show logon dialog to the cloud after application startup"
-                $loginSettings = @{
-                    # Main setting for cloud login dialog
-                    'ShowLogonDialogAfterApplicationStartup' = 'Yes'
-                    'ShowLogonDialogToTheCloudAfterApplicationStartup' = 'Yes'
-                    
-                    # Connect with cloud related settings
-                    'ConnectWithCloud' = 'Yes'
-                    'AutoConnectCloud' = 'Yes'
-                    'EnableCloudConnection' = 'Yes'
-                    
-                    # Additional dialog triggers
-                    'SimplySignDesktopShowLogonDialogAfterApplicationStartup' = 'Yes'
-                    'AutoShowLogonDialog' = 'Yes'
-                    'ForceLoginDialog' = 'Yes'
-                    'DisplayAuthenticationDialog' = 'Yes'
-                    
-                    # Cloud service settings
-                    'CloudServiceEnabled' = 'Yes'
-                    'CloudServiceAutoStart' = 'Yes'
-                }
-                
-                foreach ($setting in $loginSettings.GetEnumerator()) {
-                    try {
-                        New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
-                        Write-Host "✅ Set $($setting.Key) = $($setting.Value)"
-                    } catch {
-                        Write-Host "⚠️ Could not set $($setting.Key): $($_.Exception.Message)"
-                    }
-                }
-                
-                Write-Host "✅ Configured login settings for: $regPath"
+              New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
+              Write-Host "✅ Set $($setting.Key) = $($setting.Value)"
             } catch {
-                Write-Host "❌ Could not configure: $regPath - $($_.Exception.Message)"
+              Write-Host "⚠️ Could not set $($setting.Key): $($_.Exception.Message)"
             }
-        }
-        
-        # Verify configuration was set
-        Write-Host ""
-        Write-Host "=== VERIFYING REGISTRY CONFIGURATION ==="
-        foreach ($regPath in $regPaths) {
-            if (Test-Path $regPath) {
-                Write-Host "Registry path: $regPath"
-                try {
-                    $properties = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
-                    if ($properties) {
-                        $properties.PSObject.Properties | Where-Object { $_.Name -notlike "PS*" } | ForEach-Object {
-                            Write-Host "  $($_.Name) = $($_.Value)"
-                        }
-                    }
-                } catch {
-                    Write-Host "  Could not read properties"
-                }
-                Write-Host ""
+          }
+          
+          Write-Host "✅ Targeted registry configuration completed"
+          
+          # Verify what was actually set
+          Write-Host ""
+          Write-Host "=== REGISTRY VERIFICATION ==="
+          $properties = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+          if ($properties) {
+            $properties.PSObject.Properties | Where-Object { $_.Name -notlike "PS*" } | ForEach-Object {
+              Write-Host "  $($_.Name) = $($_.Value)"
             }
+          }
+          
+        } catch {
+          Write-Host "❌ Could not configure registry: $($_.Exception.Message)"
         }
         
         echo "✅ Registry configuration completed - ready for clean application start"
       shell: powershell
 
-    # Step 2.5: Start SimplySign Desktop with Clean Configuration
+    # Step 6: Start SimplySign Desktop with Clean Configuration
     - name: Start SimplySign Desktop (Clean Configuration)
       run: |
         echo "=== STARTING SIMPLYSIGN DESKTOP WITH CLEAN CONFIGURATION ==="
