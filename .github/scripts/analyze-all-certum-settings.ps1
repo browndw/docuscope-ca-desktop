@@ -46,14 +46,14 @@ function Export-RegistrySection {
         $exitCode = $LASTEXITCODE
         
         if ($exitCode -eq 0) {
-            Write-Host "✓ Exported: $RegPath"
+            Write-Host "Exported: $RegPath"
             return $true
         } else {
             Write-Host "- Not found: $RegPath"
             return $false
         }
     } catch {
-        Write-Host "✗ Error exporting $RegPath : $($_.Exception.Message)"
+        Write-Host "Error exporting $RegPath : $($_.Exception.Message)"
         return $false
     }
 }
@@ -307,7 +307,7 @@ $results.BooleanSettings = $booleanSettings
 
 Write-Host "Found $($booleanSettings.Count) boolean-like settings:"
 foreach ($setting in $booleanSettings) {
-    $marker = if ($setting.PotentialLoginTrigger) { " 🎯 POTENTIAL LOGIN TRIGGER" } else { "" }
+    $marker = if ($setting.PotentialLoginTrigger) { "POTENTIAL LOGIN TRIGGER" } else { "" }
     Write-Host "  $($setting.Name) = $($setting.Value) [$($setting.Type)]$marker"
 }
 
