@@ -470,12 +470,12 @@ jobs:
                 $analysisData = Get-Content "certum_settings_analysis_detailed_results.json" -Raw | ConvertFrom-Json
                 
                 if ($analysisData.PotentialTriggers -and $analysisData.PotentialTriggers.Count -gt 0) {
-                    Write-Host "🎯 FOUND $($analysisData.PotentialTriggers.Count) POTENTIAL LOGIN TRIGGER(S)!"
+                    Write-Host "[FOUND] $($analysisData.PotentialTriggers.Count) POTENTIAL LOGIN TRIGGER(S)!"
                     foreach ($trigger in $analysisData.PotentialTriggers) {
                         Write-Host "   - $($trigger.Name) = $($trigger.Value) [$($trigger.RegPath)]"
                     }
                 } else {
-                    Write-Host "ℹNo obvious potential triggers found, but analysis generated comprehensive data"
+                    Write-Host "[INFO] No obvious potential triggers found, but analysis generated comprehensive data"
                 }
                 
                 Write-Host ""
