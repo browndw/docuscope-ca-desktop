@@ -34,15 +34,7 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
 
-# Add System.Text for StringBuilder
-try {
-    Add-Type -AssemblyName System.Text
-} catch {
-    # StringBuilder is available in mscorlib, try alternative approach
-    if ($DebugMode) {
-        Write-Host "System.Text assembly not found, using mscorlib approach"
-    }
-}
+# StringBuilder is part of mscorlib and automatically available
 
 # Windows API declarations for advanced window detection
 Add-Type @"
