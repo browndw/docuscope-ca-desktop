@@ -60,11 +60,11 @@ function Test-SettingChange {
         # Make the change
         if (Test-Path $RegPath) {
             Set-ItemProperty -Path $RegPath -Name $Name -Value $NewValue -ErrorAction Stop
-            Write-Host "  ✓ Setting changed successfully"
+            Write-Host "  Setting changed successfully"
             $testResult.ChangeSuccessful = $true
             
             # Wait for potential effects
-            Write-Host "  ⏳ Waiting $WaitSeconds seconds for effects..."
+            Write-Host "  Waiting $WaitSeconds seconds for effects..."
             Start-Sleep -Seconds $WaitSeconds
             
             # Check for new processes or dialogs
@@ -73,7 +73,7 @@ function Test-SettingChange {
             $testResult.ProcessNames = $processesAfter | ForEach-Object { $_.ProcessName }
             
             if ($testResult.ProcessCountAfter -gt $testResult.ProcessCountBefore) {
-                Write-Host "  🎯 NEW PROCESS(ES) DETECTED! Setting may have triggered something!"
+                Write-Host "  NEW PROCESS(ES) DETECTED! Setting may have triggered something!"
                 $newProcesses = $processesAfter | Where-Object { $_.Id -notin ($processesBefore | ForEach-Object { $_.Id }) }
                 foreach ($proc in $newProcesses) {
                     Write-Host "    New process: $($proc.ProcessName) (PID: $($proc.Id))"
