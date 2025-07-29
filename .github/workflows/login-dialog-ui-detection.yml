@@ -142,7 +142,11 @@ jobs:
             
             # Run UI detection script
             Write-Host "Running comprehensive UI element detection..."
-            $uiResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-ui-elements.ps1" -ProcessId $process.Id -TimeoutSeconds $timeout -DebugMode $debug
+            if ($debug) {
+                $uiResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-ui-elements.ps1" -ProcessId $process.Id -TimeoutSeconds $timeout -DebugMode
+            } else {
+                $uiResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-ui-elements.ps1" -ProcessId $process.Id -TimeoutSeconds $timeout
+            }
             Write-Host "UI detection completed"
             
             # Keep process running during detection
