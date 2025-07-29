@@ -142,7 +142,21 @@ function Find-SimplySignWindows {
                 $windowInfo.ClassName -like "*SimplySign*" -or
                 $processId -eq $TargetProcessId) {
                 
-                $script:windows += $windowInfo
+                # Create a clean copy of the window info to avoid hashtable conflicts
+                $cleanWindowInfo = @{
+                    Handle = $windowInfo['Handle']
+                    Title = $windowInfo['Title']
+                    ClassName = $windowInfo['ClassName']
+                    Visible = $windowInfo['Visible']
+                    Left = $windowInfo['Left']
+                    Top = $windowInfo['Top']
+                    Right = $windowInfo['Right']
+                    Bottom = $windowInfo['Bottom']
+                    Width = $windowInfo['Width']
+                    Height = $windowInfo['Height']
+                }
+                
+                $script:windows = $script:windows + @($cleanWindowInfo)
                 
                 if ($DebugMode) {
                     Write-Host "Found window: $($windowInfo.Title) [$($windowInfo.ClassName)]"
@@ -165,7 +179,22 @@ function Find-ChildWindows {
         param([IntPtr]$hWnd, [IntPtr]$lParam)
         
         $windowInfo = Get-WindowInfo -WindowHandle $hWnd
-        $script:children += $windowInfo
+        
+        # Create a clean copy to avoid hashtable conflicts
+        $cleanWindowInfo = @{
+            Handle = $windowInfo['Handle']
+            Title = $windowInfo['Title']
+            ClassName = $windowInfo['ClassName']
+            Visible = $windowInfo['Visible']
+            Left = $windowInfo['Left']
+            Top = $windowInfo['Top']
+            Right = $windowInfo['Right']
+            Bottom = $windowInfo['Bottom']
+            Width = $windowInfo['Width']
+            Height = $windowInfo['Height']
+        }
+        
+        $script:children = $script:children + @($cleanWindowInfo)
         
         if ($DebugMode) {
             Write-Host "  Child window: $($windowInfo.Title) [$($windowInfo.ClassName)]"
@@ -373,7 +402,153 @@ function Analyze-UIElements {
     return $uiElements
 }
 
+function Start-NetworkMonitoring {
+    param([int]$TimeoutSeconds = 120)
+    
+    Write-Host "Starting network monitoring for OAuth2 activity..."
+    
+    # Create a background job to monitor network activity
+    $monitoringJob = Start-Job -ScriptBlock {
+        param($timeout)
+        
+        $endTime = (Get-Date).AddSeconds($timeout)
+        $dnsCount = 0
+        $oauth2Activity = @()
+        
+        while ((Get-Date) -lt $endTime) {
+            try {
+                # Monitor DNS resolution for OAuth2 endpoint
+                $dnsResult = nslookup cloudsign.webnotarius.pl 2>$null
+                if ($dnsResult -and $dnsResult -notlike "*can't find*") {
+                    $dnsCount++
+                    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                    $oauth2Activity += "[$timestamp] DNS resolution successful for OAuth2 endpoint"
+                }
+                
+                # Check for network connections (if netstat is available)
+                try {
+                    $connections = netstat -an 2>$null | Select-String "cloudsign" -Quiet
+                    if ($connections) {
+                        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                        $oauth2Activity += "[$timestamp] OAuth2 connection detected"
+                    }
+                } catch {
+                    # netstat might not be available, continue with DNS monitoring
+                }
+                
+            } catch {
+                # Continue monitoring even if individual checks fail
+            }
+            
+            Start-Sleep -Seconds 2
+        }
+        
+        # Return results
+        return @{
+            DNSCount = $dnsCount
+            Activity = $oauth2Activity
+            TotalTime = $timeout
+        }
+        
+    } -ArgumentList $TimeoutSeconds
+    
+    Write-Host "Network monitoring started in background (Job ID: $($monitoringJob.Id))"
+    return $monitoringJob
+}
+
+function Get-NetworkMonitoringResults {
+    param([System.Management.Automation.Job]$MonitoringJob)
+    
+    if (-not $MonitoringJob) {
+        Write-Host "No network monitoring job provided"
+        return $null
+    }
+    
+    Write-Host "Collecting network monitoring results..."
+    
+    # Wait a bit for the job to complete if it's still running
+    if ($MonitoringJob.State -eq "Running") {
+        Write-Host "Network monitoring still running, waiting up to 10 seconds..."
+        Wait-Job $MonitoringJob -Timeout 10 | Out-Null
+    }
+    
+    try {
+        if ($MonitoringJob.State -eq "Completed") {
+            $results = Receive-Job $MonitoringJob
+            Remove-Job $MonitoringJob
+            
+            # Save results to file for workflow compatibility
+            $networkResults = @{
+                Timestamp = Get-Date
+                DNSResolutions = $results.DNSCount
+                OAuth2Activity = $results.Activity
+                MonitoringDuration = $results.TotalTime
+            }
+            
+            $networkResults | ConvertTo-Json -Depth 3 | Out-File -FilePath "network_monitor_results.log" -Encoding UTF8
+            
+            Write-Host "Network monitoring completed:"
+            Write-Host "  DNS resolutions: $($results.DNSCount)"
+            Write-Host "  OAuth2 activities: $($results.Activity.Count)"
+            
+            if ($results.DNSCount -gt 0 -or $results.Activity.Count -gt 0) {
+                Write-Host "  OAuth2 network activity detected!"
+                foreach ($activity in $results.Activity) {
+                    Write-Host "    $activity"
+                }
+            } else {
+                Write-Host "  No OAuth2 network activity detected"
+            }
+            
+            return $results
+            
+        } else {
+            Write-Host "Network monitoring job did not complete successfully (State: $($MonitoringJob.State))"
+            Remove-Job $MonitoringJob -Force
+            return $null
+        }
+        
+    } catch {
+        Write-Host "Error collecting network monitoring results: $($_.Exception.Message)"
+        Remove-Job $MonitoringJob -Force
+        return $null
+    }
+}
+
 function Take-Screenshot {
+    param([string]$OutputPath = "screenshots", [string]$Suffix = "")
+    
+    try {
+        if (-not (Test-Path $OutputPath)) {
+            New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
+        }
+        
+        $screen = [System.Windows.Forms.Screen]::PrimaryScreen
+        $bitmap = New-Object System.Drawing.Bitmap($screen.Bounds.Width, $screen.Bounds.Height)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        
+        $graphics.CopyFromScreen($screen.Bounds.X, $screen.Bounds.Y, 0, 0, $screen.Bounds.Size)
+        
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $filename = if ($Suffix) { 
+            "$OutputPath/screenshot_${timestamp}_${Suffix}.png" 
+        } else { 
+            "$OutputPath/screenshot_$timestamp.png" 
+        }
+        $bitmap.Save($filename, [System.Drawing.Imaging.ImageFormat]::Png)
+        
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        
+        Write-Host "Screenshot saved: $filename"
+        return $filename
+        
+    } catch {
+        Write-Host "Could not take screenshot: $($_.Exception.Message)"
+        return $null
+    }
+}
+}
     param([string]$OutputPath = "screenshots")
     
     try {
@@ -408,17 +583,23 @@ function Take-Screenshot {
 # ==============================================================================
 
 Write-Host "Starting UI element detection..."
+
+# Start network monitoring first
+$networkMonitoringJob = Start-NetworkMonitoring -TimeoutSeconds $TimeoutSeconds
+
 $detectionResults = @{
     Timestamp = Get-Date
     ProcessId = $ProcessId
     Windows = @()
     UIElements = @()
     Screenshots = @()
+    NetworkResults = $null
     Summary = @{
         WindowsFound = 0
         InputFieldsFound = 0
         ButtonsFound = 0
         WebControlsFound = 0
+        OAuth2ActivityDetected = $false
     }
 }
 
@@ -473,12 +654,74 @@ foreach ($window in $windows) {
     Write-Host "  Web controls: $($webControls.Count)"
 }
 
-# Take screenshot
+# Take multiple screenshots to capture dialog progression
 Write-Host ""
-Write-Host "Taking screenshot for visual confirmation..."
-$screenshot = Take-Screenshot
-if ($screenshot) {
-    $detectionResults.Screenshots += $screenshot
+Write-Host "Taking screenshots to capture dialog progression..."
+
+# First screenshot - immediate state (might show update dialog)
+$screenshot1 = Take-Screenshot -Suffix "initial"
+if ($screenshot1) {
+    $detectionResults.Screenshots += $screenshot1
+}
+
+# Wait for any update dialogs to be dismissed and login dialog to appear
+Write-Host "Waiting 5 seconds for login dialog to fully appear..."
+Start-Sleep -Seconds 5
+
+# Second screenshot - after waiting (should show login dialog)
+$screenshot2 = Take-Screenshot -Suffix "after_wait"
+if ($screenshot2) {
+    $detectionResults.Screenshots += $screenshot2
+}
+
+# Check if we have new windows after the wait
+Write-Host "Re-checking for new login dialog windows..."
+$updatedWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
+if ($updatedWindows.Count -gt $windows.Count) {
+    Write-Host "New windows detected after wait - analyzing updated windows..."
+    
+    # Analyze any new windows that appeared
+    foreach ($window in $updatedWindows) {
+        $existingWindow = $windows | Where-Object { $_.Handle -eq $window.Handle }
+        if (-not $existingWindow) {
+            Write-Host "Analyzing new window: $($window.Title) [$($window.ClassName)]"
+            
+            $newUIElements = Analyze-UIElements -WindowHandle ([IntPtr]$window.Handle)
+            $detectionResults.UIElements += $newUIElements
+            
+            # Update counts
+            $newInputFields = $newUIElements | Where-Object { $_.ElementType -eq "InputField" }
+            $newButtons = $newUIElements | Where-Object { $_.ElementType -eq "Button" }
+            $newWebControls = $newUIElements | Where-Object { $_.ElementType -eq "WebControl" }
+            
+            $detectionResults.Summary.InputFieldsFound += $newInputFields.Count
+            $detectionResults.Summary.ButtonsFound += $newButtons.Count
+            $detectionResults.Summary.WebControlsFound += $newWebControls.Count
+            
+            Write-Host "  New UI Elements found:"
+            Write-Host "    Input fields: $($newInputFields.Count)"
+            Write-Host "    Buttons: $($newButtons.Count)"
+            Write-Host "    Web controls: $($newWebControls.Count)"
+        }
+    }
+    
+    # Take final screenshot after analyzing new windows
+    $screenshot3 = Take-Screenshot -Suffix "final_analysis"
+    if ($screenshot3) {
+        $detectionResults.Screenshots += $screenshot3
+    }
+    
+    # Update windows list
+    $detectionResults.Windows = $updatedWindows
+    $detectionResults.Summary.WindowsFound = $updatedWindows.Count
+}
+
+# Collect network monitoring results
+Write-Host ""
+$networkResults = Get-NetworkMonitoringResults -MonitoringJob $networkMonitoringJob
+if ($networkResults) {
+    $detectionResults.NetworkResults = $networkResults
+    $detectionResults.Summary.OAuth2ActivityDetected = ($networkResults.DNSCount -gt 0 -or $networkResults.Activity.Count -gt 0)
 }
 
 # Save detailed results
@@ -517,6 +760,13 @@ Write-Host "Windows found: $($detectionResults.Summary.WindowsFound)"
 Write-Host "Input fields found: $($detectionResults.Summary.InputFieldsFound)"
 Write-Host "Buttons found: $($detectionResults.Summary.ButtonsFound)"
 Write-Host "Web controls found: $($detectionResults.Summary.WebControlsFound)"
+Write-Host "OAuth2 activity detected: $($detectionResults.Summary.OAuth2ActivityDetected)"
+
+if ($detectionResults.NetworkResults) {
+    Write-Host "Network monitoring results:"
+    Write-Host "  DNS resolutions: $($detectionResults.NetworkResults.DNSCount)"
+    Write-Host "  Network activities: $($detectionResults.NetworkResults.Activity.Count)"
+}
 
 if ($detectionResults.Summary.InputFieldsFound -gt 0) {
     Write-Host ""
@@ -528,6 +778,14 @@ if ($detectionResults.Summary.InputFieldsFound -gt 0) {
 } else {
     Write-Host ""
     Write-Host "NO INPUT FIELDS DETECTED: May need alternative detection approach"
+}
+
+if ($detectionResults.Summary.OAuth2ActivityDetected) {
+    Write-Host ""
+    Write-Host "NETWORK ACTIVITY CONFIRMED: OAuth2 communication detected during session"
+} else {
+    Write-Host ""
+    Write-Host "NO OAUTH2 ACTIVITY: Login dialog may not have appeared or no cloud connection"
 }
 
 Write-Host ""
