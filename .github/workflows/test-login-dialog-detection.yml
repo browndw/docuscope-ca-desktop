@@ -924,7 +924,7 @@ jobs:
           } -ArgumentList ${{ inputs.detection_timeout }}
           
           Write-Host \"Network monitoring job started (ID: \$(\$job.Id))\"
-          \$job.Id | Out-File -FilePath 'network_monitor_job.id'
+          \$job.Id | Out-File -FilePath 'network_monitor_job.id' -Encoding ASCII
         " 2>&1 | tee network_monitor_start.log
       shell: bash
 
