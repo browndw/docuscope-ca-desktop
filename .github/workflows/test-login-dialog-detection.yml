@@ -105,17 +105,21 @@ jobs:
         foreach ($regPath in $regPaths) {
           $fileName = "before_" + ($regPath -replace "\\", "_" -replace ":", "") + ".reg"
           try {
-            $result = reg export $regPath $fileName /y 2>&1
-            if ($LASTEXITCODE -eq 0) {
+            # Use cmd to run reg export and capture both stdout and stderr
+            $output = cmd /c "reg export `"$regPath`" `"$fileName`" /y 2>&1"
+            $exitCode = $LASTEXITCODE
+            
+            if ($exitCode -eq 0) {
               Write-Host "✅ Exported: $regPath -> $fileName"
             } else {
-              Write-Host "⚠️ No data or access denied for: $regPath"
-              # Create empty file to mark as checked
-              "Windows Registry Editor Version 5.00`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+              # Registry key doesn't exist yet - this is expected before installation
+              Write-Host "⚪ Registry key not found (expected): $regPath"
+              # Create empty baseline file for comparison later
+              "Windows Registry Editor Version 5.00`r`n`r`n; Registry key did not exist before installation`r`n" | Out-File -FilePath $fileName -Encoding ASCII
             }
           } catch {
             Write-Host "⚠️ Could not export $regPath : $($_.Exception.Message)"
-            "Windows Registry Editor Version 5.00`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+            "Windows Registry Editor Version 5.00`r`n`r`n; Export failed: $($_.Exception.Message)`r`n" | Out-File -FilePath $fileName -Encoding ASCII
           }
         }
         
@@ -157,16 +161,20 @@ jobs:
         foreach ($regPath in $regPaths) {
           $fileName = "after_" + ($regPath -replace "\\", "_" -replace ":", "") + ".reg"
           try {
-            $result = reg export $regPath $fileName /y 2>&1
-            if ($LASTEXITCODE -eq 0) {
+            # Use cmd to run reg export and capture both stdout and stderr
+            $output = cmd /c "reg export `"$regPath`" `"$fileName`" /y 2>&1"
+            $exitCode = $LASTEXITCODE
+            
+            if ($exitCode -eq 0) {
               Write-Host "✅ Exported: $regPath -> $fileName"
             } else {
-              Write-Host "⚠️ No data or access denied for: $regPath"
-              "Windows Registry Editor Version 5.00`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+              # Registry key still doesn't exist after installation
+              Write-Host "⚪ Registry key still not found: $regPath"
+              "Windows Registry Editor Version 5.00`r`n`r`n; Registry key did not exist after installation`r`n" | Out-File -FilePath $fileName -Encoding ASCII
             }
           } catch {
             Write-Host "⚠️ Could not export $regPath : $($_.Exception.Message)"
-            "Windows Registry Editor Version 5.00`r`n" | Out-File -FilePath $fileName -Encoding ASCII
+            "Windows Registry Editor Version 5.00`r`n`r`n; Export failed: $($_.Exception.Message)`r`n" | Out-File -FilePath $fileName -Encoding ASCII
           }
         }
         
