@@ -16,7 +16,7 @@
 param(
     [string]$SettingsAnalysisFile = "settings_analysis_detailed_results.json",
     [int]$TestDurationSeconds = 15,
-    [bool]$RestoreOriginal = 1
+    [switch]$RestoreOriginal
 )
 
 $ErrorActionPreference = "Continue"
