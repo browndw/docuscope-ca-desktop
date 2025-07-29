@@ -1068,7 +1068,7 @@ jobs:
         echo "=== COLLECTING NETWORK MONITORING RESULTS ==="
         
         if [ -f "network_monitor_job.id" ]; then
-          JOB_ID=$(cat network_monitor_job.id)
+          JOB_ID=$(tr -cd '0-9' < network_monitor_job.id)
           echo "Retrieving network monitoring results from job ID: $JOB_ID"
           
           powershell -Command "
