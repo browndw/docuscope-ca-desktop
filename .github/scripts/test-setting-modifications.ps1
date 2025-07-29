@@ -88,10 +88,10 @@ function Test-SettingChange {
             if ($RestoreOriginal) {
                 try {
                     Set-ItemProperty -Path $RegPath -Name $Name -Value $OriginalValue -ErrorAction Stop
-                    Write-Host "  ↺ Restored original value"
+                    Write-Host "  Restored original value"
                     $testResult.RestoreSuccessful = $true
                 } catch {
-                    Write-Host "  ✗ Failed to restore original value: $($_.Exception.Message)"
+                    Write-Host "  Failed to restore original value: $($_.Exception.Message)"
                     $testResult.RestoreSuccessful = $false
                 }
             }
@@ -110,7 +110,7 @@ function Test-SettingChange {
 function Start-SimplySignAndTest {
     param([string]$TestDescription)
     
-    Write-Host "  📋 Test: $TestDescription"
+    Write-Host "  Test: $TestDescription"
     
     # Find SimplySign executable
     $possiblePaths = @(
@@ -284,10 +284,10 @@ foreach ($setting in ($settingsToTest | Sort-Object Priority)) {
     }
     
     Write-Host "    Result summary:"
-    Write-Host "    Setting change: $(if ($testResult.ChangeSuccessful) { "✓" } else { "✗" })"
-    Write-Host "    New processes: $(if ($testResult.TriggeredNewProcess) { "✓ YES" } else { "- No" })"
-    Write-Host "    SimplySign startup: $(if ($startupTest) { "✓ Normal" } else { "⚠ Different" })"
-    Write-Host "    Restore: $(if ($testResult.RestoreSuccessful) { "✓" } else { "✗" })"
+    Write-Host "    Setting change: $(if ($testResult.ChangeSuccessful) { "YES" } else { "NO" })"
+    Write-Host "    New processes: $(if ($testResult.TriggeredNewProcess) { "YES" } else { "NO" })"
+    Write-Host "    SimplySign startup: $(if ($startupTest) { "Normal" } else { "Different" })"
+    Write-Host "    Restore: $(if ($testResult.RestoreSuccessful) { "YES" } else { "NO" })"
     
     $settingIndex++
 }
@@ -352,10 +352,10 @@ $($testResults | ForEach-Object {
     "Setting: $($_.SettingName)"
     "  Path: $($_.RegPath)" 
     "  Change: $($_.OriginalValue) → $($_.NewValue)"
-    "  Success: $(if ($_.ChangeSuccessful) { "✓" } else { "✗" })"
-    "  New process: $(if ($_.TriggeredNewProcess) { "✓" } else { "✗" })"
-    "  Startup OK: $(if ($_.SimplySignStartupWorked) { "✓" } else { "✗" })"
-    "  Restored: $(if ($_.RestoreSuccessful) { "✓" } else { "✗" })"
+    "  Success: $(if ($_.ChangeSuccessful) { "YES" } else { "NO" })"
+    "  New process: $(if ($_.TriggeredNewProcess) { "YES" } else { "NO" })"
+    "  Startup OK: $(if ($_.SimplySignStartupWorked) { "YES" } else { "NO" })"
+    "  Restored: $(if ($_.RestoreSuccessful) { "YES" } else { "NO" })"
     ""
 } | Out-String)
 
