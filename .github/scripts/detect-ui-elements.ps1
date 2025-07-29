@@ -350,46 +350,46 @@ public class NoButtonCoordAPI {
                 # Method 3: Direct "No" button targeting via UI Automation
                 try {
                     Write-Host "Method 3: Searching for 'No' button via UI Automation..."
-                $automation = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
-                
-                if ($automation) {
-                    # Find all buttons
-                    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
-                    $buttons = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+                    $automation = [System.Windows.Automation.AutomationElement]::FromHandle($windowHandle)
                     
-                    Write-Host "  Found $($buttons.Count) button(s) in update dialog"
-                    
-                    foreach ($button in $buttons) {
-                        try {
-                            $buttonName = $button.Current.Name
-                            $buttonId = $button.Current.AutomationId
-                            Write-Host "    Button found: '$buttonName' [ID: $buttonId]"
-                            
-                            # Look specifically for "No" button
-                            if ($buttonName -eq "No" -or $buttonName -eq "&No" -or $buttonId -eq "7") {
-                                Write-Host "    Found 'No' button - clicking it!"
+                    if ($automation) {
+                        # Find all buttons
+                        $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+                        $buttons = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+                        
+                        Write-Host "  Found $($buttons.Count) button(s) in update dialog"
+                        
+                        foreach ($button in $buttons) {
+                            try {
+                                $buttonName = $button.Current.Name
+                                $buttonId = $button.Current.AutomationId
+                                Write-Host "    Button found: '$buttonName' [ID: $buttonId]"
                                 
-                                # Try InvokePattern
-                                try {
-                                    $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                                    if ($invokePattern) {
-                                        $invokePattern.Invoke()
-                                        Write-Host "    Successfully clicked 'No' button via InvokePattern"
-                                        $dialogDismissed = $true
-                                        Start-Sleep -Seconds 2
-                                        break
-                                    }
-                                } catch {
-                                    Write-Host "    InvokePattern failed: $($_.Exception.Message)"
-                                }
-                                
-                                # Try coordinate click as backup
-                                try {
-                                    $rect = $button.Current.BoundingRectangle
-                                    $centerX = $rect.Left + ($rect.Width / 2)
-                                    $centerY = $rect.Top + ($rect.Height / 2)
+                                # Look specifically for "No" button
+                                if ($buttonName -eq "No" -or $buttonName -eq "&No" -or $buttonId -eq "7") {
+                                    Write-Host "    Found 'No' button - clicking it!"
                                     
-                                    Add-Type @"
+                                    # Try InvokePattern
+                                    try {
+                                        $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                                        if ($invokePattern) {
+                                            $invokePattern.Invoke()
+                                            Write-Host "    Successfully clicked 'No' button via InvokePattern"
+                                            $dialogDismissed = $true
+                                            Start-Sleep -Seconds 2
+                                            break
+                                        }
+                                    } catch {
+                                        Write-Host "    InvokePattern failed: $($_.Exception.Message)"
+                                    }
+                                    
+                                    # Try coordinate click as backup
+                                    try {
+                                        $rect = $button.Current.BoundingRectangle
+                                        $centerX = $rect.Left + ($rect.Width / 2)
+                                        $centerY = $rect.Top + ($rect.Height / 2)
+                                        
+                                        Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class NoButtonClickAPI {
@@ -401,29 +401,30 @@ public class NoButtonClickAPI {
     public const uint MOUSEEVENTF_LEFTUP = 0x04;
 }
 "@
-                                    
-                                    [NoButtonClickAPI]::SetCursorPos([int]$centerX, [int]$centerY)
-                                    Start-Sleep -Milliseconds 100
-                                    [NoButtonClickAPI]::mouse_event([NoButtonClickAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
-                                    [NoButtonClickAPI]::mouse_event([NoButtonClickAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
-                                    
-                                    Write-Host "    Clicked 'No' button at coordinates ($centerX, $centerY)"
-                                    $dialogDismissed = $true
-                                    Start-Sleep -Seconds 2
-                                    break
-                                    
-                                } catch {
-                                    Write-Host "    Coordinate click failed: $($_.Exception.Message)"
+                                        
+                                        [NoButtonClickAPI]::SetCursorPos([int]$centerX, [int]$centerY)
+                                        Start-Sleep -Milliseconds 100
+                                        [NoButtonClickAPI]::mouse_event([NoButtonClickAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                                        [NoButtonClickAPI]::mouse_event([NoButtonClickAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                                        
+                                        Write-Host "    Clicked 'No' button at coordinates ($centerX, $centerY)"
+                                        $dialogDismissed = $true
+                                        Start-Sleep -Seconds 2
+                                        break
+                                        
+                                    } catch {
+                                        Write-Host "    Coordinate click failed: $($_.Exception.Message)"
+                                    }
                                 }
+                            } catch {
+                                Write-Host "    Could not analyze button: $($_.Exception.Message)"
                             }
-                        } catch {
-                            Write-Host "    Could not analyze button: $($_.Exception.Message)"
                         }
                     }
+                    
+                } catch {
+                    Write-Host "  UI Automation failed: $($_.Exception.Message)"
                 }
-                
-            } catch {
-                Write-Host "  UI Automation failed: $($_.Exception.Message)"
             }
             
             if (-not $dialogDismissed) {
