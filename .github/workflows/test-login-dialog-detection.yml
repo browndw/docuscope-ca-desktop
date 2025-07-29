@@ -243,6 +243,15 @@ jobs:
                       Write-Host "    POTENTIAL LOGIN TRIGGER:"
                       Write-Host "      $content"
                     }
+                    
+                    # Look specifically for the macOS equivalent setting we found
+                    if ($content -match "ShowLogonDialogAfterApplicationStartup" -or 
+                        $content -match "ShowLogonDialog.*Startup" -or
+                        $content -match "SimplySignDesktopShowLogonDialog") {
+                      Write-Host "    🎯 FOUND WINDOWS EQUIVALENT OF MACOS SETTING:"
+                      Write-Host "      macOS: SimplySignDesktopShowLogonDialogAfterApplicationStartup"
+                      Write-Host "      Windows: $content"
+                    }
                   }
                 }
               }
@@ -300,46 +309,65 @@ jobs:
       run: |
         echo "=== CONFIGURING SIMPLYSIGN FOR LOGIN DIALOG ==="
         echo "Setting registry keys to trigger login dialog on startup..."
-        echo "Using targeted approach based on common login dialog patterns"
+        echo "Using targeted approach based on macOS discovery: SimplySignDesktopShowLogonDialogAfterApplicationStartup = Yes"
         
-        # Only configure the primary registry path for now
-        $regPath = "HKCU:\Software\Certum"
+        # Test multiple registry paths where Windows might store the equivalent setting
+        $regPaths = @(
+          "HKCU:\Software\Certum",
+          "HKCU:\Software\Certum\SimplySign Desktop", 
+          "HKCU:\Software\SimplySignDesktop"
+        )
         
-        try {
-          if (-not (Test-Path $regPath)) {
-            New-Item -Path $regPath -Force | Out-Null
-            Write-Host "Created registry path: $regPath"
-          }
-          
-          # Test the most likely login dialog triggers one at a time
-          $targetSettings = @{
-            # Based on UI text you mentioned: "Show logon dialog to the cloud after application startup"
-            'ShowLogonDialogToTheCloudAfterApplicationStartup' = 'Yes'
-          }
-          
-          foreach ($setting in $targetSettings.GetEnumerator()) {
-            try {
-              New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
-              Write-Host "Set $($setting.Key) = $($setting.Value)"
-            } catch {
-              Write-Host "Could not set $($setting.Key): $($_.Exception.Message)"
+        # Setting variations based on macOS discovery
+        $targetSettings = @{
+          # Exact match to macOS setting name
+          'SimplySignDesktopShowLogonDialogAfterApplicationStartup' = 'Yes'
+          # Potential Windows variations
+          'ShowLogonDialogAfterApplicationStartup' = 'Yes'
+          'ShowLogonDialogAfterStartup' = 'Yes'
+          'ShowLogonDialog' = 'Yes'
+        }
+        
+        foreach ($regPath in $regPaths) {
+          try {
+            if (-not (Test-Path $regPath)) {
+              New-Item -Path $regPath -Force | Out-Null
+              Write-Host "Created registry path: $regPath"
             }
-          }
-          
-          Write-Host "Targeted registry configuration completed"
-          
-          # Verify what was actually set
-          Write-Host ""
-          Write-Host "=== REGISTRY VERIFICATION ==="
-          $properties = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
-          if ($properties) {
-            $properties.PSObject.Properties | Where-Object { $_.Name -notlike "PS*" } | ForEach-Object {
-              Write-Host "  $($_.Name) = $($_.Value)"
+            
+            foreach ($setting in $targetSettings.GetEnumerator()) {
+              try {
+                New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
+                Write-Host "Set $regPath\$($setting.Key) = $($setting.Value)"
+              } catch {
+                Write-Host "Could not set $regPath\$($setting.Key): $($_.Exception.Message)"
+              }
             }
+            
+          } catch {
+            Write-Host "Could not configure registry path $regPath : $($_.Exception.Message)"
           }
-          
-        } catch {
-          Write-Host "Could not configure registry: $($_.Exception.Message)"
+        }
+        
+        Write-Host "Multi-path registry configuration completed"
+        
+        # Verify what was actually set across all paths
+        Write-Host ""
+        Write-Host "=== REGISTRY VERIFICATION ACROSS ALL PATHS ==="
+        foreach ($regPath in $regPaths) {
+          if (Test-Path $regPath) {
+            Write-Host "Registry path: $regPath"
+            $properties = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+            if ($properties) {
+              $properties.PSObject.Properties | Where-Object { $_.Name -notlike "PS*" } | ForEach-Object {
+                Write-Host "  $($_.Name) = $($_.Value)"
+              }
+            } else {
+              Write-Host "  (No properties found)"
+            }
+          } else {
+            Write-Host "Registry path does not exist: $regPath"
+          }
         }
         
         echo "Registry configuration completed - ready for clean application start"
