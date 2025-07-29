@@ -548,35 +548,6 @@ function Take-Screenshot {
         return $null
     }
 }
-}
-    param([string]$OutputPath = "screenshots")
-    
-    try {
-        if (-not (Test-Path $OutputPath)) {
-            New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
-        }
-        
-        $screen = [System.Windows.Forms.Screen]::PrimaryScreen
-        $bitmap = New-Object System.Drawing.Bitmap($screen.Bounds.Width, $screen.Bounds.Height)
-        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-        
-        $graphics.CopyFromScreen($screen.Bounds.X, $screen.Bounds.Y, 0, 0, $screen.Bounds.Size)
-        
-        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $filename = "$OutputPath/screenshot_$timestamp.png"
-        $bitmap.Save($filename, [System.Drawing.Imaging.ImageFormat]::Png)
-        
-        $graphics.Dispose()
-        $bitmap.Dispose()
-        
-        Write-Host "Screenshot saved: $filename"
-        return $filename
-        
-    } catch {
-        Write-Host "Could not take screenshot: $($_.Exception.Message)"
-        return $null
-    }
-}
 
 # ==============================================================================
 # MAIN DETECTION LOGIC
