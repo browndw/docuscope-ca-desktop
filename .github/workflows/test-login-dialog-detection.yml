@@ -129,6 +129,9 @@ jobs:
         
         Write-Host "✅ Pre-installation snapshot completed"
         Get-ChildItem -Name "before_*.reg" | ForEach-Object { Write-Host "  Created: $_" }
+        
+        # Ensure script exits successfully regardless of registry key existence
+        exit 0
       shell: powershell
 
     # Step 2: Install SimplySign Desktop
@@ -183,6 +186,9 @@ jobs:
         
         Write-Host "✅ Post-installation snapshot completed"
         Get-ChildItem -Name "after_*.reg" | ForEach-Object { Write-Host "  Created: $_" }
+        
+        # Ensure script exits successfully regardless of registry key existence  
+        exit 0
       shell: powershell
 
     # Step 4: Analyze Registry Changes
@@ -283,6 +289,9 @@ jobs:
         }
         
         echo "✅ Registry analysis completed"
+        
+        # Ensure script exits successfully
+        exit 0
       shell: powershell
 
     # Step 5: Configure Based on Discovered Settings (if any found)
