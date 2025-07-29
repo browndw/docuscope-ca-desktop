@@ -334,6 +334,186 @@ function Find-SystemTrayApplications {
     return $trayInfo
 }
 
+function Find-HiddenTrayIcons {
+    param([hashtable]$TrayInfo, [string]$OutputPath = "screenshots")
+    
+    Write-Host "Searching for hidden tray icons after revealing them..."
+    
+    $hiddenIcons = @()
+    $interactions = @()
+    
+    try {
+        # After revealing hidden icons, try to find the overflow area
+        # Look for NotifyIconOverflowWindow or similar hidden icon containers
+        $overflowHandle = [WindowAPI]::FindWindow("NotifyIconOverflowWindow", $null)
+        
+        if ($overflowHandle -ne [IntPtr]::Zero) {
+            Write-Host "Found overflow window for hidden icons: Handle $($overflowHandle.ToInt64())"
+            $interactions += "Found NotifyIconOverflowWindow"
+            
+            # Take screenshot showing the overflow area
+            $overflowScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "hidden_icons_overflow_found"
+            if ($overflowScreenshot) {
+                $interactions += "Screenshot of overflow area: $overflowScreenshot"
+            }
+            
+            # Try to enumerate icons in the overflow area
+            try {
+                $automation = [System.Windows.Automation.AutomationElement]::FromHandle($overflowHandle)
+                if ($automation) {
+                    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+                    $overflowButtons = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+                    
+                    Write-Host "Found $($overflowButtons.Count) button(s) in overflow area"
+                    $interactions += "Found $($overflowButtons.Count) buttons in overflow area"
+                    
+                    foreach ($button in $overflowButtons) {
+                        try {
+                            $buttonInfo = @{
+                                Name = $button.Current.Name
+                                AutomationId = $button.Current.AutomationId
+                                ClassName = $button.Current.ClassName
+                                BoundingRectangle = $button.Current.BoundingRectangle
+                                IsEnabled = $button.Current.IsEnabled
+                                Location = "HiddenOverflow"
+                            }
+                            
+                            # Check if this might be SimplySign
+                            $isSimplySign = ($buttonInfo.Name -like "*SimplySign*" -or 
+                                            $buttonInfo.Name -like "*Sign*" -or 
+                                            $buttonInfo.Name -like "*Simply*" -or
+                                            $buttonInfo.Name -like "*Certum*" -or
+                                            $buttonInfo.AutomationId -like "*SimplySign*" -or
+                                            $buttonInfo.AutomationId -like "*Sign*")
+                            
+                            $buttonInfo.IsSimplySign = $isSimplySign
+                            $hiddenIcons += $buttonInfo
+                            
+                            if ($isSimplySign) {
+                                Write-Host "FOUND SIMPLYSIGN IN HIDDEN ICONS: '$($buttonInfo.Name)'"
+                                Write-Host "  AutomationId: '$($buttonInfo.AutomationId)'"
+                                Write-Host "  Position: ($($buttonInfo.BoundingRectangle.Left),$($buttonInfo.BoundingRectangle.Top))"
+                                Write-Host "  Size: $($buttonInfo.BoundingRectangle.Width)x$($buttonInfo.BoundingRectangle.Height)"
+                                $interactions += "FOUND SimplySign in hidden icons: '$($buttonInfo.Name)'"
+                                
+                                # Try to click this hidden SimplySign icon
+                                Write-Host "Attempting to click hidden SimplySign icon..."
+                                $centerX = $buttonInfo.BoundingRectangle.Left + ($buttonInfo.BoundingRectangle.Width / 2)
+                                $centerY = $buttonInfo.BoundingRectangle.Top + ($buttonInfo.BoundingRectangle.Height / 2)
+                                
+                                [WindowAPI]::SetCursorPos([int]$centerX, [int]$centerY)
+                                Start-Sleep -Milliseconds 300
+                                [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                                Start-Sleep -Milliseconds 100
+                                [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                                
+                                $interactions += "Clicked hidden SimplySign icon at ($centerX, $centerY)"
+                                
+                                Start-Sleep -Seconds 3
+                                
+                                # Take screenshot after clicking hidden icon
+                                $clickHiddenScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_hidden_icon_click"
+                                if ($clickHiddenScreenshot) {
+                                    $interactions += "Screenshot after hidden icon click: $clickHiddenScreenshot"
+                                }
+                                
+                            } else {
+                                Write-Host "Hidden tray icon: '$($buttonInfo.Name)' [ID: $($buttonInfo.AutomationId)]"
+                            }
+                            
+                        } catch {
+                            Write-Host "Could not analyze hidden tray button: $($_.Exception.Message)"
+                        }
+                    }
+                }
+            } catch {
+                Write-Host "Could not enumerate hidden tray icons via UI Automation: $($_.Exception.Message)"
+            }
+            
+        } else {
+            Write-Host "No overflow window found - trying alternative hidden icon detection"
+            $interactions += "No overflow window found"
+            
+            # Try looking for ToolbarWindow32 in different locations
+            # Sometimes hidden icons appear in different toolbar containers
+            $taskbarHandle = [WindowAPI]::FindWindow("Shell_TrayWnd", $null)
+            if ($taskbarHandle -ne [IntPtr]::Zero) {
+                
+                # Look for multiple ToolbarWindow32 instances
+                $toolbarHandle = [IntPtr]::Zero
+                $toolbarCount = 0
+                
+                # Find first ToolbarWindow32
+                $currentToolbar = [WindowAPI]::FindWindowEx($taskbarHandle, [IntPtr]::Zero, "ToolbarWindow32", $null)
+                
+                while ($currentToolbar -ne [IntPtr]::Zero -and $toolbarCount -lt 10) {
+                    $toolbarCount++
+                    Write-Host "Found ToolbarWindow32 #$toolbarCount : Handle $($currentToolbar.ToInt64())"
+                    
+                    # Try to enumerate this toolbar for hidden icons
+                    try {
+                        $automation = [System.Windows.Automation.AutomationElement]::FromHandle($currentToolbar)
+                        if ($automation) {
+                            $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+                            $toolbarButtons = $automation.FindAll([System.Windows.Automation.TreeScope]::Children, $buttonCondition)
+                            
+                            Write-Host "  Toolbar #$toolbarCount has $($toolbarButtons.Count) button(s)"
+                            
+                            if ($toolbarButtons.Count -gt 0) {
+                                foreach ($button in $toolbarButtons) {
+                                    try {
+                                        $buttonName = $button.Current.Name
+                                        $buttonId = $button.Current.AutomationId
+                                        
+                                        if ($buttonName -like "*SimplySign*" -or $buttonName -like "*Sign*" -or $buttonName -like "*Simply*" -or $buttonName -like "*Certum*") {
+                                            Write-Host "  FOUND POTENTIAL SIMPLYSIGN IN TOOLBAR #$toolbarCount : '$buttonName'"
+                                            $interactions += "Found potential SimplySign in toolbar #$toolbarCount : '$buttonName'"
+                                            
+                                            # Try to click it
+                                            $rect = $button.Current.BoundingRectangle
+                                            $centerX = $rect.Left + ($rect.Width / 2)
+                                            $centerY = $rect.Top + ($rect.Height / 2)
+                                            
+                                            [WindowAPI]::SetCursorPos([int]$centerX, [int]$centerY)
+                                            Start-Sleep -Milliseconds 300
+                                            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                                            Start-Sleep -Milliseconds 100
+                                            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                                            
+                                            $interactions += "Clicked toolbar SimplySign icon at ($centerX, $centerY)"
+                                            Start-Sleep -Seconds 2
+                                        }
+                                        
+                                    } catch {
+                                        # Continue checking other buttons
+                                    }
+                                }
+                            }
+                        }
+                    } catch {
+                        Write-Host "  Could not enumerate toolbar #$toolbarCount"
+                    }
+                    
+                    # Find next ToolbarWindow32
+                    $currentToolbar = [WindowAPI]::FindWindowEx($taskbarHandle, $currentToolbar, "ToolbarWindow32", $null)
+                }
+                
+                $interactions += "Checked $toolbarCount ToolbarWindow32 instances for hidden icons"
+            }
+        }
+        
+    } catch {
+        Write-Host "Error searching for hidden tray icons: $($_.Exception.Message)"
+        $interactions += "Error searching for hidden tray icons: $($_.Exception.Message)"
+    }
+    
+    return @{
+        HiddenIcons = $hiddenIcons
+        Interactions = $interactions
+        SimplySignFound = ($hiddenIcons | Where-Object { $_.IsSimplySign -eq $true }).Count -gt 0
+    }
+}
+
 function Interact-WithSystemTray {
     param([hashtable]$TrayInfo, [string]$OutputPath = "screenshots")
     
@@ -438,25 +618,133 @@ function Interact-WithSystemTray {
                 $interactions += "Screenshot after generic tray click: $genericClickScreenshot"
             }
             
-            # Try clicking the "Show hidden icons" button (usually a small arrow)
+            # Multiple attempts to find and click the "Show hidden icons" button
+            Write-Host "Attempting to reveal hidden tray icons..."
+            
+            # Method 1: Click the up arrow (usually at the left edge of notification area)
             $showHiddenX = $notifyRect.Left + 10  # Usually near the left edge
             $showHiddenY = $centerY
             
-            Write-Host "Attempting to click 'Show hidden icons' at ($showHiddenX, $showHiddenY)"
+            Write-Host "Method 1: Clicking potential up arrow at ($showHiddenX, $showHiddenY)"
             [WindowAPI]::SetCursorPos($showHiddenX, $showHiddenY)
             Start-Sleep -Milliseconds 200
             [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
             Start-Sleep -Milliseconds 50
             [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
             
-            $interactions += "Attempted to click 'Show hidden icons' at ($showHiddenX, $showHiddenY)"
+            $interactions += "Clicked potential up arrow at ($showHiddenX, $showHiddenY)"
             
             Start-Sleep -Seconds 2
             
-            # Take screenshot after trying to show hidden icons
-            $hiddenIconsScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_show_hidden_icons"
-            if ($hiddenIconsScreenshot) {
-                $interactions += "Screenshot after attempting to show hidden icons: $hiddenIconsScreenshot"
+            # Take screenshot after first attempt
+            $hiddenIconsScreenshot1 = Take-Screenshot -OutputPath $OutputPath -Suffix "after_show_hidden_attempt1"
+            if ($hiddenIconsScreenshot1) {
+                $interactions += "Screenshot after first hidden icons attempt: $hiddenIconsScreenshot1"
+            }
+            
+            # Method 2: Try slightly different positions for the up arrow
+            $showHiddenX2 = $notifyRect.Left + 5   # Even closer to edge
+            $showHiddenY2 = $centerY
+            
+            Write-Host "Method 2: Trying closer to edge at ($showHiddenX2, $showHiddenY2)"
+            [WindowAPI]::SetCursorPos($showHiddenX2, $showHiddenY2)
+            Start-Sleep -Milliseconds 200
+            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 50
+            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+            
+            $interactions += "Clicked closer to edge at ($showHiddenX2, $showHiddenY2)"
+            
+            Start-Sleep -Seconds 2
+            
+            # Method 3: Try the actual up arrow character position (usually has a small visual indicator)
+            $showHiddenX3 = $notifyRect.Left + 15  # Slightly more to the right
+            $showHiddenY3 = $centerY
+            
+            Write-Host "Method 3: Trying up arrow indicator at ($showHiddenX3, $showHiddenY3)"
+            [WindowAPI]::SetCursorPos($showHiddenX3, $showHiddenY3)
+            Start-Sleep -Milliseconds 200
+            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 50
+            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+            
+            $interactions += "Clicked up arrow indicator at ($showHiddenX3, $showHiddenY3)"
+            
+            Start-Sleep -Seconds 3
+            
+            # Take screenshot after attempting to show hidden icons
+            $hiddenIconsScreenshot2 = Take-Screenshot -OutputPath $OutputPath -Suffix "after_show_hidden_attempts"
+            if ($hiddenIconsScreenshot2) {
+                $interactions += "Screenshot after hidden icons attempts: $hiddenIconsScreenshot2"
+            }
+            
+            # Method 4: Use keyboard shortcut to access hidden icons
+            Write-Host "Method 4: Using Windows+B keyboard shortcut to access system tray"
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.SendKeys]::SendWait("^{ESC}")  # Escape any current selection
+            Start-Sleep -Milliseconds 500
+            [System.Windows.Forms.SendKeys]::SendWait("#{b}")    # Windows+B to select system tray
+            Start-Sleep -Seconds 2
+            
+            $interactions += "Used Windows+B keyboard shortcut to access system tray"
+            
+            # Take screenshot after keyboard shortcut
+            $keyboardScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_keyboard_tray_access"
+            if ($keyboardScreenshot) {
+                $interactions += "Screenshot after keyboard tray access: $keyboardScreenshot"
+            }
+            
+            # Try arrow keys to navigate through tray icons
+            Write-Host "Method 5: Using arrow keys to navigate through tray icons"
+            [System.Windows.Forms.SendKeys]::SendWait("{LEFT}")   # Move left through icons
+            Start-Sleep -Milliseconds 300
+            [System.Windows.Forms.SendKeys]::SendWait("{LEFT}")   # Move left again
+            Start-Sleep -Milliseconds 300
+            [System.Windows.Forms.SendKeys]::SendWait("{RIGHT}")  # Move right to see different icons
+            Start-Sleep -Milliseconds 300
+            [System.Windows.Forms.SendKeys]::SendWait("{RIGHT}") 
+            Start-Sleep -Seconds 1
+            
+            $interactions += "Navigated through tray icons with arrow keys"
+            
+            # Take screenshot after navigation
+            $navigationScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_tray_navigation"
+            if ($navigationScreenshot) {
+                $interactions += "Screenshot after tray navigation: $navigationScreenshot"
+            }
+            
+            # Press Enter on current selection to see if it activates anything
+            Write-Host "Method 6: Pressing Enter on current tray selection"
+            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+            Start-Sleep -Seconds 2
+            
+            $interactions += "Pressed Enter on tray selection"
+            
+            # Final screenshot after Enter
+            $enterScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_tray_enter"
+            if ($enterScreenshot) {
+                $interactions += "Screenshot after tray Enter: $enterScreenshot"
+            }
+            # After all attempts to show hidden icons, search for them
+            Write-Host "Searching for SimplySign in revealed hidden icons..."
+            $hiddenIconResults = Find-HiddenTrayIcons -TrayInfo $TrayInfo -OutputPath $OutputPath
+            
+            if ($hiddenIconResults.SimplySignFound) {
+                Write-Host "SUCCESS: Found SimplySign in hidden tray icons!"
+                $interactions += $hiddenIconResults.Interactions
+                
+                # Wait for potential login dialog after clicking hidden icon
+                Start-Sleep -Seconds 5
+                
+                # Take screenshot after hidden icon interaction
+                $postHiddenScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_hidden_simplysign_click"
+                if ($postHiddenScreenshot) {
+                    $interactions += "Screenshot after hidden SimplySign click: $postHiddenScreenshot"
+                }
+                
+            } else {
+                Write-Host "No SimplySign found in hidden icons, but continuing with other methods"
+                $interactions += $hiddenIconResults.Interactions
             }
         }
         
