@@ -17,7 +17,7 @@
 param(
     [int]$ProcessId = 0,
     [int]$TimeoutSeconds = 60,
-    [bool]$DebugMode = $false
+    [switch]$DebugMode
 )
 
 $ErrorActionPreference = "Continue"
