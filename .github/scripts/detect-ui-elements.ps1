@@ -36,7 +36,7 @@ Add-Type -AssemblyName System.Drawing
 
 # StringBuilder is part of mscorlib and automatically available
 
-# Windows API declarations for advanced window detection
+# Windows API declarations for advanced window detection and system tray interaction
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -64,7 +64,32 @@ public class WindowAPI {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     
+    // System tray and taskbar APIs
+    [DllImport("user32.dll")]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    
+    [DllImport("user32.dll")]
+    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+    
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+    
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+    
+    [DllImport("shell32.dll")]
+    public static extern uint SHAppBarMessage(uint dwMessage, ref APPBARDATA pData);
+    
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
+    public const uint MOUSEEVENTF_LEFTUP = 0x04;
+    public const uint MOUSEEVENTF_RIGHTDOWN = 0x08;
+    public const uint MOUSEEVENTF_RIGHTUP = 0x10;
+    public const uint ABM_GETTASKBARPOS = 0x00000005;
     
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
@@ -72,6 +97,22 @@ public class WindowAPI {
         public int Top;
         public int Right;
         public int Bottom;
+    }
+    
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT {
+        public int X;
+        public int Y;
+    }
+    
+    [StructLayout(LayoutKind.Sequential)]
+    public struct APPBARDATA {
+        public uint cbSize;
+        public IntPtr hWnd;
+        public uint uCallbackMessage;
+        public uint uEdge;
+        public RECT rc;
+        public IntPtr lParam;
     }
 }
 "@
@@ -169,6 +210,279 @@ function Find-SimplySignWindows {
     
     [WindowAPI]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
     return $windows
+}
+
+function Find-SystemTrayApplications {
+    param([int]$TargetProcessId = 0)
+    
+    Write-Host "Searching for system tray applications..."
+    
+    $trayInfo = @{
+        TaskbarFound = $false
+        NotificationAreaFound = $false
+        TrayIcons = @()
+        TaskbarRect = @{}
+        NotificationAreaRect = @{}
+    }
+    
+    try {
+        # Find the taskbar window
+        $taskbarHandle = [WindowAPI]::FindWindow("Shell_TrayWnd", $null)
+        if ($taskbarHandle -ne [IntPtr]::Zero) {
+            $trayInfo.TaskbarFound = $true
+            Write-Host "Found taskbar window: Handle $($taskbarHandle.ToInt64())"
+            
+            # Get taskbar position using SHAppBarMessage
+            $appBarData = New-Object WindowAPI+APPBARDATA
+            $appBarData.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($appBarData)
+            
+            $result = [WindowAPI]::SHAppBarMessage([WindowAPI]::ABM_GETTASKBARPOS, [ref]$appBarData)
+            if ($result -ne 0) {
+                $trayInfo.TaskbarRect = @{
+                    Left = $appBarData.rc.Left
+                    Top = $appBarData.rc.Top
+                    Right = $appBarData.rc.Right
+                    Bottom = $appBarData.rc.Bottom
+                    Width = $appBarData.rc.Right - $appBarData.rc.Left
+                    Height = $appBarData.rc.Bottom - $appBarData.rc.Top
+                }
+                Write-Host "Taskbar position: ($($trayInfo.TaskbarRect.Left),$($trayInfo.TaskbarRect.Top)) Size: $($trayInfo.TaskbarRect.Width)x$($trayInfo.TaskbarRect.Height)"
+            }
+            
+            # Find the notification area (system tray)
+            $trayNotifyHandle = [WindowAPI]::FindWindowEx($taskbarHandle, [IntPtr]::Zero, "TrayNotifyWnd", $null)
+            if ($trayNotifyHandle -ne [IntPtr]::Zero) {
+                $trayInfo.NotificationAreaFound = $true
+                Write-Host "Found notification area: Handle $($trayNotifyHandle.ToInt64())"
+                
+                # Get notification area rectangle
+                $notifyRect = New-Object WindowAPI+RECT
+                [WindowAPI]::GetWindowRect($trayNotifyHandle, [ref]$notifyRect) | Out-Null
+                
+                $trayInfo.NotificationAreaRect = @{
+                    Left = $notifyRect.Left
+                    Top = $notifyRect.Top
+                    Right = $notifyRect.Right
+                    Bottom = $notifyRect.Bottom
+                    Width = $notifyRect.Right - $notifyRect.Left
+                    Height = $notifyRect.Bottom - $notifyRect.Top
+                }
+                Write-Host "Notification area position: ($($trayInfo.NotificationAreaRect.Left),$($trayInfo.NotificationAreaRect.Top)) Size: $($trayInfo.NotificationAreaRect.Width)x$($trayInfo.NotificationAreaRect.Height)"
+                
+                # Find the SysPager (contains the actual tray icons)
+                $sysPagerHandle = [WindowAPI]::FindWindowEx($trayNotifyHandle, [IntPtr]::Zero, "SysPager", $null)
+                if ($sysPagerHandle -ne [IntPtr]::Zero) {
+                    Write-Host "Found SysPager: Handle $($sysPagerHandle.ToInt64())"
+                    
+                    # Find ToolbarWindow32 (contains individual tray icons)
+                    $toolbarHandle = [WindowAPI]::FindWindowEx($sysPagerHandle, [IntPtr]::Zero, "ToolbarWindow32", $null)
+                    if ($toolbarHandle -ne [IntPtr]::Zero) {
+                        Write-Host "Found tray toolbar: Handle $($toolbarHandle.ToInt64())"
+                        
+                        # Try to enumerate tray icon information
+                        try {
+                            $automation = [System.Windows.Automation.AutomationElement]::FromHandle($toolbarHandle)
+                            if ($automation) {
+                                $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+                                $trayButtons = $automation.FindAll([System.Windows.Automation.TreeScope]::Children, $buttonCondition)
+                                
+                                Write-Host "Found $($trayButtons.Count) tray icon(s)"
+                                
+                                foreach ($button in $trayButtons) {
+                                    try {
+                                        $buttonInfo = @{
+                                            Name = $button.Current.Name
+                                            AutomationId = $button.Current.AutomationId
+                                            ClassName = $button.Current.ClassName
+                                            BoundingRectangle = $button.Current.BoundingRectangle
+                                            IsEnabled = $button.Current.IsEnabled
+                                        }
+                                        
+                                        # Check if this might be SimplySign based on name patterns
+                                        $isSimplySign = ($buttonInfo.Name -like "*SimplySign*" -or 
+                                                        $buttonInfo.Name -like "*Sign*" -or 
+                                                        $buttonInfo.AutomationId -like "*SimplySign*")
+                                        
+                                        $buttonInfo.IsSimplySign = $isSimplySign
+                                        $trayInfo.TrayIcons += $buttonInfo
+                                        
+                                        if ($isSimplySign) {
+                                            Write-Host "POTENTIAL SIMPLYSIGN TRAY ICON FOUND: '$($buttonInfo.Name)'"
+                                            Write-Host "  Position: ($($buttonInfo.BoundingRectangle.Left),$($buttonInfo.BoundingRectangle.Top))"
+                                            Write-Host "  Size: $($buttonInfo.BoundingRectangle.Width)x$($buttonInfo.BoundingRectangle.Height)"
+                                        } else {
+                                            Write-Host "Tray icon: '$($buttonInfo.Name)' [ID: $($buttonInfo.AutomationId)]"
+                                        }
+                                        
+                                    } catch {
+                                        Write-Host "Could not analyze tray button: $($_.Exception.Message)"
+                                    }
+                                }
+                            }
+                        } catch {
+                            Write-Host "Could not enumerate tray icons via UI Automation: $($_.Exception.Message)"
+                        }
+                    }
+                }
+            }
+        }
+        
+    } catch {
+        Write-Host "Error detecting system tray: $($_.Exception.Message)"
+    }
+    
+    return $trayInfo
+}
+
+function Interact-WithSystemTray {
+    param([hashtable]$TrayInfo, [string]$OutputPath = "screenshots")
+    
+    Write-Host "Attempting to interact with system tray..."
+    
+    if (-not $TrayInfo.NotificationAreaFound) {
+        Write-Host "No notification area found - cannot interact with system tray"
+        return $false
+    }
+    
+    $interactions = @()
+    
+    try {
+        # Take screenshot before interaction
+        $beforeScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "before_tray_interaction"
+        if ($beforeScreenshot) {
+            $interactions += "Screenshot taken before tray interaction: $beforeScreenshot"
+        }
+        
+        # Check if we found any potential SimplySign tray icons
+        $simplySignIcons = $TrayInfo.TrayIcons | Where-Object { $_.IsSimplySign -eq $true }
+        
+        if ($simplySignIcons.Count -gt 0) {
+            Write-Host "Found $($simplySignIcons.Count) potential SimplySign tray icon(s)"
+            
+            foreach ($icon in $simplySignIcons) {
+                Write-Host "Attempting to click SimplySign tray icon: '$($icon.Name)'"
+                
+                # Calculate center of the tray icon
+                $centerX = $icon.BoundingRectangle.Left + ($icon.BoundingRectangle.Width / 2)
+                $centerY = $icon.BoundingRectangle.Top + ($icon.BoundingRectangle.Height / 2)
+                
+                # Left click on the tray icon
+                Write-Host "Left-clicking tray icon at ($centerX, $centerY)"
+                [WindowAPI]::SetCursorPos([int]$centerX, [int]$centerY)
+                Start-Sleep -Milliseconds 200
+                [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                Start-Sleep -Milliseconds 50
+                [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                
+                $interactions += "Left-clicked SimplySign tray icon '$($icon.Name)' at ($centerX, $centerY)"
+                
+                # Wait for potential dialog to appear
+                Start-Sleep -Seconds 2
+                
+                # Take screenshot after left click
+                $leftClickScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_tray_left_click"
+                if ($leftClickScreenshot) {
+                    $interactions += "Screenshot after left click: $leftClickScreenshot"
+                }
+                
+                # Also try right-click to see context menu
+                Write-Host "Right-clicking tray icon for context menu"
+                [WindowAPI]::SetCursorPos([int]$centerX, [int]$centerY)
+                Start-Sleep -Milliseconds 200
+                [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                Start-Sleep -Milliseconds 50
+                [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, [UIntPtr]::Zero)
+                
+                $interactions += "Right-clicked SimplySign tray icon '$($icon.Name)' for context menu"
+                
+                # Wait for context menu
+                Start-Sleep -Seconds 2
+                
+                # Take screenshot after right click
+                $rightClickScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_tray_right_click"
+                if ($rightClickScreenshot) {
+                    $interactions += "Screenshot after right click: $rightClickScreenshot"
+                }
+                
+                # Wait a bit more and dismiss any context menu by clicking elsewhere
+                Start-Sleep -Seconds 1
+                [WindowAPI]::SetCursorPos(100, 100)  # Click away from tray
+                [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                
+                Start-Sleep -Seconds 1
+            }
+            
+        } else {
+            Write-Host "No SimplySign tray icons found, attempting generic tray interaction"
+            
+            # Try clicking in the general notification area to reveal hidden icons
+            $notifyRect = $TrayInfo.NotificationAreaRect
+            $centerX = $notifyRect.Left + ($notifyRect.Width / 2)
+            $centerY = $notifyRect.Top + ($notifyRect.Height / 2)
+            
+            Write-Host "Clicking notification area center at ($centerX, $centerY)"
+            [WindowAPI]::SetCursorPos($centerX, $centerY)
+            Start-Sleep -Milliseconds 200
+            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 50
+            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+            
+            $interactions += "Clicked notification area center at ($centerX, $centerY)"
+            
+            Start-Sleep -Seconds 2
+            
+            # Take screenshot after generic click
+            $genericClickScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_generic_tray_click"
+            if ($genericClickScreenshot) {
+                $interactions += "Screenshot after generic tray click: $genericClickScreenshot"
+            }
+            
+            # Try clicking the "Show hidden icons" button (usually a small arrow)
+            $showHiddenX = $notifyRect.Left + 10  # Usually near the left edge
+            $showHiddenY = $centerY
+            
+            Write-Host "Attempting to click 'Show hidden icons' at ($showHiddenX, $showHiddenY)"
+            [WindowAPI]::SetCursorPos($showHiddenX, $showHiddenY)
+            Start-Sleep -Milliseconds 200
+            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 50
+            [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+            
+            $interactions += "Attempted to click 'Show hidden icons' at ($showHiddenX, $showHiddenY)"
+            
+            Start-Sleep -Seconds 2
+            
+            # Take screenshot after trying to show hidden icons
+            $hiddenIconsScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "after_show_hidden_icons"
+            if ($hiddenIconsScreenshot) {
+                $interactions += "Screenshot after attempting to show hidden icons: $hiddenIconsScreenshot"
+            }
+        }
+        
+        # Take final screenshot
+        Start-Sleep -Seconds 2
+        $finalScreenshot = Take-Screenshot -OutputPath $OutputPath -Suffix "final_tray_interaction"
+        if ($finalScreenshot) {
+            $interactions += "Final screenshot after tray interaction: $finalScreenshot"
+        }
+        
+    } catch {
+        Write-Host "Error during tray interaction: $($_.Exception.Message)"
+        $interactions += "Error during tray interaction: $($_.Exception.Message)"
+    }
+    
+    # Save interaction log
+    $interactionLog = @{
+        Timestamp = Get-Date
+        TrayInfo = $TrayInfo
+        Interactions = $interactions
+    }
+    
+    $interactionLog | ConvertTo-Json -Depth 5 | Out-File -FilePath "$OutputPath/tray_interaction_log.json" -Encoding UTF8
+    Write-Host "Tray interaction log saved to: $OutputPath/tray_interaction_log.json"
+    
+    return $interactions.Count -gt 0
 }
 
 function Find-ChildWindows {
@@ -933,6 +1247,8 @@ $detectionResults = @{
     Windows = @()
     UIElements = @()
     Screenshots = @()
+    SystemTrayInfo = $null
+    TrayInteractionResults = @()
     NetworkResults = $null
     Summary = @{
         WindowsFound = 0
@@ -940,159 +1256,202 @@ $detectionResults = @{
         ButtonsFound = 0
         WebControlsFound = 0
         OAuth2ActivityDetected = $false
+        SystemTrayDetected = $false
+        SimplySignTrayIconsFound = 0
     }
 }
 
-# Find SimplySign windows and handle update dialogs
-Write-Host "Searching for SimplySign windows..."
-$windows = Wait-ForLoginDialog -ProcessId $ProcessId -MaxWaitSeconds $TimeoutSeconds
-
-if ($windows.Count -eq 0) {
-    Write-Host "No SimplySign windows found after waiting"
-    if ($ProcessId -ne 0) {
-        Write-Host "Trying to find any windows for process $ProcessId..."
-        $windows = Find-SimplySignWindows -TargetProcessId $ProcessId
-    }
-}
-
-$detectionResults.Windows = $windows
-$detectionResults.Summary.WindowsFound = $windows.Count
-
-Write-Host "Found $($windows.Count) SimplySign window(s)"
-
-# Analyze each window
-foreach ($window in $windows) {
-    Write-Host ""
-    Write-Host "=== ANALYZING WINDOW: $($window.Title) ==="
-    Write-Host "Class: $($window.ClassName)"
-    Write-Host "Size: $($window.Width)x$($window.Height)"
-    Write-Host "Position: ($($window.Left),$($window.Top))"
-    Write-Host "Visible: $($window.Visible)"
-    
-    # Find child windows
-    Write-Host "Looking for child windows..."
-    $childWindows = Find-ChildWindows -ParentHandle ([IntPtr]$window.Handle)
-    Write-Host "Found $($childWindows.Count) child window(s)"
-    
-    # Analyze UI elements
-    Write-Host "Analyzing UI elements..."
-    $uiElements = Analyze-UIElements -WindowHandle ([IntPtr]$window.Handle)
-    $detectionResults.UIElements += $uiElements
-    
-    # Count element types
-    $inputFields = $uiElements | Where-Object { $_.ElementType -eq "InputField" }
-    $buttons = $uiElements | Where-Object { $_.ElementType -eq "Button" }
-    $webControls = $uiElements | Where-Object { $_.ElementType -eq "WebControl" }
-    
-    $detectionResults.Summary.InputFieldsFound += $inputFields.Count
-    $detectionResults.Summary.ButtonsFound += $buttons.Count
-    $detectionResults.Summary.WebControlsFound += $webControls.Count
-    
-    Write-Host "UI Elements found:"
-    Write-Host "  Input fields: $($inputFields.Count)"
-    Write-Host "  Buttons: $($buttons.Count)"
-    Write-Host "  Web controls: $($webControls.Count)"
-}
-
-# Take multiple screenshots to capture dialog progression
+# FIRST: Check for system tray applications (this might be where SimplySign is hiding)
 Write-Host ""
-Write-Host "Taking screenshots to capture dialog progression..."
+Write-Host "=== SYSTEM TRAY DETECTION ==="
+$systemTrayInfo = Find-SystemTrayApplications -TargetProcessId $ProcessId
+$detectionResults.SystemTrayInfo = $systemTrayInfo
+$detectionResults.Summary.SystemTrayDetected = $systemTrayInfo.NotificationAreaFound
 
-# First screenshot - immediate state (likely shows update dialog)
-$screenshot1 = Take-Screenshot -Suffix "initial_state"
-if ($screenshot1) {
-    $detectionResults.Screenshots += $screenshot1
-}
-
-# Try to dismiss any update dialogs one more time before waiting
-Write-Host "Making additional attempt to dismiss update dialogs..."
-$currentWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
-$updateDismissed = Handle-UpdateDialog -Windows $currentWindows
-
-if ($updateDismissed) {
-    Write-Host "Additional update dialog dismissal attempted"
-    Start-Sleep -Seconds 3
+if ($systemTrayInfo.NotificationAreaFound) {
+    $simplySignTrayIcons = $systemTrayInfo.TrayIcons | Where-Object { $_.IsSimplySign -eq $true }
+    $detectionResults.Summary.SimplySignTrayIconsFound = $simplySignTrayIcons.Count
     
-    # Screenshot after update dismissal
-    $screenshot2 = Take-Screenshot -Suffix "after_update_dismissal"
-    if ($screenshot2) {
-        $detectionResults.Screenshots += $screenshot2
+    Write-Host "System tray detection completed:"
+    Write-Host "  Taskbar found: $($systemTrayInfo.TaskbarFound)"
+    Write-Host "  Notification area found: $($systemTrayInfo.NotificationAreaFound)"
+    Write-Host "  Total tray icons: $($systemTrayInfo.TrayIcons.Count)"
+    Write-Host "  SimplySign tray icons: $($simplySignTrayIcons.Count)"
+    
+    if ($simplySignTrayIcons.Count -gt 0) {
+        Write-Host ""
+        Write-Host "THEORY CONFIRMED: SimplySign appears to be running in system tray!"
+        Write-Host "This explains why we see network activity but no visible windows."
+        
+        # Interact with the system tray to try to trigger the login dialog
+        Write-Host ""
+        Write-Host "=== SYSTEM TRAY INTERACTION ==="
+        $trayInteracted = Interact-WithSystemTray -TrayInfo $systemTrayInfo -OutputPath "screenshots"
+        
+        if ($trayInteracted) {
+            Write-Host "System tray interaction completed - checking for new windows..."
+            
+            # Wait for potential dialogs to appear after tray interaction
+            Start-Sleep -Seconds 5
+            
+            # Re-scan for windows after tray interaction
+            Write-Host "Re-scanning for windows after tray interaction..."
+            $postTrayWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
+            
+            if ($postTrayWindows.Count -gt 0) {
+                Write-Host "SUCCESS: Found $($postTrayWindows.Count) window(s) after tray interaction!"
+                $detectionResults.Windows = $postTrayWindows
+                $detectionResults.Summary.WindowsFound = $postTrayWindows.Count
+                
+                # Analyze the new windows
+                foreach ($window in $postTrayWindows) {
+                    Write-Host ""
+                    Write-Host "=== ANALYZING POST-TRAY WINDOW: $($window.Title) ==="
+                    Write-Host "Class: $($window.ClassName)"
+                    Write-Host "Size: $($window.Width)x$($window.Height)"
+                    Write-Host "Position: ($($window.Left),$($window.Top))"
+                    Write-Host "Visible: $($window.Visible)"
+                    
+                    # Analyze UI elements in the new window
+                    $uiElements = Analyze-UIElements -WindowHandle ([IntPtr]$window.Handle)
+                    $detectionResults.UIElements += $uiElements
+                    
+                    # Count element types
+                    $inputFields = $uiElements | Where-Object { $_.ElementType -eq "InputField" }
+                    $buttons = $uiElements | Where-Object { $_.ElementType -eq "Button" }
+                    $webControls = $uiElements | Where-Object { $_.ElementType -eq "WebControl" }
+                    
+                    $detectionResults.Summary.InputFieldsFound += $inputFields.Count
+                    $detectionResults.Summary.ButtonsFound += $buttons.Count
+                    $detectionResults.Summary.WebControlsFound += $webControls.Count
+                    
+                    Write-Host "UI Elements found in post-tray window:"
+                    Write-Host "  Input fields: $($inputFields.Count)"
+                    Write-Host "  Buttons: $($buttons.Count)"
+                    Write-Host "  Web controls: $($webControls.Count)"
+                }
+                
+            } else {
+                Write-Host "No new windows appeared after tray interaction"
+                Write-Host "SimplySign may require different interaction or may be using web-based login"
+            }
+        }
+        
+    } else {
+        Write-Host "No SimplySign-specific tray icons detected"
+        Write-Host "SimplySign may be using a generic icon or different identification"
     }
-}
-
-# Wait longer for login dialog to fully appear
-Write-Host "Waiting 8 seconds for login dialog to fully appear..."
-Start-Sleep -Seconds 8
-
-# Screenshot after longer wait
-$screenshot3 = Take-Screenshot -Suffix "after_extended_wait"
-if ($screenshot3) {
-    $detectionResults.Screenshots += $screenshot3
-}
-
-# Check for any new dialogs that appeared
-Write-Host "Checking for new dialogs after extended wait..."
-$finalWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
-
-if ($finalWindows.Count -ne $windows.Count) {
-    Write-Host "Window count changed from $($windows.Count) to $($finalWindows.Count) - analyzing new state..."
     
-    # Screenshot showing the final state
-    $screenshot4 = Take-Screenshot -Suffix "final_window_state"
-    if ($screenshot4) {
-        $detectionResults.Screenshots += $screenshot4
+} else {
+    Write-Host "Could not detect system tray - falling back to traditional window detection"
+}
+
+# SECOND: Traditional window detection (fallback or additional detection)
+Write-Host ""
+Write-Host "=== TRADITIONAL WINDOW DETECTION ==="
+Write-Host "Searching for SimplySign windows..."
+$traditionalWindows = Wait-ForLoginDialog -ProcessId $ProcessId -MaxWaitSeconds $TimeoutSeconds
+
+if ($traditionalWindows.Count -eq 0 -and $ProcessId -ne 0) {
+    Write-Host "No SimplySign windows found after waiting"
+    Write-Host "Trying to find any windows for process $ProcessId..."
+    $traditionalWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
+}
+
+# Combine results if we haven't found windows via tray interaction
+if ($detectionResults.Summary.WindowsFound -eq 0 -and $traditionalWindows.Count -gt 0) {
+    $detectionResults.Windows = $traditionalWindows
+    $detectionResults.Summary.WindowsFound = $traditionalWindows.Count
+    
+    Write-Host "Found $($traditionalWindows.Count) SimplySign window(s) via traditional detection"
+    
+    # Analyze each traditionally found window
+    foreach ($window in $traditionalWindows) {
+        Write-Host ""
+        Write-Host "=== ANALYZING TRADITIONAL WINDOW: $($window.Title) ==="
+        Write-Host "Class: $($window.ClassName)"
+        Write-Host "Size: $($window.Width)x$($window.Height)"
+        Write-Host "Position: ($($window.Left),$($window.Top))"
+        Write-Host "Visible: $($window.Visible)"
+        
+        # Find child windows
+        Write-Host "Looking for child windows..."
+        $childWindows = Find-ChildWindows -ParentHandle ([IntPtr]$window.Handle)
+        Write-Host "Found $($childWindows.Count) child window(s)"
+        
+        # Analyze UI elements
+        Write-Host "Analyzing UI elements..."
+        $uiElements = Analyze-UIElements -WindowHandle ([IntPtr]$window.Handle)
+        $detectionResults.UIElements += $uiElements
+        
+        # Count element types
+        $inputFields = $uiElements | Where-Object { $_.ElementType -eq "InputField" }
+        $buttons = $uiElements | Where-Object { $_.ElementType -eq "Button" }
+        $webControls = $uiElements | Where-Object { $_.ElementType -eq "WebControl" }
+        
+        $detectionResults.Summary.InputFieldsFound += $inputFields.Count
+        $detectionResults.Summary.ButtonsFound += $buttons.Count
+        $detectionResults.Summary.WebControlsFound += $webControls.Count
+        
+        Write-Host "UI Elements found:"
+        Write-Host "  Input fields: $($inputFields.Count)"
+        Write-Host "  Buttons: $($buttons.Count)"
+        Write-Host "  Web controls: $($webControls.Count)"
     }
+} elseif ($detectionResults.Summary.WindowsFound -gt 0) {
+    Write-Host "Using windows found via tray interaction (skipping traditional detection)"
+} else {
+    Write-Host "No windows found via either tray interaction or traditional detection"
 }
 
-# Check if we have new windows after the extended wait
-Write-Host "Re-checking for new login dialog windows..."
-$updatedWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
+# Take additional screenshots to capture final state
+Write-Host ""
+Write-Host "Taking final screenshots to capture complete session state..."
 
-if ($updatedWindows.Count -gt $windows.Count) {
-    Write-Host "New windows detected after extended wait - analyzing updated windows..."
+# Screenshot showing current desktop state
+$finalDesktopScreenshot = Take-Screenshot -Suffix "final_desktop_state"
+if ($finalDesktopScreenshot) {
+    $detectionResults.Screenshots += $finalDesktopScreenshot
+}
+
+# Try one more interaction with system tray if we found it but no windows
+if ($detectionResults.Summary.SystemTrayDetected -and $detectionResults.Summary.WindowsFound -eq 0) {
+    Write-Host "Attempting additional system tray exploration..."
     
-    # Analyze any new windows that appeared
-    foreach ($window in $updatedWindows) {
-        $existingWindow = $windows | Where-Object { $_.Handle -eq $window.Handle }
-        if (-not $existingWindow) {
-            Write-Host "Analyzing new window: '$($window.Title)' [$($window.ClassName)]"
-            Write-Host "  Size: $($window.Width)x$($window.Height) Position: ($($window.Left),$($window.Top))"
-            
-            $newUIElements = Analyze-UIElements -WindowHandle ([IntPtr]$window.Handle)
-            $detectionResults.UIElements += $newUIElements
-            
-            # Update counts
-            $newInputFields = $newUIElements | Where-Object { $_.ElementType -eq "InputField" }
-            $newButtons = $newUIElements | Where-Object { $_.ElementType -eq "Button" }
-            $newWebControls = $newUIElements | Where-Object { $_.ElementType -eq "WebControl" }
-            
-            $detectionResults.Summary.InputFieldsFound += $newInputFields.Count
-            $detectionResults.Summary.ButtonsFound += $newButtons.Count
-            $detectionResults.Summary.WebControlsFound += $newWebControls.Count
-            
-            Write-Host "  New UI Elements found:"
-            Write-Host "    Input fields: $($newInputFields.Count)"
-            Write-Host "    Buttons: $($newButtons.Count)"
-            Write-Host "    Web controls: $($newWebControls.Count)"
+    # Take screenshot of notification area specifically
+    if ($systemTrayInfo.NotificationAreaFound) {
+        $notifyRect = $systemTrayInfo.NotificationAreaRect
+        
+        # Double-click in notification area to explore further
+        $centerX = $notifyRect.Left + ($notifyRect.Width / 2)
+        $centerY = $notifyRect.Top + ($notifyRect.Height / 2)
+        
+        Write-Host "Double-clicking notification area at ($centerX, $centerY)"
+        [WindowAPI]::SetCursorPos($centerX, $centerY)
+        Start-Sleep -Milliseconds 200
+        
+        # Double-click
+        [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+        [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 100
+        [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+        [WindowAPI]::mouse_event([WindowAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+        
+        Start-Sleep -Seconds 3
+        
+        $doubleClickScreenshot = Take-Screenshot -Suffix "after_tray_double_click"
+        if ($doubleClickScreenshot) {
+            $detectionResults.Screenshots += $doubleClickScreenshot
+        }
+        
+        # Check once more for new windows
+        $finalWindowCheck = Find-SimplySignWindows -TargetProcessId $ProcessId
+        if ($finalWindowCheck.Count -gt $detectionResults.Summary.WindowsFound) {
+            Write-Host "FOUND NEW WINDOWS after additional tray interaction!"
+            $detectionResults.Windows += $finalWindowCheck
+            $detectionResults.Summary.WindowsFound = $finalWindowCheck.Count
         }
     }
-    
-    # Take final screenshot after analyzing new windows
-    $screenshotFinal = Take-Screenshot -Suffix "final_analysis_complete"
-    if ($screenshotFinal) {
-        $detectionResults.Screenshots += $screenshotFinal
-    }
-    
-    # Update windows list
-    $detectionResults.Windows = $updatedWindows
-    $detectionResults.Summary.WindowsFound = $updatedWindows.Count
-    
-} elseif ($finalWindows.Count -ne $windows.Count) {
-    # Update to the final windows state if it changed
-    $detectionResults.Windows = $finalWindows
-    $detectionResults.Summary.WindowsFound = $finalWindows.Count
-    
-    Write-Host "Window state updated to final count: $($finalWindows.Count)"
 }
 
 # Collect network monitoring results
@@ -1140,11 +1499,83 @@ Write-Host "Input fields found: $($detectionResults.Summary.InputFieldsFound)"
 Write-Host "Buttons found: $($detectionResults.Summary.ButtonsFound)"
 Write-Host "Web controls found: $($detectionResults.Summary.WebControlsFound)"
 Write-Host "OAuth2 activity detected: $($detectionResults.Summary.OAuth2ActivityDetected)"
+Write-Host "System tray detected: $($detectionResults.Summary.SystemTrayDetected)"
+Write-Host "SimplySign tray icons found: $($detectionResults.Summary.SimplySignTrayIconsFound)"
 
 if ($detectionResults.NetworkResults) {
     Write-Host "Network monitoring results:"
     Write-Host "  DNS resolutions: $($detectionResults.NetworkResults.DNSCount)"
     Write-Host "  Network activities: $($detectionResults.NetworkResults.Activity.Count)"
+}
+
+# Analysis and recommendations
+Write-Host ""
+Write-Host "=== ANALYSIS AND THEORY VALIDATION ==="
+
+if ($detectionResults.Summary.SimplySignTrayIconsFound -gt 0) {
+    Write-Host "THEORY CONFIRMED: SimplySign Desktop is running in system tray!"
+    Write-Host "This explains the network activity without visible windows."
+    
+    if ($detectionResults.Summary.WindowsFound -gt 0) {
+        Write-Host "SUCCESS: Tray interaction triggered login dialog appearance!"
+        Write-Host "Your theory was correct - newer versions avoid update prompts by running in tray."
+    } else {
+        Write-Host "Tray icons found but no login dialog appeared after interaction."
+        Write-Host "SimplySign may require different activation method or uses web-based login."
+    }
+    
+} elseif ($detectionResults.Summary.SystemTrayDetected) {
+    Write-Host "System tray detected but no SimplySign-specific icons identified."
+    Write-Host "SimplySign may be using generic icon names or different identification."
+    Write-Host "The network activity suggests the application is running but hidden."
+    
+} else {
+    Write-Host "Could not detect system tray functionality."
+    Write-Host "Falling back to traditional window detection methods."
+}
+
+if ($detectionResults.Summary.OAuth2ActivityDetected) {
+    Write-Host ""
+    Write-Host "NETWORK ACTIVITY CONFIRMED: OAuth2 communication detected during session"
+    Write-Host "This proves SimplySign Desktop is running and attempting to connect to cloud services."
+    
+    if ($detectionResults.Summary.WindowsFound -eq 0) {
+        Write-Host "Network activity without visible windows suggests:"
+        Write-Host "  1. Application is running in background (system tray)"
+        Write-Host "  2. Login dialog may be web-based or browser-embedded"
+        Write-Host "  3. Application may require specific trigger to show login UI"
+    }
+} else {
+    Write-Host ""
+    Write-Host "NO OAUTH2 ACTIVITY: Login dialog may not have appeared or no cloud connection"
+}
+
+# Specific recommendations based on findings
+Write-Host ""
+Write-Host "=== RECOMMENDATIONS ==="
+
+if ($detectionResults.Summary.SimplySignTrayIconsFound -gt 0) {
+    Write-Host "RECOMMENDED APPROACH: System tray interaction"
+    Write-Host "  - Focus on automating tray icon clicks"
+    Write-Host "  - Monitor for dialog appearance after tray interaction"
+    Write-Host "  - This approach bypasses update dialog issues completely"
+    
+} elseif ($detectionResults.Summary.OAuth2ActivityDetected -and $detectionResults.Summary.WindowsFound -eq 0) {
+    Write-Host "RECOMMENDED APPROACH: Web-based login detection"
+    Write-Host "  - Application may be using embedded browser for login"
+    Write-Host "  - Consider browser automation instead of Windows UI automation"
+    Write-Host "  - Monitor network traffic for OAuth2 login pages"
+    
+} elseif ($detectionResults.Summary.InputFieldsFound -gt 0) {
+    Write-Host "RECOMMENDED APPROACH: Traditional UI automation"
+    Write-Host "  - Input fields detected - credential injection possible"
+    Write-Host "  - Use existing Windows UI automation methods"
+    
+} else {
+    Write-Host "RECOMMENDED APPROACH: Hybrid detection"
+    Write-Host "  - Combine system tray monitoring with network activity detection"
+    Write-Host "  - Try multiple activation methods (tray clicks, keyboard shortcuts, etc.)"
+    Write-Host "  - Consider that newer versions may have different UI patterns"
 }
 
 if ($detectionResults.Summary.InputFieldsFound -gt 0) {
@@ -1157,14 +1588,7 @@ if ($detectionResults.Summary.InputFieldsFound -gt 0) {
 } else {
     Write-Host ""
     Write-Host "NO INPUT FIELDS DETECTED: May need alternative detection approach"
-}
-
-if ($detectionResults.Summary.OAuth2ActivityDetected) {
-    Write-Host ""
-    Write-Host "NETWORK ACTIVITY CONFIRMED: OAuth2 communication detected during session"
-} else {
-    Write-Host ""
-    Write-Host "NO OAUTH2 ACTIVITY: Login dialog may not have appeared or no cloud connection"
+    Write-Host "Focus on system tray interaction or web-based login methods"
 }
 
 Write-Host ""
