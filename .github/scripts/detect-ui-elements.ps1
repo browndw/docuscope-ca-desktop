@@ -213,62 +213,195 @@ function Handle-UpdateDialog {
     Write-Host "Checking for update dialogs..."
     
     foreach ($window in $Windows) {
-        # Look for update-related dialogs
+        if ($DebugMode) {
+            Write-Host "Examining window: '$($window.Title)' [$($window.ClassName)] Size: $($window.Width)x$($window.Height)"
+        }
+        
+        # Look for update-related dialogs - be more aggressive in detection
+        $isUpdateDialog = $false
+        
+        # Check title patterns
         if ($window.Title -like "*update*" -or 
             $window.Title -like "*version*" -or 
             $window.Title -like "*download*" -or
-            $window.ClassName -like "*Dialog*" -or
+            $window.Title -like "*SimplySign*") {
+            $isUpdateDialog = $true
+        }
+        
+        # Check class patterns for standard Windows dialogs
+        if ($window.ClassName -like "*#32770*" -or 
+            $window.ClassName -like "*Dialog*" -or 
             $window.ClassName -like "*MessageBox*") {
-            
-            Write-Host "Found potential update dialog: $($window.Title) [$($window.ClassName)]"
+            # For standard dialog boxes, assume it might be an update dialog if it's small
+            if ($window.Width -lt 500 -and $window.Height -lt 300) {
+                $isUpdateDialog = $true
+            }
+        }
+        
+        if ($isUpdateDialog) {
+            Write-Host "Found potential update dialog: '$($window.Title)' [$($window.ClassName)]"
+            Write-Host "  Position: ($($window.Left),$($window.Top)) Size: $($window.Width)x$($window.Height)"
             
             try {
-                # Try to find and click "No" button to skip update
+                # Method 1: Try UI Automation to find buttons
                 $automation = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$window.Handle)
                 
                 if ($automation) {
-                    # Look for "No" button
-                    $buttonCondition = New-Object System.Windows.Automation.AndCondition @(
-                        [System.Windows.Automation.Condition]::TrueCondition,
-                        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
-                    )
+                    Write-Host "Analyzing dialog with UI Automation..."
                     
-                    $buttons = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+                    # Get all descendants to see what's in the dialog
+                    $allElements = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                    Write-Host "Found $($allElements.Count) UI elements in dialog"
                     
-                    foreach ($button in $buttons) {
-                        $buttonName = $button.Current.Name
-                        Write-Host "Found button: '$buttonName'"
-                        
-                        # Look for "No", "Cancel", "Skip", or "Later" buttons
-                        if ($buttonName -like "*No*" -or 
-                            $buttonName -like "*Cancel*" -or 
-                            $buttonName -like "*Skip*" -or 
-                            $buttonName -like "*Later*" -or
-                            $buttonName -like "*Remind*") {
-                            
-                            Write-Host "Clicking '$buttonName' button to skip update..."
-                            
-                            # Get the invoke pattern to click the button
-                            $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                            if ($invokePattern) {
-                                $invokePattern.Invoke()
-                                Write-Host "Successfully clicked '$buttonName' button"
-                                Start-Sleep -Seconds 2
-                                return $true
+                    # Debug: List all elements found
+                    if ($DebugMode) {
+                        foreach ($element in $allElements) {
+                            try {
+                                $controlType = $element.Current.ControlType.ProgrammaticName
+                                $name = $element.Current.Name
+                                $className = $element.Current.ClassName
+                                Write-Host "  Element: $controlType '$name' [$className]"
+                            } catch {
+                                Write-Host "  Element: (could not read properties)"
                             }
                         }
                     }
                     
-                    # If no "No" button found, try pressing Escape key
-                    Write-Host "No 'No' button found, trying to press Escape key..."
-                    Add-Type -AssemblyName System.Windows.Forms
-                    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
-                    Start-Sleep -Seconds 1
-                    return $true
+                    # Look for buttons specifically
+                    $buttonCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+                    $buttons = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+                    
+                    Write-Host "Found $($buttons.Count) button(s) in dialog"
+                    
+                    $buttonClicked = $false
+                    foreach ($button in $buttons) {
+                        try {
+                            $buttonName = $button.Current.Name
+                            $buttonId = $button.Current.AutomationId
+                            Write-Host "  Button: '$buttonName' [ID: $buttonId]"
+                            
+                            # Look for "No", "Cancel", "Skip", "Later", or empty buttons (often the second button is "No")
+                            if ($buttonName -like "*No*" -or 
+                                $buttonName -like "*Cancel*" -or 
+                                $buttonName -like "*Skip*" -or 
+                                $buttonName -like "*Later*" -or
+                                $buttonName -like "*Remind*" -or
+                                $buttonName -eq "" -or
+                                $buttonId -eq "2" -or
+                                $buttonId -eq "7") {  # Common IDs for "No" and "Cancel"
+                                
+                                Write-Host "Attempting to click '$buttonName' button (ID: $buttonId)..."
+                                
+                                # Try to get the invoke pattern
+                                try {
+                                    $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                                    if ($invokePattern) {
+                                        $invokePattern.Invoke()
+                                        Write-Host "Successfully clicked button via InvokePattern"
+                                        $buttonClicked = $true
+                                        Start-Sleep -Seconds 2
+                                        break
+                                    }
+                                } catch {
+                                    Write-Host "InvokePattern failed: $($_.Exception.Message)"
+                                }
+                                
+                                # Try clicking via bounding rectangle
+                                try {
+                                    $rect = $button.Current.BoundingRectangle
+                                    $centerX = $rect.Left + ($rect.Width / 2)
+                                    $centerY = $rect.Top + ($rect.Height / 2)
+                                    
+                                    Write-Host "Trying to click at coordinates ($centerX, $centerY)..."
+                                    
+                                    # Use Windows API to click
+                                    Add-Type @"
+                                        using System;
+                                        using System.Runtime.InteropServices;
+                                        public class MouseAPI {
+                                            [DllImport("user32.dll")]
+                                            public static extern bool SetCursorPos(int x, int y);
+                                            [DllImport("user32.dll")]
+                                            public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+                                            public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
+                                            public const uint MOUSEEVENTF_LEFTUP = 0x04;
+                                        }
+"@
+                                    
+                                    [MouseAPI]::SetCursorPos([int]$centerX, [int]$centerY)
+                                    Start-Sleep -Milliseconds 100
+                                    [MouseAPI]::mouse_event([MouseAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
+                                    [MouseAPI]::mouse_event([MouseAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
+                                    
+                                    Write-Host "Clicked at coordinates"
+                                    $buttonClicked = $true
+                                    Start-Sleep -Seconds 2
+                                    break
+                                    
+                                } catch {
+                                    Write-Host "Coordinate click failed: $($_.Exception.Message)"
+                                }
+                            }
+                        } catch {
+                            Write-Host "Could not analyze button: $($_.Exception.Message)"
+                        }
+                    }
+                    
+                    if ($buttonClicked) {
+                        return $true
+                    }
                 }
                 
             } catch {
-                Write-Host "Could not interact with update dialog: $($_.Exception.Message)"
+                Write-Host "UI Automation failed: $($_.Exception.Message)"
+            }
+            
+            # Method 2: Try keyboard shortcuts
+            Write-Host "Trying keyboard shortcuts to dismiss dialog..."
+            
+            # Focus the window first
+            try {
+                Add-Type @"
+                    using System;
+                    using System.Runtime.InteropServices;
+                    public class WindowAPI2 {
+                        [DllImport("user32.dll")]
+                        public static extern bool SetForegroundWindow(IntPtr hWnd);
+                        [DllImport("user32.dll")]
+                        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+                    }
+"@
+                [WindowAPI2]::SetForegroundWindow([IntPtr]$window.Handle)
+                [WindowAPI2]::ShowWindow([IntPtr]$window.Handle, 1)
+                Start-Sleep -Milliseconds 500
+                
+                # Try different key combinations
+                Add-Type -AssemblyName System.Windows.Forms
+                
+                # Try "N" for No
+                Write-Host "Sending 'N' key for No..."
+                [System.Windows.Forms.SendKeys]::SendWait("N")
+                Start-Sleep -Seconds 1
+                
+                # Try Escape
+                Write-Host "Sending Escape key..."
+                [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+                Start-Sleep -Seconds 1
+                
+                # Try Alt+F4
+                Write-Host "Sending Alt+F4..."
+                [System.Windows.Forms.SendKeys]::SendWait("%{F4}")
+                Start-Sleep -Seconds 1
+                
+                # Try Tab+Enter (assuming No is second button)
+                Write-Host "Sending Tab+Enter..."
+                [System.Windows.Forms.SendKeys]::SendWait("{TAB}{ENTER}")
+                Start-Sleep -Seconds 1
+                
+                return $true
+                
+            } catch {
+                Write-Host "Keyboard method failed: $($_.Exception.Message)"
             }
         }
     }
@@ -283,16 +416,56 @@ function Wait-ForLoginDialog {
     
     $startTime = Get-Date
     $endTime = $startTime.AddSeconds($MaxWaitSeconds)
+    $updateDialogAttempts = 0
+    $maxUpdateAttempts = 5
     
     while ((Get-Date) -lt $endTime) {
         $windows = Find-SimplySignWindows -TargetProcessId $ProcessId
+        
+        if ($windows.Count -eq 0) {
+            Write-Host "No windows found, waiting..."
+            Start-Sleep -Seconds 2
+            continue
+        }
         
         # Check if we have any dialogs that might be update prompts
         $updateHandled = Handle-UpdateDialog -Windows $windows
         
         if ($updateHandled) {
-            Write-Host "Update dialog handled, waiting for login dialog..."
-            Start-Sleep -Seconds 3
+            $updateDialogAttempts++
+            Write-Host "Update dialog handling attempt $updateDialogAttempts/$maxUpdateAttempts completed"
+            
+            # Wait a bit longer after handling update dialog
+            Start-Sleep -Seconds 5
+            
+            # Re-check for windows after update dialog dismissal
+            $updatedWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
+            
+            if ($updatedWindows.Count -gt 0) {
+                Write-Host "Checking if login dialog appeared after update dismissal..."
+                
+                foreach ($window in $updatedWindows) {
+                    # Look for login dialog characteristics
+                    if ($window.Title -like "*login*" -or 
+                        $window.Title -like "*sign*" -or 
+                        $window.Title -like "*auth*" -or
+                        $window.Title -like "*connect*" -or
+                        # If it's a different dialog (larger than typical update dialog)
+                        ($window.Width -gt 400 -or $window.Height -gt 300)) {
+                        
+                        Write-Host "Potential login dialog found after update dismissal: '$($window.Title)'"
+                        Write-Host "  Size: $($window.Width)x$($window.Height)"
+                        return $updatedWindows
+                    }
+                }
+            }
+            
+            # If we've tried multiple times and still see update dialogs, continue waiting
+            if ($updateDialogAttempts -ge $maxUpdateAttempts) {
+                Write-Host "Reached maximum update dialog attempts, proceeding with current windows..."
+                return $windows
+            }
+            
             continue
         }
         
@@ -302,11 +475,28 @@ function Wait-ForLoginDialog {
                 $window.Title -like "*sign*" -or 
                 $window.Title -like "*auth*" -or
                 $window.Title -like "*connect*" -or
-                ($window.Width -gt 300 -and $window.Height -gt 200 -and $window.Visible)) {
+                # Consider larger dialogs as potential login windows
+                ($window.Width -gt 400 -and $window.Height -gt 300 -and $window.Visible)) {
                 
-                Write-Host "Potential login dialog found: $($window.Title)"
+                Write-Host "Potential login dialog found: '$($window.Title)' (Size: $($window.Width)x$($window.Height))"
                 return $windows
             }
+        }
+        
+        # If we only have small dialogs, they might still be update dialogs
+        $allSmallDialogs = $true
+        foreach ($window in $windows) {
+            if ($window.Visible -and ($window.Width -gt 400 -or $window.Height -gt 300)) {
+                $allSmallDialogs = $false
+                break
+            }
+        }
+        
+        if ($allSmallDialogs) {
+            Write-Host "Only small dialogs found, likely still update dialogs. Continuing to wait..."
+        } else {
+            Write-Host "Found larger dialogs, assuming login dialog appeared"
+            return $windows
         }
         
         Start-Sleep -Seconds 2
@@ -629,33 +819,65 @@ foreach ($window in $windows) {
 Write-Host ""
 Write-Host "Taking screenshots to capture dialog progression..."
 
-# First screenshot - immediate state (might show update dialog)
-$screenshot1 = Take-Screenshot -Suffix "initial"
+# First screenshot - immediate state (likely shows update dialog)
+$screenshot1 = Take-Screenshot -Suffix "initial_state"
 if ($screenshot1) {
     $detectionResults.Screenshots += $screenshot1
 }
 
-# Wait for any update dialogs to be dismissed and login dialog to appear
-Write-Host "Waiting 5 seconds for login dialog to fully appear..."
-Start-Sleep -Seconds 5
+# Try to dismiss any update dialogs one more time before waiting
+Write-Host "Making additional attempt to dismiss update dialogs..."
+$currentWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
+$updateDismissed = Handle-UpdateDialog -Windows $currentWindows
 
-# Second screenshot - after waiting (should show login dialog)
-$screenshot2 = Take-Screenshot -Suffix "after_wait"
-if ($screenshot2) {
-    $detectionResults.Screenshots += $screenshot2
+if ($updateDismissed) {
+    Write-Host "Additional update dialog dismissal attempted"
+    Start-Sleep -Seconds 3
+    
+    # Screenshot after update dismissal
+    $screenshot2 = Take-Screenshot -Suffix "after_update_dismissal"
+    if ($screenshot2) {
+        $detectionResults.Screenshots += $screenshot2
+    }
 }
 
-# Check if we have new windows after the wait
+# Wait longer for login dialog to fully appear
+Write-Host "Waiting 8 seconds for login dialog to fully appear..."
+Start-Sleep -Seconds 8
+
+# Screenshot after longer wait
+$screenshot3 = Take-Screenshot -Suffix "after_extended_wait"
+if ($screenshot3) {
+    $detectionResults.Screenshots += $screenshot3
+}
+
+# Check for any new dialogs that appeared
+Write-Host "Checking for new dialogs after extended wait..."
+$finalWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
+
+if ($finalWindows.Count -ne $windows.Count) {
+    Write-Host "Window count changed from $($windows.Count) to $($finalWindows.Count) - analyzing new state..."
+    
+    # Screenshot showing the final state
+    $screenshot4 = Take-Screenshot -Suffix "final_window_state"
+    if ($screenshot4) {
+        $detectionResults.Screenshots += $screenshot4
+    }
+}
+
+# Check if we have new windows after the extended wait
 Write-Host "Re-checking for new login dialog windows..."
 $updatedWindows = Find-SimplySignWindows -TargetProcessId $ProcessId
+
 if ($updatedWindows.Count -gt $windows.Count) {
-    Write-Host "New windows detected after wait - analyzing updated windows..."
+    Write-Host "New windows detected after extended wait - analyzing updated windows..."
     
     # Analyze any new windows that appeared
     foreach ($window in $updatedWindows) {
         $existingWindow = $windows | Where-Object { $_.Handle -eq $window.Handle }
         if (-not $existingWindow) {
-            Write-Host "Analyzing new window: $($window.Title) [$($window.ClassName)]"
+            Write-Host "Analyzing new window: '$($window.Title)' [$($window.ClassName)]"
+            Write-Host "  Size: $($window.Width)x$($window.Height) Position: ($($window.Left),$($window.Top))"
             
             $newUIElements = Analyze-UIElements -WindowHandle ([IntPtr]$window.Handle)
             $detectionResults.UIElements += $newUIElements
@@ -677,14 +899,21 @@ if ($updatedWindows.Count -gt $windows.Count) {
     }
     
     # Take final screenshot after analyzing new windows
-    $screenshot3 = Take-Screenshot -Suffix "final_analysis"
-    if ($screenshot3) {
-        $detectionResults.Screenshots += $screenshot3
+    $screenshotFinal = Take-Screenshot -Suffix "final_analysis_complete"
+    if ($screenshotFinal) {
+        $detectionResults.Screenshots += $screenshotFinal
     }
     
     # Update windows list
     $detectionResults.Windows = $updatedWindows
     $detectionResults.Summary.WindowsFound = $updatedWindows.Count
+    
+} elseif ($finalWindows.Count -ne $windows.Count) {
+    # Update to the final windows state if it changed
+    $detectionResults.Windows = $finalWindows
+    $detectionResults.Summary.WindowsFound = $finalWindows.Count
+    
+    Write-Host "Window state updated to final count: $($finalWindows.Count)"
 }
 
 # Collect network monitoring results
