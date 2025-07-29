@@ -32,6 +32,17 @@ Write-Host ""
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Drawing
+
+# Add System.Text for StringBuilder
+try {
+    Add-Type -AssemblyName System.Text
+} catch {
+    # StringBuilder is available in mscorlib, try alternative approach
+    if ($DebugMode) {
+        Write-Host "System.Text assembly not found, using mscorlib approach"
+    }
+}
 
 # Windows API declarations for advanced window detection
 Add-Type @"
@@ -40,16 +51,16 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 public class WindowAPI {
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
     
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
     
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
     
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
     
     [DllImport("user32.dll")]
@@ -76,25 +87,43 @@ public class WindowAPI {
 function Get-WindowInfo {
     param([IntPtr]$WindowHandle)
     
-    $title = New-Object StringBuilder 256
-    $className = New-Object StringBuilder 256
-    $rect = New-Object WindowAPI+RECT
-    
-    [WindowAPI]::GetWindowText($WindowHandle, $title, 256) | Out-Null
-    [WindowAPI]::GetClassName($WindowHandle, $className, 256) | Out-Null
-    [WindowAPI]::GetWindowRect($WindowHandle, [ref]$rect) | Out-Null
-    
-    return @{
-        Handle = $WindowHandle.ToInt64()
-        Title = $title.ToString()
-        ClassName = $className.ToString()
-        Visible = [WindowAPI]::IsWindowVisible($WindowHandle)
-        Left = $rect.Left
-        Top = $rect.Top
-        Right = $rect.Right
-        Bottom = $rect.Bottom
-        Width = $rect.Right - $rect.Left
-        Height = $rect.Bottom - $rect.Top
+    try {
+        $title = New-Object System.Text.StringBuilder 256
+        $className = New-Object System.Text.StringBuilder 256
+        $rect = New-Object WindowAPI+RECT
+        
+        [WindowAPI]::GetWindowText($WindowHandle, $title, 256) | Out-Null
+        [WindowAPI]::GetClassName($WindowHandle, $className, 256) | Out-Null
+        [WindowAPI]::GetWindowRect($WindowHandle, [ref]$rect) | Out-Null
+        
+        return @{
+            Handle = $WindowHandle.ToInt64()
+            Title = $title.ToString()
+            ClassName = $className.ToString()
+            Visible = [WindowAPI]::IsWindowVisible($WindowHandle)
+            Left = $rect.Left
+            Top = $rect.Top
+            Right = $rect.Right
+            Bottom = $rect.Bottom
+            Width = $rect.Right - $rect.Left
+            Height = $rect.Bottom - $rect.Top
+        }
+    } catch {
+        if ($DebugMode) {
+            Write-Host "Error getting window info for handle $($WindowHandle): $($_.Exception.Message)"
+        }
+        return @{
+            Handle = $WindowHandle.ToInt64()
+            Title = ""
+            ClassName = ""
+            Visible = $false
+            Left = 0
+            Top = 0
+            Right = 0
+            Bottom = 0
+            Width = 0
+            Height = 0
+        }
     }
 }
 
