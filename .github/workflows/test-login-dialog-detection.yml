@@ -288,7 +288,7 @@ jobs:
           }
         }
         
-        echo "✅ Registry analysis completed"
+        Write-Host "✅ Registry analysis completed"
         
         # Ensure script exits successfully
         exit 0
