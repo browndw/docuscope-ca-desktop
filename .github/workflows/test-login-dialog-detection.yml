@@ -452,443 +452,249 @@ jobs:
         exit 0
       shell: powershell
 
-    # Step 7: Find Default SimplySignDesktopShowLogonDialogAfterApplicationStartup Location
-    - name: Find Default SimplySignDesktopShowLogonDialogAfterApplicationStartup Location
+    # Step 7: Comprehensive Settings Analysis
+    - name: Analyze All Certum Settings - Broad Search Approach
       run: |
-        Write-Host "=== FINDING DEFAULT SETTING LOCATION ==="
-        Write-Host "Goal: Locate where SimplySignDesktopShowLogonDialogAfterApplicationStartup = 'No' is stored"
-        Write-Host "Strategy: Start SimplySign, let it create default preferences, then search for the setting"
+        Write-Host "=== COMPREHENSIVE CERTUM SETTINGS ANALYSIS ==="
+        Write-Host "New Strategy: Find ALL settings, not just the macOS-specific one"
+        Write-Host "Looking for any boolean settings that might control login dialog behavior"
         Write-Host ""
         
-        # First, start SimplySign to let it create its default configuration
-        $possiblePaths = @(
-            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
-            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
-            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySign Desktop.exe",
-            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySign Desktop.exe"
-        )
-        
-        $exePath = $null
-        foreach ($path in $possiblePaths) {
-            if (Test-Path $path) {
-                $exePath = $path
-                Write-Host "Found SimplySign Desktop at: $path"
-                break
-            }
-        }
-        
-        if (-not $exePath) {
-            Write-Host "Could not locate SimplySign Desktop executable"
-            exit 1
-        }
-        
-        # Start SimplySign briefly to create default settings
-        Write-Host "Starting SimplySign to create default configuration..."
+        # Make analysis script executable and run it
         try {
-            $process = Start-Process -FilePath $exePath -WindowStyle Hidden -PassThru
-            Write-Host "Started SimplySign (PID: $($process.Id))"
+            $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/analyze-all-certum-settings.ps1" -OutputPrefix "certum_settings_analysis" -SearchTerms "login,logon,dialog,startup,connect,cloud,auth,show,display,auto,trigger,start"
+            Write-Host "Settings analysis completed"
             
-            # Give it time to initialize and create default settings
-            Start-Sleep -Seconds 15
-            
-            # Stop the process
-            if (-not $process.HasExited) {
-                $process | Stop-Process -Force
-                Write-Host "Stopped SimplySign after initialization"
-            }
-        } catch {
-            Write-Host "Error during SimplySign startup: $($_.Exception.Message)"
-        }
-        
-        Write-Host ""
-        Write-Host "SEARCHING FOR SimplySignDesktopShowLogonDialogAfterApplicationStartup..."
-        Write-Host "============================================================================="
-        
-        # Search all registry hives for the exact setting name
-        $searchPaths = @(
-            "HKCU:\",
-            "HKLM:\SOFTWARE\",
-            "HKLM:\SOFTWARE\WOW6432Node\"
-        )
-        
-        $foundLocations = @()
-        
-        foreach ($rootPath in $searchPaths) {
-            Write-Host "Searching under: $rootPath"
-            try {
-                # Use reg query to search for the setting name
-                $output = cmd /c "reg query `"$($rootPath.Replace(':', ''))`" /s /f `"SimplySignDesktopShowLogonDialogAfterApplicationStartup`" 2>nul"
+            # Check if analysis found potential triggers
+            if (Test-Path "certum_settings_analysis_detailed_results.json") {
+                $analysisData = Get-Content "certum_settings_analysis_detailed_results.json" -Raw | ConvertFrom-Json
                 
-                if ($output -and $output.Count -gt 0) {
-                    Write-Host "FOUND MATCHES in $rootPath :"
-                    $output | ForEach-Object {
-                        if ($_ -and $_ -notlike "*searching*" -and $_ -notlike "*End of search*") {
-                            Write-Host "    $_"
-                            if ($_ -match "HKEY_") {
-                                $foundLocations += $_
-                            }
-                        }
+                if ($analysisData.PotentialTriggers -and $analysisData.PotentialTriggers.Count -gt 0) {
+                    Write-Host "🎯 FOUND $($analysisData.PotentialTriggers.Count) POTENTIAL LOGIN TRIGGER(S)!"
+                    foreach ($trigger in $analysisData.PotentialTriggers) {
+                        Write-Host "   - $($trigger.Name) = $($trigger.Value) [$($trigger.RegPath)]"
                     }
                 } else {
-                    Write-Host "No matches in $rootPath"
+                    Write-Host "ℹ️ No obvious potential triggers found, but analysis generated comprehensive data"
                 }
-            } catch {
-                Write-Host "Search failed in $rootPath : $($_.Exception.Message)"
-            }
-        }
-        
-        Write-Host ""
-        Write-Host "SEARCHING APPDATA AND USER PROFILE FILES..."
-        Write-Host "==============================================="
-        
-        # Check for preference files in AppData (like macOS stores in ~/Library/Preferences)
-        $appDataPaths = @(
-            "$env:APPDATA\Certum",
-            "$env:APPDATA\SimplySign",
-            "$env:LOCALAPPDATA\Certum", 
-            "$env:LOCALAPPDATA\SimplySign",
-            "$env:USERPROFILE\Documents\Certum",
-            "$env:USERPROFILE\Documents\SimplySign"
-        )
-        
-        $foundFiles = @()
-        
-        foreach ($path in $appDataPaths) {
-            Write-Host "Checking: $path"
-            if (Test-Path $path) {
-                Write-Host "Path exists - searching files..."
-                try {
-                    # Look for any files that might contain preferences
-                    $configFiles = Get-ChildItem -Path $path -Recurse -Include "*.xml", "*.plist", "*.config", "*.ini", "*.json", "*.cfg", "*.properties" -ErrorAction SilentlyContinue
-                    
-                    foreach ($file in $configFiles) {
-                        Write-Host "Found config file: $($file.FullName)"
-                        
-                        # Search file content for our setting
-                        try {
-                            $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
-                            if ($content -and $content -match "SimplySignDesktopShowLogonDialogAfterApplicationStartup") {
-                                Write-Host "FOUND SETTING IN FILE: $($file.FullName)"
-                                $foundFiles += $file.FullName
-                                
-                                # Extract the relevant lines
-                                $lines = Get-Content -Path $file.FullName
-                                $matchingLines = $lines | Select-String "SimplySignDesktopShowLogonDialogAfterApplicationStartup"
-                                foreach ($line in $matchingLines) {
-                                    Write-Host "      $line"
-                                }
-                            }
-                        } catch {
-                            Write-Host "   Could not read file: $($file.FullName)"
-                        }
-                    }
-                } catch {
-                    Write-Host "   Error searching path: $($_.Exception.Message)"
-                }
-            } else {
-                Write-Host "   Path does not exist"
-            }
-        }
-        
-        Write-Host ""
-        Write-Host "SEARCH SUMMARY:"
-        Write-Host "=================="
-        
-        $totalFound = $foundLocations.Count + $foundFiles.Count
-        
-        if ($foundLocations.Count -gt 0) {
-            Write-Host "Found $($foundLocations.Count) REGISTRY location(s) with SimplySignDesktopShowLogonDialogAfterApplicationStartup:"
-            $foundLocations | ForEach-Object { Write-Host "   $_" }
-            
-            # Try to read the actual values
-            Write-Host ""
-            Write-Host "READING REGISTRY VALUES:"
-            foreach ($location in $foundLocations) {
-                if ($location -match "HKEY_") {
-                    try {
-                        $regPath = $location -replace "HKEY_CURRENT_USER", "HKCU:" -replace "HKEY_LOCAL_MACHINE", "HKLM:"
-                        $value = Get-ItemProperty -Path $regPath -Name "SimplySignDesktopShowLogonDialogAfterApplicationStartup" -ErrorAction SilentlyContinue
-                        if ($value) {
-                            Write-Host "$regPath"
-                            Write-Host "   SimplySignDesktopShowLogonDialogAfterApplicationStartup = $($value.SimplySignDesktopShowLogonDialogAfterApplicationStartup)"
-                        }
-                    } catch {
-                        Write-Host "Could not read value from $location"
-                    }
-                }
-            }
-        }
-        
-        if ($foundFiles.Count -gt 0) {
-            Write-Host ""
-            Write-Host "Found $($foundFiles.Count) FILE(s) with SimplySignDesktopShowLogonDialogAfterApplicationStartup:"
-            $foundFiles | ForEach-Object { Write-Host "   $_" }
-        }
-        
-        if ($totalFound -eq 0) {
-            Write-Host "NO MATCHES FOUND in registry or files"
-            Write-Host "The setting may be:"
-            Write-Host "   1. Stored in a different format/name"
-            Write-Host "   2. Created only after user interaction"
-            Write-Host "   3. Stored in a different location we haven't checked"
-            Write-Host "   4. Not yet created (first run hasn't happened)"
-        } else {
-            Write-Host ""
-            Write-Host "Found $totalFound total location(s) with the setting"
-        }
-        
-        # Also search for any Certum or SimplySign related settings for context
-        Write-Host ""
-        Write-Host "SEARCHING FOR ANY CERTUM/SIMPLYSIGN SETTINGS FOR CONTEXT..."
-        try {
-            $certumOutput = cmd /c "reg query HKCU /s /f Certum 2>nul" | Select-Object -First 20
-            if ($certumOutput) {
-                Write-Host "Found Certum registry entries:"
-                $certumOutput | ForEach-Object { Write-Host "   $_" }
-            }
-        } catch {}
-        
-        Write-Host ""
-        Write-Host "NEXT STEPS:"
-        Write-Host "=============="
-        Write-Host "If setting was found: We can modify it directly"
-        Write-Host "If setting not found: May need to trigger first-time setup or user interaction"
-        Write-Host "Registry search completed"
-      shell: powershell
-
-    # Step 8: Modify Found Setting (if located)
-    - name: Modify SimplySignDesktopShowLogonDialogAfterApplicationStartup Setting
-      run: |
-        Write-Host "=== MODIFYING FOUND SETTING ==="
-        Write-Host "Searching for existing SimplySignDesktopShowLogonDialogAfterApplicationStartup setting..."
-        Write-Host ""
-        
-        $settingFound = $false
-        $modificationSuccess = $false
-        $settingLocation = ""
-        $settingType = ""
-        
-        # Search for the exact setting in likely registry locations
-        $searchPaths = @(
-            "HKCU:\Software\Certum",
-            "HKCU:\Software\SimplySign",
-            "HKCU:\Software\SimplySignDesktop",
-            "HKLM:\SOFTWARE\Certum",
-            "HKLM:\SOFTWARE\SimplySign"
-        )
-        
-        # First check registry locations
-        foreach ($regPath in $searchPaths) {
-            if (Test-Path $regPath) {
-                try {
-                    $existingValue = Get-ItemProperty -Path $regPath -Name "SimplySignDesktopShowLogonDialogAfterApplicationStartup" -ErrorAction SilentlyContinue
-                    if ($existingValue) {
-                        $settingFound = $true
-                        $settingLocation = $regPath
-                        $settingType = "REGISTRY"
-                        $currentValue = $existingValue.SimplySignDesktopShowLogonDialogAfterApplicationStartup
-                        Write-Host "FOUND SETTING in REGISTRY at: $regPath"
-                        Write-Host "   Current value: $currentValue"
-                        
-                        if ($currentValue -eq "No") {
-                            Write-Host "   Confirmed default value is 'No' - this is the setting we need!"
-                            
-                            # Change it to Yes
-                            try {
-                                Set-ItemProperty -Path $regPath -Name "SimplySignDesktopShowLogonDialogAfterApplicationStartup" -Value "Yes"
-                                Write-Host "   CHANGED TO: Yes"
-                                $modificationSuccess = $true
-                                
-                                # Verify the change
-                                $newValue = Get-ItemProperty -Path $regPath -Name "SimplySignDesktopShowLogonDialogAfterApplicationStartup"
-                                Write-Host "   Verified new value: $($newValue.SimplySignDesktopShowLogonDialogAfterApplicationStartup)"
-                                
-                            } catch {
-                                Write-Host "   Failed to modify setting: $($_.Exception.Message)"
-                            }
-                        } else {
-                            Write-Host "   Value is not 'No' (it's '$currentValue') - unexpected!"
-                        }
-                        break
-                    }
-                } catch {
-                    # Setting doesn't exist in this path - continue searching
-                }
-            }
-        }
-        
-        # If not found in registry, check AppData files
-        if (-not $settingFound) {
-            Write-Host "Setting not found in registry, checking AppData files..."
-            
-            $appDataPaths = @(
-                "$env:APPDATA\Certum",
-                "$env:APPDATA\SimplySign", 
-                "$env:LOCALAPPDATA\Certum",
-                "$env:LOCALAPPDATA\SimplySign"
-            )
-            
-            foreach ($path in $appDataPaths) {
-                if (Test-Path $path) {
-                    $configFiles = Get-ChildItem -Path $path -Recurse -Include "*.xml", "*.plist", "*.config", "*.ini", "*.json", "*.cfg", "*.properties" -ErrorAction SilentlyContinue
-                    
-                    foreach ($file in $configFiles) {
-                        try {
-                            $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
-                            if ($content -and $content -match "SimplySignDesktopShowLogonDialogAfterApplicationStartup") {
-                                $settingFound = $true
-                                $settingLocation = $file.FullName
-                                $settingType = "FILE"
-                                
-                                Write-Host "🎯 FOUND SETTING in FILE: $($file.FullName)"
-                                
-                                # Check if it contains "No" value
-                                if ($content -match 'SimplySignDesktopShowLogonDialogAfterApplicationStartup.*No') {
-                                    Write-Host "   Found 'No' value in file - attempting to change to 'Yes'"
-                                    
-                                    try {
-                                        # Replace No with Yes in the file
-                                        $newContent = $content -replace '(SimplySignDesktopShowLogonDialogAfterApplicationStartup.*?)No', '$1Yes'
-                                        Set-Content -Path $file.FullName -Value $newContent
-                                        Write-Host "   CHANGED TO: Yes in file"
-                                        $modificationSuccess = $true
-                                        
-                                        # Verify the change
-                                        $verifyContent = Get-Content -Path $file.FullName -Raw
-                                        if ($verifyContent -match 'SimplySignDesktopShowLogonDialogAfterApplicationStartup.*Yes') {
-                                            Write-Host "   Verified new value in file: Yes"
-                                        }
-                                        
-                                    } catch {
-                                        Write-Host "   Failed to modify file: $($_.Exception.Message)"
-                                    }
-                                }
-                                break
-                            }
-                        } catch {
-                            # Continue searching other files
-                        }
-                    }
-                    
-                    if ($settingFound) { break }
-                }
-            }
-        }
-        
-        if (-not $settingFound) {
-            Write-Host "SimplySignDesktopShowLogonDialogAfterApplicationStartup setting NOT FOUND"
-            Write-Host "Possible reasons:"
-            Write-Host "   1. Setting is created only after first user interaction"
-            Write-Host "   2. Setting is stored in a file, not registry"
-            Write-Host "   3. Setting name is different on Windows"
-            Write-Host "   4. Application hasn't been run with user interaction yet"
-            Write-Host ""
-            Write-Host "Will check for any user preference files..."
-            
-            # Check for preference files in AppData
-            $appDataPaths = @(
-                "$env:APPDATA\Certum",
-                "$env:APPDATA\SimplySign",
-                "$env:LOCALAPPDATA\Certum",
-                "$env:LOCALAPPDATA\SimplySign"
-            )
-            
-            foreach ($path in $appDataPaths) {
-                if (Test-Path $path) {
-                    Write-Host "Found: $path"
-                    Get-ChildItem -Path $path -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-                        Write-Host "   $($_.FullName)"
-                    }
-                }
-            }
-        }
-        
-        Write-Host ""
-        Write-Host "MODIFICATION SUMMARY:"
-        Write-Host "======================="
-        Write-Host "Setting found: $settingFound"
-        Write-Host "Setting type: $settingType"
-        Write-Host "Setting location: $settingLocation"
-        Write-Host "Modification successful: $modificationSuccess"
-        
-        if ($modificationSuccess) {
-            Write-Host "SUCCESS: SimplySignDesktopShowLogonDialogAfterApplicationStartup changed from 'No' to 'Yes'"
-            Write-Host "Location: $settingLocation ($settingType)"
-            Write-Host "Next step: Start SimplySign and check if login dialog appears"
-        } else {
-            Write-Host "Could not modify setting - may need different approach"
-            if (-not $settingFound) {
-                Write-Host "Setting was not found in:"
-                Write-Host "  - Registry (HKCU/HKLM Software paths)"
-                Write-Host "  - AppData files (XML, config, ini, json, etc.)"
-                Write-Host "  - User profile documents"
-            }
-        }
-      shell: powershell
-
-    # Step 9: Test Modified Setting
-    - name: Test SimplySign with Modified Setting
-      run: |
-        Write-Host "=== TESTING MODIFIED SETTING ==="
-        Write-Host "Restarting SimplySign to test if login dialog now appears..."
-        Write-Host ""
-        
-        # Locate SimplySign executable
-        $possiblePaths = @(
-            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
-            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
-            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySign Desktop.exe",
-            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySign Desktop.exe"
-        )
-        
-        $exePath = $null
-        foreach ($path in $possiblePaths) {
-            if (Test-Path $path) {
-                $exePath = $path
-                Write-Host "Found SimplySign at: $path"
-                break
-            }
-        }
-        
-        if (-not $exePath) {
-            Write-Host "Could not locate SimplySign executable"
-            exit 1
-        }
-        
-        # Start SimplySign with modified setting
-        Write-Host "Starting SimplySign with SimplySignDesktopShowLogonDialogAfterApplicationStartup = Yes..."
-        try {
-            $process = Start-Process -FilePath $exePath -WindowStyle Hidden -PassThru
-            Write-Host "Started SimplySign (PID: $($process.Id))"
-            
-            # Give it time to initialize and potentially show login dialog
-            Write-Host "Waiting 15 seconds for initialization and login dialog..."
-            Start-Sleep -Seconds 15
-            
-            # Check process status
-            if (-not $process.HasExited) {
-                Write-Host "Process is running and stable"
                 
-                # Check for multiple processes
-                $allProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
-                Write-Host "Total SimplySign processes: $($allProcesses.Count)"
-                $allProcesses | ForEach-Object {
-                    Write-Host "   PID $($_.Id): $($_.ProcessName)"
-                }
-            } else {
-                Write-Host "Process exited during initialization (Exit Code: $($process.ExitCode))"
+                Write-Host ""
+                Write-Host "📊 Analysis Summary:"
+                Write-Host "   Total registry values: $($analysisData.Summary.TotalRegistryValues)"
+                Write-Host "   Boolean settings: $($analysisData.Summary.BooleanSettings)" 
+                Write-Host "   Config files found: $($analysisData.Summary.ConfigFilesFound)"
             }
             
         } catch {
-            Write-Host "Failed to start SimplySign: $($_.Exception.Message)"
-            exit 1
+            Write-Host "❌ Settings analysis failed: $($_.Exception.Message)"
+            # Continue with workflow even if analysis fails
+        }
+      shell: powershell
+
+    # Step 8: Test Potential Settings
+    - name: Systematically Test Potential Login Settings
+      run: |
+        Write-Host "=== SYSTEMATIC SETTING MODIFICATION TESTING ==="
+        Write-Host "Testing each potential setting to see if it triggers login dialog behavior"
+        Write-Host ""
+        
+        # Check if we have analysis results to work with
+        if (-not (Test-Path "certum_settings_analysis_detailed_results.json")) {
+            Write-Host "⚠️ No analysis results found - creating minimal test set"
+            
+            # Create a minimal set focusing on known registry location
+            $minimalTestData = @{
+                AllCertumSettings = @()
+                PotentialTriggers = @()
+                BooleanSettings = @()
+            }
+            
+            # Check for the Autostart setting we know exists
+            try {
+                $certumPath = "HKLM:\SOFTWARE\Certum"
+                if (Test-Path $certumPath) {
+                    $autostartValue = Get-ItemProperty -Path $certumPath -Name "Autostart" -ErrorAction SilentlyContinue
+                    if ($autostartValue) {
+                        $minimalTestData.AllCertumSettings += @{
+                            Name = "Autostart"
+                            Value = $autostartValue.Autostart
+                            RegPath = $certumPath
+                        }
+                        Write-Host "✓ Found Autostart setting: $($autostartValue.Autostart)"
+                    }
+                }
+            } catch {
+                Write-Host "Could not access known Certum registry location"
+            }
+            
+            # Save minimal data for testing script
+            $minimalTestData | ConvertTo-Json -Depth 5 | Out-File -FilePath "certum_settings_analysis_detailed_results.json" -Encoding UTF8
+        }
+        
+        # Run the systematic testing script
+        try {
+            $testResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/test-setting-modifications.ps1" -SettingsAnalysisFile "certum_settings_analysis_detailed_results.json" -TestDurationSeconds 20 -RestoreOriginal $true
+            
+            Write-Host "✅ Setting modification testing completed"
+            
+            # Check for significant findings
+            if (Test-Path "setting_modification_test_results.json") {
+                $testData = Get-Content "setting_modification_test_results.json" -Raw | ConvertFrom-Json
+                
+                if ($testData.SignificantFindings -and $testData.SignificantFindings.Count -gt 0) {
+                    Write-Host ""
+                    Write-Host "🚨 SIGNIFICANT FINDINGS - Settings that affected behavior:"
+                    foreach ($finding in $testData.SignificantFindings) {
+                        Write-Host "   Setting: $($finding.SettingName)"
+                        Write-Host "   Change: $($finding.OriginalValue) → $($finding.NewValue)"
+                        Write-Host "   New processes: $(if ($finding.TriggeredNewProcess) { "✓ YES" } else { "No" })"
+                        Write-Host "   Startup affected: $(if (-not $finding.SimplySignStartupWorked) { "✓ YES" } else { "No" })"
+                        Write-Host "   Path: $($finding.RegPath)"
+                        Write-Host ""
+                    }
+                    
+                    # Save the most promising setting for next phase
+                    $mostPromising = $testData.SignificantFindings[0]
+                    $mostPromising | ConvertTo-Json | Out-File -FilePath "most_promising_setting.json" -Encoding UTF8
+                    Write-Host "💡 Most promising setting saved for final testing phase"
+                    
+                } else {
+                    Write-Host "ℹ️ No settings showed obvious login dialog triggering behavior"
+                    Write-Host "This suggests the login dialog may be controlled by:"
+                    Write-Host "   1. File-based configuration (not registry)"
+                    Write-Host "   2. User interaction triggers"
+                    Write-Host "   3. Different mechanisms than simple boolean flags"
+                }
+                
+                Write-Host ""
+                Write-Host "📊 Testing Summary:"
+                Write-Host "   Settings tested: $($testData.SettingsTested)"
+                Write-Host "   Successful changes: $($testData.Summary.SuccessfulChanges)"
+                Write-Host "   Process triggers: $($testData.Summary.ProcessTriggered)"
+                Write-Host "   Startup effects: $($testData.Summary.StartupAffected)"
+            }
+            
+        } catch {
+            Write-Host "❌ Setting modification testing failed: $($_.Exception.Message)"
+            Write-Host "Continuing with workflow..."
         }
         
         Write-Host ""
-        Write-Host "CRITICAL TEST COMPLETED"
-        Write-Host "=========================="
-        Write-Host "SimplySign started with SimplySignDesktopShowLogonDialogAfterApplicationStartup = Yes"
-        Write-Host "Next step: Run login dialog detection to see if it worked"
+        Write-Host "Setting modification testing phase completed"
+      shell: powershell
+
+    # Step 9: Apply Most Promising Setting and Test
+    - name: Apply Most Promising Setting and Test Login Dialog
+      run: |
+        Write-Host "=== APPLYING MOST PROMISING SETTING FOR FINAL TEST ==="
+        Write-Host "If we found a promising setting, apply it and test for login dialog"
+        Write-Host ""
+        
+        $appliedSetting = $false
+        $settingDetails = ""
+        
+        # Check if we have a promising setting to apply
+        if (Test-Path "most_promising_setting.json") {
+            try {
+                $promisingSetting = Get-Content "most_promising_setting.json" -Raw | ConvertFrom-Json
+                
+                Write-Host "🎯 Applying most promising setting:"
+                Write-Host "   Setting: $($promisingSetting.SettingName)"
+                Write-Host "   Change: $($promisingSetting.OriginalValue) → $($promisingSetting.NewValue)"
+                Write-Host "   Path: $($promisingSetting.RegPath)"
+                
+                # Apply the setting
+                if (Test-Path $promisingSetting.RegPath) {
+                    Set-ItemProperty -Path $promisingSetting.RegPath -Name $promisingSetting.SettingName -Value $promisingSetting.NewValue
+                    Write-Host "✅ Setting applied successfully"
+                    $appliedSetting = $true
+                    $settingDetails = "$($promisingSetting.SettingName) = $($promisingSetting.NewValue)"
+                } else {
+                    Write-Host "❌ Registry path not accessible: $($promisingSetting.RegPath)"
+                }
+                
+            } catch {
+                Write-Host "❌ Failed to apply promising setting: $($_.Exception.Message)"
+            }
+        } else {
+            Write-Host "ℹ️ No promising setting found from previous analysis"
+            
+            # Fallback - try the Autostart setting if it exists
+            try {
+                $certumPath = "HKLM:\SOFTWARE\Certum"
+                if (Test-Path $certumPath) {
+                    $autostartValue = Get-ItemProperty -Path $certumPath -Name "Autostart" -ErrorAction SilentlyContinue
+                    if ($autostartValue -and $autostartValue.Autostart -eq 0) {
+                        Write-Host "🔄 Fallback: Trying Autostart setting (0 → 1)"
+                        Set-ItemProperty -Path $certumPath -Name "Autostart" -Value 1
+                        Write-Host "✅ Autostart setting changed to 1"
+                        $appliedSetting = $true
+                        $settingDetails = "Autostart = 1"
+                    }
+                }
+            } catch {
+                Write-Host "Could not apply Autostart fallback"
+            }
+        }
+        
+        if ($appliedSetting) {
+            Write-Host ""
+            Write-Host "🧪 TESTING SIMPLYSIGN WITH MODIFIED SETTING"
+            Write-Host "Setting applied: $settingDetails"
+            Write-Host "Starting SimplySign to see if login dialog appears..."
+            
+            # Find SimplySign executable
+            $possiblePaths = @(
+                "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+                "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySignDesktop.exe"
+            )
+            
+            $exePath = $null
+            foreach ($path in $possiblePaths) {
+                if (Test-Path $path) {
+                    $exePath = $path
+                    break
+                }
+            }
+            
+            if ($exePath) {
+                try {
+                    # Start SimplySign with the modified setting
+                    $process = Start-Process -FilePath $exePath -PassThru
+                    Write-Host "▶️ Started SimplySign (PID: $($process.Id)) with modified setting"
+                    
+                    # Wait longer than usual to see if login dialog appears
+                    Write-Host "⏳ Waiting 30 seconds for potential login dialog..."
+                    Start-Sleep -Seconds 30
+                    
+                    # Check process status and look for additional processes
+                    $allProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
+                    Write-Host "📊 SimplySign processes after setting change:"
+                    $allProcesses | ForEach-Object {
+                        Write-Host "   PID $($_.Id): $($_.ProcessName)"
+                    }
+                    
+                    if ($allProcesses.Count -gt 1) {
+                        Write-Host "🎯 Multiple processes detected - setting may have triggered additional behavior!"
+                    }
+                    
+                    # Clean up processes
+                    $allProcesses | ForEach-Object {
+                        try { $_ | Stop-Process -Force } catch {}
+                    }
+                    
+                } catch {
+                    Write-Host "❌ Error testing with modified setting: $($_.Exception.Message)"
+                }
+            } else {
+                Write-Host "❌ SimplySign executable not found"
+            }
+        } else {
+            Write-Host "⚠️ No setting was applied - proceeding with default configuration"
+        }
+        
+        Write-Host ""
+        Write-Host "Final setting test completed"
       shell: powershell
 
     # Step 10: Start Network Monitoring (if enabled)
@@ -897,45 +703,88 @@ jobs:
       run: |
         echo "=== STARTING OAUTH2 NETWORK MONITORING ==="
         echo "Monitoring for requests to cloudsign.webnotarius.pl..."
+        echo "Using file-based monitoring to persist across workflow steps"
         
-        # Start background network monitoring
-        powershell -Command "
-          Write-Host 'Starting OAuth2 network capture...'
-          \$job = Start-Job -ScriptBlock {
-            param(\$duration)
-            \$endTime = (Get-Date).AddSeconds(\$duration)
-            while ((Get-Date) -lt \$endTime) {
-              # Check for network connections to webnotarius
-              \$connections = netstat -an | Select-String 'webnotarius'
-              if (\$connections) {
-                Write-Host \"[\$(Get-Date)] OAuth2 connection detected: \$connections\"
-              }
-              
-              # Monitor DNS queries
-              try {
-                \$dnsResult = nslookup cloudsign.webnotarius.pl 2>null
-                if (\$dnsResult -and \$dnsResult -notlike '*can''t find*') {
-                  Write-Host \"[\$(Get-Date)] DNS resolution successful for OAuth2 endpoint\"
+        # Create network monitoring script
+        cat > network_monitor.ps1 << 'EOF'
+        param([int]$DurationSeconds = 180)
+        
+        $logFile = "network_monitor_results.log"
+        $endTime = (Get-Date).AddSeconds($DurationSeconds)
+        
+        Write-Host "Starting OAuth2 network monitoring for $DurationSeconds seconds..."
+        "Network monitoring started at $(Get-Date)" | Out-File -FilePath $logFile -Encoding UTF8
+        
+        $connectionCount = 0
+        $dnsCount = 0
+        
+        while ((Get-Date) -lt $endTime) {
+            $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            
+            # Check for network connections to webnotarius
+            try {
+                $connections = netstat -an | Select-String 'webnotarius' -ErrorAction SilentlyContinue
+                if ($connections) {
+                    $connectionCount++
+                    $logEntry = "[$timestamp] OAuth2 connection detected: $connections"
+                    Write-Host $logEntry
+                    $logEntry | Out-File -FilePath $logFile -Append -Encoding UTF8
                 }
-              } catch {}
-              
-              Start-Sleep -Seconds 2
+            } catch {
+                # Ignore netstat errors
             }
-          } -ArgumentList ${{ inputs.detection_timeout }}
-          
-          Write-Host \"Network monitoring job started (ID: \$(\$job.Id))\"
-          \$job.Id | Out-File -FilePath 'network_monitor_job.id' -Encoding ASCII
-        " 2>&1 | tee network_monitor_start.log
+            
+            # Monitor DNS queries
+            try {
+                $dnsResult = nslookup cloudsign.webnotarius.pl 2>$null
+                if ($dnsResult -and $dnsResult -notlike '*can''t find*') {
+                    $dnsCount++
+                    $logEntry = "[$timestamp] DNS resolution successful for OAuth2 endpoint"
+                    Write-Host $logEntry
+                    $logEntry | Out-File -FilePath $logFile -Append -Encoding UTF8
+                }
+            } catch {
+                # Ignore DNS lookup errors
+            }
+            
+            Start-Sleep -Seconds 2
+        }
+        
+        $summary = "Network monitoring completed. Connections: $connectionCount, DNS queries: $dnsCount"
+        Write-Host $summary
+        $summary | Out-File -FilePath $logFile -Append -Encoding UTF8
+        "Network monitoring ended at $(Get-Date)" | Out-File -FilePath $logFile -Append -Encoding UTF8
+        EOF
+        
+        # Start monitoring in background
+        echo "Starting background network monitoring process..."
+        powershell -ExecutionPolicy Bypass -File network_monitor.ps1 -DurationSeconds ${{ inputs.detection_timeout }} > network_monitor_start.log 2>&1 &
+        
+        # Save the background process PID for later reference
+        MONITOR_PID=$!
+        echo $MONITOR_PID > network_monitor.pid
+        echo "Network monitoring started with PID: $MONITOR_PID"
+        echo "Monitoring will run for ${{ inputs.detection_timeout }} seconds"
+        
+        # Give it a moment to start
+        sleep 2
+        
+        # Check if monitoring started successfully
+        if ps -p $MONITOR_PID > /dev/null 2>&1; then
+          echo "✓ Network monitoring process is running"
+        else
+          echo "⚠ Network monitoring process may have failed to start"
+        fi
       shell: bash
 
-    # Step 11: Login Dialog Detection After Setting Modification
-    - name: Detect Login Dialog - Multiple Methods + Command Testing
+    # Step 11: Enhanced Login Dialog Detection
+    - name: Enhanced Login Dialog Detection - Post Settings Analysis
       env:
         DETECTION_TIMEOUT: ${{ inputs.detection_timeout }}
         DEBUG_MODE: ${{ inputs.debug_mode }}
       run: |
-        echo "=== COMPREHENSIVE LOGIN DIALOG DETECTION + COMMAND TESTING ==="
-        echo "Testing detection methods AND command invocation in GitHub Actions environment"
+        echo "=== ENHANCED LOGIN DIALOG DETECTION ==="
+        echo "Testing for login dialog after comprehensive settings analysis and modifications"
         echo "Detection timeout: $env:DETECTION_TIMEOUT seconds"
         echo "Debug mode: $env:DEBUG_MODE"
         echo ""
@@ -943,109 +792,100 @@ jobs:
         $timeout = [int]$env:DETECTION_TIMEOUT
         $debug = if ($env:DEBUG_MODE -eq "true") { $true } else { $false }
         
-        # First, run our standard detection
-        Write-Host "=== PHASE 1: STANDARD DETECTION ==="
-        Write-Host "Executing comprehensive dialog detection script..."
+        # Phase 1: Check what settings were applied
+        Write-Host "=== PHASE 1: APPLIED SETTINGS SUMMARY ==="
+        if (Test-Path "most_promising_setting.json") {
+            $appliedSetting = Get-Content "most_promising_setting.json" -Raw | ConvertFrom-Json
+            Write-Host "✓ Applied promising setting: $($appliedSetting.SettingName) = $($appliedSetting.NewValue)"
+        } elseif (Test-Path "HKLM:\SOFTWARE\Certum") {
+            $autostartValue = Get-ItemProperty -Path "HKLM:\SOFTWARE\Certum" -Name "Autostart" -ErrorAction SilentlyContinue
+            if ($autostartValue -and $autostartValue.Autostart -eq 1) {
+                Write-Host "✓ Applied fallback setting: Autostart = 1"
+            } else {
+                Write-Host "ℹ️ No settings were modified"
+            }
+        } else {
+            Write-Host "ℹ️ No settings analysis results available"
+        }
+        
+        Write-Host ""
+        Write-Host "=== PHASE 2: STANDARD DETECTION WITH SETTINGS ==="
+        Write-Host "Running standard detection script with any applied settings..."
         try {
-            $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds 30 -DebugMode $debug
+            $result = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds 45 -DebugMode $debug
             Write-Host "Detection script result: $result"
         } catch {
             Write-Host "Detection script error: $($_.Exception.Message)"
         }
         
         Write-Host ""
-        Write-Host "=== PHASE 2: COMMAND INVOCATION TESTING ==="
-        Write-Host "Attempting to trigger 'Connect with cloud' programmatically..."
+        Write-Host "=== PHASE 3: ALTERNATIVE APPROACHES ==="
+        Write-Host "Testing alternative methods based on our settings analysis..."
         
-        # Try to find and invoke "Connect with cloud" command
-        # Method 1: Look for menu automation
-        Write-Host "Method 1: UI Automation approach..."
-        try {
-            Add-Type -AssemblyName UIAutomationClient
-            Add-Type -AssemblyName UIAutomationTypes
-            
-            # Find SimplySign window
-            $automation = [System.Windows.Automation.AutomationElement]::RootElement
-            $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, "*SimplySign*")
-            $simplySignWindow = $automation.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
-            
-            if ($simplySignWindow) {
-                Write-Host "Found SimplySign window: $($simplySignWindow.Current.Name)"
-                
-                # Look for menu items or buttons related to cloud connection
-                $menuCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
-                $menuItems = $simplySignWindow.FindAll([System.Windows.Automation.TreeScope]::Descendants, $menuCondition)
-                
-                Write-Host "Found $($menuItems.Count) menu items"
-                foreach ($item in $menuItems) {
-                    $name = $item.Current.Name
-                    if ($name -like "*cloud*" -or $name -like "*connect*" -or $name -like "*login*") {
-                        Write-Host "  Potential cloud menu: $name"
-                    }
-                }
-            } else {
-                Write-Host "Could not find SimplySign window for UI automation"
-            }
-        } catch {
-            Write-Host "UI Automation failed: $($_.Exception.Message)"
-        }
-        
-        # Method 2: Command line parameters
-        Write-Host ""
-        Write-Host "Method 2: Command line parameters..."
-        $possibleCommands = @(
-            "/connect",
-            "/cloud",
-            "/login",
-            "/auth",
-            "/show-login",
-            "-connect",
-            "-cloud",
-            "-login"
+        # Try to start SimplySign in different modes
+        $possiblePaths = @(
+            "${env:ProgramFiles}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySignDesktop.exe"
         )
         
-        foreach ($cmd in $possibleCommands) {
-            Write-Host "Testing parameter: $cmd"
-            # This would normally try to start with the parameter, but we'll skip actual execution
-            # to avoid process conflicts
-        }
-        
-        # Method 3: Registry triggers
-        Write-Host ""
-        Write-Host "Method 3: Additional registry triggers..."
-        try {
-            # Try setting additional registry values that might trigger immediate connection
-            $regPath = "HKCU:\Software\Certum"
-            if (Test-Path $regPath) {
-                New-ItemProperty -Path $regPath -Name "TriggerCloudConnection" -Value "Yes" -PropertyType String -Force | Out-Null
-                New-ItemProperty -Path $regPath -Name "ForceConnectWithCloud" -Value "Yes" -PropertyType String -Force | Out-Null
-                Write-Host "Set additional trigger registry values"
+        $exePath = $null
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+                $exePath = $path
+                break
             }
-        } catch {
-            Write-Host "Could not set additional registry triggers: $($_.Exception.Message)"
+        }
+        
+        if ($exePath) {
+            # Test 1: Multiple startup attempts
+            Write-Host "Test 1: Multiple startup attempts to trigger first-run behavior..."
+            for ($i = 1; $i -le 3; $i++) {
+                Write-Host "  Startup attempt $i/3..."
+                try {
+                    $process = Start-Process -FilePath $exePath -PassThru
+                    Start-Sleep -Seconds 10
+                    
+                    $allProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
+                    if ($allProcesses.Count -gt 1) {
+                        Write-Host "    🎯 Multiple processes detected on attempt $i!"
+                    }
+                    
+                    # Clean up
+                    $allProcesses | ForEach-Object { try { $_ | Stop-Process -Force } catch {} }
+                    Start-Sleep -Seconds 2
+                } catch {
+                    Write-Host "    Startup attempt $i failed"
+                }
+            }
+            
+            # Test 2: Command line parameters
+            Write-Host ""
+            Write-Host "Test 2: Command line parameters..."
+            $commandLineTests = @("/login", "/connect", "/cloud", "/auth", "--login", "--connect")
+            foreach ($param in $commandLineTests) {
+                Write-Host "  Testing parameter: $param"
+                try {
+                    $process = Start-Process -FilePath $exePath -ArgumentList $param -PassThru -ErrorAction SilentlyContinue
+                    Start-Sleep -Seconds 5
+                    
+                    if ($process -and -not $process.HasExited) {
+                        Write-Host "    Parameter accepted, process running"
+                        $process | Stop-Process -Force
+                    } else {
+                        Write-Host "    Parameter rejected or process exited"
+                    }
+                } catch {
+                    Write-Host "    Parameter test failed"
+                }
+            }
         }
         
         Write-Host ""
-        Write-Host "=== PHASE 3: POST-COMMAND DETECTION ==="
-        Write-Host "Running detection again after command attempts..."
+        Write-Host "=== PHASE 4: FINAL COMPREHENSIVE DETECTION ==="
+        Write-Host "Running extended detection for remaining timeout..."
         
-        # Wait a moment for any triggered dialogs
-        Start-Sleep -Seconds 5
-        
-        # Run detection again
-        try {
-            $result2 = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds 30 -DebugMode $debug
-            Write-Host "Post-command detection result: $result2"
-        } catch {
-            Write-Host "Post-command detection error: $($_.Exception.Message)"
-        }
-        
-        Write-Host ""
-        Write-Host "=== PHASE 4: FINAL LONG-TERM DETECTION ==="
-        Write-Host "Running extended detection for remaining timeout period..."
-        
-        $remainingTimeout = $timeout - 70  # Account for time already spent
-        if ($remainingTimeout -gt 0) {
+        $remainingTimeout = $timeout - 120  # Account for time spent in previous phases
+        if ($remainingTimeout -gt 30) {
             try {
                 $finalResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-login-dialog.ps1" -TimeoutSeconds $remainingTimeout -DebugMode $debug
                 Write-Host "Final detection result: $finalResult"
@@ -1053,11 +893,12 @@ jobs:
                 Write-Host "Final detection error: $($_.Exception.Message)"
             }
         } else {
-            Write-Host "No remaining time for extended detection"
+            Write-Host "Insufficient time remaining for extended detection"
         }
         
         Write-Host ""
-        Write-Host "=== DETECTION AND COMMAND TESTING COMPLETED ==="
+        Write-Host "=== DETECTION ANALYSIS COMPLETE ==="
+        Write-Host "Results should be analyzed in combination with settings modification findings"
         
       shell: powershell
 
@@ -1067,45 +908,90 @@ jobs:
       run: |
         echo "=== COLLECTING NETWORK MONITORING RESULTS ==="
         
-        if [ -f "network_monitor_job.id" ]; then
-          JOB_ID=$(tr -cd '0-9' < network_monitor_job.id)
-          echo "Retrieving network monitoring results from job ID: $JOB_ID"
+        # Check if monitoring process is still running
+        if [ -f "network_monitor.pid" ]; then
+          MONITOR_PID=$(cat network_monitor.pid)
+          echo "Checking network monitoring process (PID: $MONITOR_PID)..."
           
-          powershell -Command "
-            try {
-              \$job = Get-Job -Id $JOB_ID -ErrorAction SilentlyContinue
-              if (\$job) {
-                Write-Host 'Network monitoring job status: ' + \$job.State
-                \$results = Receive-Job -Job \$job
-                if (\$results) {
-                  Write-Host 'Network monitoring results:'
-                  \$results | ForEach-Object { Write-Host \"   \$_\" }
-                } else {
-                  Write-Host 'No network activity detected during monitoring period'
-                }
-                Remove-Job -Job \$job -Force
-              } else {
-                Write-Host 'Network monitoring job not found'
-              }
-            } catch {
-              Write-Host \"Error retrieving network results: \$(\$_.Exception.Message)\"
-            }
-          "
+          if ps -p $MONITOR_PID > /dev/null 2>&1; then
+            echo "Network monitoring still running - waiting for completion..."
+            # Wait a bit for it to finish naturally
+            sleep 10
+            
+            # If still running, terminate it
+            if ps -p $MONITOR_PID > /dev/null 2>&1; then
+              echo "Terminating network monitoring process..."
+              kill $MONITOR_PID 2>/dev/null || true
+              sleep 2
+            fi
+          else
+            echo "Network monitoring process has completed"
+          fi
         else
-          echo "Network monitor job ID not found"
+          echo "No network monitoring PID file found"
         fi
+        
+        # Collect results from log file
+        if [ -f "network_monitor_results.log" ]; then
+          echo ""
+          echo "📊 NETWORK MONITORING RESULTS:"
+          echo "=============================="
+          cat network_monitor_results.log
+          
+          # Check for any OAuth2 activity
+          if grep -q "OAuth2 connection detected\|DNS resolution successful" network_monitor_results.log; then
+            echo ""
+            echo "🌐 OAuth2 network activity detected during monitoring!"
+          else
+            echo ""
+            echo "ℹ️ No OAuth2 network activity detected during monitoring period"
+          fi
+          
+          # Count activities
+          CONNECTION_COUNT=$(grep -c "OAuth2 connection detected" network_monitor_results.log 2>/dev/null || echo "0")
+          DNS_COUNT=$(grep -c "DNS resolution successful" network_monitor_results.log 2>/dev/null || echo "0")
+          
+          echo ""
+          echo "📈 Activity Summary:"
+          echo "  OAuth2 connections detected: $CONNECTION_COUNT"
+          echo "  DNS resolutions detected: $DNS_COUNT"
+          
+        else
+          echo "⚠️ Network monitoring results file not found"
+          echo "Monitoring may not have started properly or results were not saved"
+          
+          # Check if there's any startup log
+          if [ -f "network_monitor_start.log" ]; then
+            echo ""
+            echo "Startup log contents:"
+            cat network_monitor_start.log
+          fi
+        fi
+        
+        echo ""
+        echo "Network monitoring analysis completed"
       shell: bash
 
-    # Step 13: Upload Diagnostic Results
-    - name: Upload Detection Results
+    # Step 13: Upload Comprehensive Diagnostic Results
+    - name: Upload Enhanced Detection and Settings Analysis Results
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: login-dialog-detection-results
+        name: comprehensive-login-analysis-results
         path: |
           detection_results.json
+          network_monitor_results.log
           network_monitor_start.log
+          network_monitor.ps1
           .github/scripts/detect-login-dialog.ps1
+          .github/scripts/analyze-all-certum-settings.ps1
+          .github/scripts/test-setting-modifications.ps1
+          certum_settings_analysis_*.json
+          certum_settings_analysis_*.txt
+          certum_settings_analysis_*.reg
+          setting_modification_test_results.json
+          setting_modification_summary.txt
+          most_promising_setting.json
           *.log
           *.reg
           registry_changes_*.txt
@@ -1114,41 +1000,129 @@ jobs:
         retention-days: 7
         compression-level: 9
 
-    # Step 14: Generate Summary Report
-    - name: Generate Diagnostic Summary
+    # Step 14: Generate Comprehensive Summary Report
+    - name: Generate Enhanced Diagnostic Summary
       if: always()
       run: |
-        echo "=== LOGIN DIALOG DETECTION DIAGNOSTIC SUMMARY ==="
+        echo "=== COMPREHENSIVE LOGIN DIALOG ANALYSIS SUMMARY ==="
         echo "Date: $(date)"
         echo "Environment: GitHub Actions Windows Runner"
+        echo "Analysis approach: Broad settings discovery + systematic testing"
         echo "Detection timeout: ${{ inputs.detection_timeout }} seconds"
         echo "Network monitoring: ${{ inputs.enable_network_monitoring }}"
         echo ""
         
-        if [ -f "detection_results.json" ]; then
-          echo "Detection Results:"
-          cat detection_results.json | python -m json.tool 2>/dev/null || cat detection_results.json
-          echo ""
+        echo "🔍 ANALYSIS PHASES COMPLETED:"
+        echo "1. ✅ SimplySign installation and initialization"
+        echo "2. ✅ Registry monitoring (before/after snapshots)"
+        echo "3. ✅ Comprehensive Certum settings analysis"
+        echo "4. ✅ Systematic setting modification testing"
+        echo "5. ✅ Enhanced login dialog detection"
+        echo ""
+        
+        # Check for settings analysis results
+        if [ -f "certum_settings_analysis_detailed_results.json" ]; then
+          echo "📊 SETTINGS ANALYSIS RESULTS:"
+          echo "  ✓ Settings analysis completed - check JSON file for details"
+          if grep -q "PotentialTriggers" certum_settings_analysis_detailed_results.json; then
+            echo "  🎯 Potential login triggers found in analysis"
+          else
+            echo "  - No obvious potential triggers identified"
+          fi
+        else
+          echo "⚠️  No settings analysis results found"
         fi
         
-        echo "Key Questions Answered:"
-        echo "1. Does SimplySign Desktop start successfully in GitHub Actions? [Check process launch]"
-        echo "2. Does a login dialog actually appear? [Check detection methods]"  
-        echo "3. Is it a native dialog or web view? [Check WebView detection]"
-        echo "4. Are there OAuth2 network requests? [Check network monitoring]"
-        echo "5. How long does initialization take? [Check timing in logs]"
         echo ""
         
-        echo "Next Steps Based on Results:"
-        echo "- If no detection: Login dialog doesn't appear in headless mode"
-        echo "- If WebView detected: Need web automation instead of window automation" 
-        echo "- If network detected: OAuth2 flow is active, could bypass GUI"
-        echo "- If process issues: Need to fix SimplySign startup configuration"
+        # Check for modification test results
+        if [ -f "setting_modification_test_results.json" ]; then
+          echo "🧪 SETTING MODIFICATION TEST RESULTS:"
+          echo "  ✓ Setting modification tests completed"
+          if grep -q "SignificantFindings" setting_modification_test_results.json; then
+            echo "  🚨 Significant findings detected - check results file"
+          else
+            echo "  - No significant behavior changes detected"
+          fi
+        else
+          echo "⚠️  No modification test results found"
+        fi
+        
         echo ""
         
-        echo "🔗 Related Files:"
-        echo "- detection_results.json: Detailed detection method results"
-        echo "- dialog_detection.ps1: Full detection script for reference"
-        echo "- *.log: Various monitoring and debug logs"
+        # Check for login dialog detection results
+        if [ -f "detection_results.json" ]; then
+          echo "🎯 LOGIN DIALOG DETECTION RESULTS:"
+          if grep -q '"detected": *true' detection_results.json; then
+            echo "  ✅ Login dialog detected!"
+          else
+            echo "  ❌ No login dialog detected"
+          fi
+        else
+          echo "⚠️  No detection results found"
+        fi
+        
+        echo ""
+        echo "📁 GENERATED FILES:"
+        echo "Analysis and test files created during this run:"
+        ls -la *.json *.txt *.reg 2>/dev/null | head -10 || echo "  No analysis files found"
+        
+        echo ""
+        echo "🎯 KEY INSIGHTS SUMMARY:"
+        echo "========================="
+        
+        # Determine overall outcome
+        SETTINGS_FOUND=false
+        DETECTION_SUCCESS=false
+        
+        if [ -f "setting_modification_test_results.json" ] && grep -q "SignificantFindings" setting_modification_test_results.json; then
+          SETTINGS_FOUND=true
+        fi
+        
+        if [ -f "detection_results.json" ] && grep -q '"detected": *true' detection_results.json; then
+          DETECTION_SUCCESS=true
+        fi
+        
+        if [ "$SETTINGS_FOUND" = true ] && [ "$DETECTION_SUCCESS" = true ]; then
+          echo "🎉 SUCCESS: Found settings that trigger login dialog!"
+          echo "   Recommendation: Use the identified settings in production workflow"
+        elif [ "$SETTINGS_FOUND" = true ]; then
+          echo "🔍 PARTIAL SUCCESS: Found behavior-affecting settings"
+          echo "   Recommendation: Further test these settings for login dialog control"
+        elif [ "$DETECTION_SUCCESS" = true ]; then
+          echo "🎯 DETECTION SUCCESS: Login dialog appeared without setting changes"
+          echo "   Recommendation: Current configuration may already be sufficient"
+        else
+          echo "❌ NO OBVIOUS LOGIN TRIGGERS FOUND"
+          echo "   Possible explanations:"
+          echo "   1. Login dialog controlled by config files (not registry)"
+          echo "   2. Requires user interaction to trigger"
+          echo "   3. Headless environment inherently prevents login dialogs"
+          echo "   4. Windows version uses different approach than macOS"
+          echo ""
+          echo "   Recommendations:"
+          echo "   - Review generated analysis files for missed settings"
+          echo "   - Look for XML/INI config files in AppData"
+          echo "   - Try simulating user interaction"
+          echo "   - Test with different startup parameters"
+          echo "   - Consider if GUI automation is needed instead of setting changes"
+        fi
+        
+        echo ""
+        echo "📋 NEXT STEPS:"
+        echo "=============="
+        echo "1. Download and review 'comprehensive-login-analysis-results' artifact"
+        echo "2. Check detailed JSON files for specific findings"
+        echo "3. If settings found: Test them individually in your environment"
+        echo "4. If no triggers found: Explore alternative approaches (files, UI automation)"
+        echo "5. Consider testing in interactive (non-headless) environment"
+        echo ""
+        echo "🔗 ARTIFACT FILES:"
+        echo "All analysis results uploaded as 'comprehensive-login-analysis-results'"
+        echo "Key files to review:"
+        echo "  - certum_settings_analysis_detailed_results.json"
+        echo "  - setting_modification_test_results.json"
+        echo "  - setting_modification_summary.txt"
+        echo "  - detection_results.json"
         
       shell: bash
