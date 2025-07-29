@@ -286,6 +286,8 @@ function Wait-ForLoginDialog {
     Write-Host "Timeout waiting for login dialog"
     return Find-SimplySignWindows -TargetProcessId $ProcessId
 }
+
+function Analyze-UIElements {
     param([IntPtr]$WindowHandle)
     
     $uiElements = @()
