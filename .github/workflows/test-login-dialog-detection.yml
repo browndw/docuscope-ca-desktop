@@ -520,7 +520,7 @@ jobs:
                             Value = $autostartValue.Autostart
                             RegPath = $certumPath
                         }
-                        Write-Host "✓ Found Autostart setting: $($autostartValue.Autostart)"
+                        Write-Host "Found Autostart setting: $($autostartValue.Autostart)"
                     }
                 }
             } catch {
@@ -547,8 +547,8 @@ jobs:
                     foreach ($finding in $testData.SignificantFindings) {
                         Write-Host "   Setting: $($finding.SettingName)"
                         Write-Host "   Change: $($finding.OriginalValue) → $($finding.NewValue)"
-                        Write-Host "   New processes: $(if ($finding.TriggeredNewProcess) { "✓ YES" } else { "No" })"
-                        Write-Host "   Startup affected: $(if (-not $finding.SimplySignStartupWorked) { "✓ YES" } else { "No" })"
+                        Write-Host "   New processes: $(if ($finding.TriggeredNewProcess) { "YES" } else { "No" })"
+                        Write-Host "   Startup affected: $(if (-not $finding.SimplySignStartupWorked) { "YES" } else { "No" })"
                         Write-Host "   Path: $($finding.RegPath)"
                         Write-Host ""
                     }
@@ -559,7 +559,7 @@ jobs:
                     Write-Host "Most promising setting saved for final testing phase"
                     
                 } else {
-                    Write-Host "ℹNo settings showed obvious login dialog triggering behavior"
+                    Write-Host "No settings showed obvious login dialog triggering behavior"
                     Write-Host "This suggests the login dialog may be controlled by:"
                     Write-Host "   1. File-based configuration (not registry)"
                     Write-Host "   2. User interaction triggers"
@@ -598,7 +598,7 @@ jobs:
             try {
                 $promisingSetting = Get-Content "most_promising_setting.json" -Raw | ConvertFrom-Json
                 
-                Write-Host "🎯 Applying most promising setting:"
+                Write-Host "   Applying most promising setting:"
                 Write-Host "   Setting: $($promisingSetting.SettingName)"
                 Write-Host "   Change: $($promisingSetting.OriginalValue) → $($promisingSetting.NewValue)"
                 Write-Host "   Path: $($promisingSetting.RegPath)"
@@ -617,7 +617,7 @@ jobs:
                 Write-Host "Failed to apply promising setting: $($_.Exception.Message)"
             }
         } else {
-            Write-Host "ℹNo promising setting found from previous analysis"
+            Write-Host "No promising setting found from previous analysis"
             
             # Fallback - try the Autostart setting if it exists
             try {
@@ -664,7 +664,7 @@ jobs:
                     Write-Host "▶Started SimplySign (PID: $($process.Id)) with modified setting"
                     
                     # Wait longer than usual to see if login dialog appears
-                    Write-Host "⏳ Waiting 30 seconds for potential login dialog..."
+                    Write-Host "Waiting 30 seconds for potential login dialog..."
                     Start-Sleep -Seconds 30
                     
                     # Check process status and look for additional processes
@@ -771,9 +771,9 @@ jobs:
         
         # Check if monitoring started successfully
         if ps -p $MONITOR_PID > /dev/null 2>&1; then
-          echo "✓ Network monitoring process is running"
+          echo "Network monitoring process is running"
         else
-          echo "⚠ Network monitoring process may have failed to start"
+          echo "Network monitoring process may have failed to start"
         fi
       shell: bash
 
@@ -796,16 +796,16 @@ jobs:
         Write-Host "=== PHASE 1: APPLIED SETTINGS SUMMARY ==="
         if (Test-Path "most_promising_setting.json") {
             $appliedSetting = Get-Content "most_promising_setting.json" -Raw | ConvertFrom-Json
-            Write-Host "✓ Applied promising setting: $($appliedSetting.SettingName) = $($appliedSetting.NewValue)"
+            Write-Host "Applied promising setting: $($appliedSetting.SettingName) = $($appliedSetting.NewValue)"
         } elseif (Test-Path "HKLM:\SOFTWARE\Certum") {
             $autostartValue = Get-ItemProperty -Path "HKLM:\SOFTWARE\Certum" -Name "Autostart" -ErrorAction SilentlyContinue
             if ($autostartValue -and $autostartValue.Autostart -eq 1) {
-                Write-Host "✓ Applied fallback setting: Autostart = 1"
+                Write-Host "Applied fallback setting: Autostart = 1"
             } else {
-                Write-Host "ℹ️ No settings were modified"
+                Write-Host "No settings were modified"
             }
         } else {
-            Write-Host "ℹ️ No settings analysis results available"
+            Write-Host "No settings analysis results available"
         }
         
         Write-Host ""
@@ -847,7 +847,7 @@ jobs:
                     
                     $allProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
                     if ($allProcesses.Count -gt 1) {
-                        Write-Host "    🎯 Multiple processes detected on attempt $i!"
+                        Write-Host "    Multiple processes detected on attempt $i!"
                     }
                     
                     # Clean up
@@ -1012,7 +1012,7 @@ jobs:
         echo "Network monitoring: ${{ inputs.enable_network_monitoring }}"
         echo ""
         
-        echo "🔍 ANALYSIS PHASES COMPLETED:"
+        echo "ANALYSIS PHASES COMPLETED:"
         echo "1. SimplySign installation and initialization"
         echo "2. Registry monitoring (before/after snapshots)"
         echo "3. Comprehensive Certum settings analysis"
@@ -1038,7 +1038,7 @@ jobs:
         # Check for modification test results
         if [ -f "setting_modification_test_results.json" ]; then
           echo "SETTING MODIFICATION TEST RESULTS:"
-          echo "  ✓ Setting modification tests completed"
+          echo "  Setting modification tests completed"
           if grep -q "SignificantFindings" setting_modification_test_results.json; then
             echo "  Significant findings detected - check results file"
           else
@@ -1052,7 +1052,7 @@ jobs:
         
         # Check for login dialog detection results
         if [ -f "detection_results.json" ]; then
-          echo "🎯 LOGIN DIALOG DETECTION RESULTS:"
+          echo "LOGIN DIALOG DETECTION RESULTS:"
           if grep -q '"detected": *true' detection_results.json; then
             echo "  Login dialog detected!"
           else
