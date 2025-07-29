@@ -330,15 +330,15 @@ jobs:
         }
         
         if (-not $exePath) {
-            Write-Host "❌ Could not locate SimplySign Desktop executable"
+            Write-Host "Could not locate SimplySign Desktop executable"
             exit 1
         }
         
         # Start SimplySign briefly to create default settings
-        Write-Host "🚀 Starting SimplySign to create default configuration..."
+        Write-Host "Starting SimplySign to create default configuration..."
         try {
             $process = Start-Process -FilePath $exePath -WindowStyle Hidden -PassThru
-            Write-Host "✅ Started SimplySign (PID: $($process.Id))"
+            Write-Host "Started SimplySign (PID: $($process.Id))"
             
             # Give it time to initialize and create default settings
             Start-Sleep -Seconds 15
@@ -346,14 +346,14 @@ jobs:
             # Stop the process
             if (-not $process.HasExited) {
                 $process | Stop-Process -Force
-                Write-Host "✅ Stopped SimplySign after initialization"
+                Write-Host "Stopped SimplySign after initialization"
             }
         } catch {
-            Write-Host "⚠️ Error during SimplySign startup: $($_.Exception.Message)"
+            Write-Host "Error during SimplySign startup: $($_.Exception.Message)"
         }
         
         Write-Host ""
-        Write-Host "🔍 SEARCHING FOR SimplySignDesktopShowLogonDialogAfterApplicationStartup..."
+        Write-Host "SEARCHING FOR SimplySignDesktopShowLogonDialogAfterApplicationStartup..."
         Write-Host "============================================================================="
         
         # Search all registry hives for the exact setting name
@@ -366,13 +366,13 @@ jobs:
         $foundLocations = @()
         
         foreach ($rootPath in $searchPaths) {
-            Write-Host "🔍 Searching under: $rootPath"
+            Write-Host "Searching under: $rootPath"
             try {
                 # Use reg query to search for the setting name
                 $output = cmd /c "reg query `"$($rootPath.Replace(':', ''))`" /s /f `"SimplySignDesktopShowLogonDialogAfterApplicationStartup`" 2>nul"
                 
                 if ($output -and $output.Count -gt 0) {
-                    Write-Host "🎯 FOUND MATCHES in $rootPath :"
+                    Write-Host "FOUND MATCHES in $rootPath :"
                     $output | ForEach-Object {
                         if ($_ -and $_ -notlike "*searching*" -and $_ -notlike "*End of search*") {
                             Write-Host "    $_"
@@ -382,15 +382,15 @@ jobs:
                         }
                     }
                 } else {
-                    Write-Host "   ⚪ No matches in $rootPath"
+                    Write-Host "No matches in $rootPath"
                 }
             } catch {
-                Write-Host "   ⚠️ Search failed in $rootPath : $($_.Exception.Message)"
+                Write-Host "Search failed in $rootPath : $($_.Exception.Message)"
             }
         }
         
         Write-Host ""
-        Write-Host "🔍 SEARCHING APPDATA AND USER PROFILE FILES..."
+        Write-Host "SEARCHING APPDATA AND USER PROFILE FILES..."
         Write-Host "==============================================="
         
         # Check for preference files in AppData (like macOS stores in ~/Library/Preferences)
@@ -406,21 +406,21 @@ jobs:
         $foundFiles = @()
         
         foreach ($path in $appDataPaths) {
-            Write-Host "📁 Checking: $path"
+            Write-Host "Checking: $path"
             if (Test-Path $path) {
-                Write-Host "   ✅ Path exists - searching files..."
+                Write-Host "Path exists - searching files..."
                 try {
                     # Look for any files that might contain preferences
                     $configFiles = Get-ChildItem -Path $path -Recurse -Include "*.xml", "*.plist", "*.config", "*.ini", "*.json", "*.cfg", "*.properties" -ErrorAction SilentlyContinue
                     
                     foreach ($file in $configFiles) {
-                        Write-Host "   📄 Found config file: $($file.FullName)"
+                        Write-Host "Found config file: $($file.FullName)"
                         
                         # Search file content for our setting
                         try {
                             $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
                             if ($content -and $content -match "SimplySignDesktopShowLogonDialogAfterApplicationStartup") {
-                                Write-Host "   🎯 FOUND SETTING IN FILE: $($file.FullName)"
+                                Write-Host "FOUND SETTING IN FILE: $($file.FullName)"
                                 $foundFiles += $file.FullName
                                 
                                 # Extract the relevant lines
@@ -431,41 +431,41 @@ jobs:
                                 }
                             }
                         } catch {
-                            Write-Host "   ⚠️ Could not read file: $($file.FullName)"
+                            Write-Host "   Could not read file: $($file.FullName)"
                         }
                     }
                 } catch {
-                    Write-Host "   ⚠️ Error searching path: $($_.Exception.Message)"
+                    Write-Host "   Error searching path: $($_.Exception.Message)"
                 }
             } else {
-                Write-Host "   ⚪ Path does not exist"
+                Write-Host "   Path does not exist"
             }
         }
         
         Write-Host ""
-        Write-Host "📊 SEARCH SUMMARY:"
+        Write-Host "SEARCH SUMMARY:"
         Write-Host "=================="
         
         $totalFound = $foundLocations.Count + $foundFiles.Count
         
         if ($foundLocations.Count -gt 0) {
-            Write-Host "🎯 Found $($foundLocations.Count) REGISTRY location(s) with SimplySignDesktopShowLogonDialogAfterApplicationStartup:"
+            Write-Host "Found $($foundLocations.Count) REGISTRY location(s) with SimplySignDesktopShowLogonDialogAfterApplicationStartup:"
             $foundLocations | ForEach-Object { Write-Host "   $_" }
             
             # Try to read the actual values
             Write-Host ""
-            Write-Host "📋 READING REGISTRY VALUES:"
+            Write-Host "READING REGISTRY VALUES:"
             foreach ($location in $foundLocations) {
                 if ($location -match "HKEY_") {
                     try {
                         $regPath = $location -replace "HKEY_CURRENT_USER", "HKCU:" -replace "HKEY_LOCAL_MACHINE", "HKLM:"
                         $value = Get-ItemProperty -Path $regPath -Name "SimplySignDesktopShowLogonDialogAfterApplicationStartup" -ErrorAction SilentlyContinue
                         if ($value) {
-                            Write-Host "✅ $regPath"
+                            Write-Host "$regPath"
                             Write-Host "   SimplySignDesktopShowLogonDialogAfterApplicationStartup = $($value.SimplySignDesktopShowLogonDialogAfterApplicationStartup)"
                         }
                     } catch {
-                        Write-Host "⚠️ Could not read value from $location"
+                        Write-Host "Could not read value from $location"
                     }
                 }
             }
@@ -473,12 +473,12 @@ jobs:
         
         if ($foundFiles.Count -gt 0) {
             Write-Host ""
-            Write-Host "🎯 Found $($foundFiles.Count) FILE(s) with SimplySignDesktopShowLogonDialogAfterApplicationStartup:"
+            Write-Host "Found $($foundFiles.Count) FILE(s) with SimplySignDesktopShowLogonDialogAfterApplicationStartup:"
             $foundFiles | ForEach-Object { Write-Host "   $_" }
         }
         
         if ($totalFound -eq 0) {
-            Write-Host "❌ NO MATCHES FOUND in registry or files"
+            Write-Host "NO MATCHES FOUND in registry or files"
             Write-Host "The setting may be:"
             Write-Host "   1. Stored in a different format/name"
             Write-Host "   2. Created only after user interaction"
@@ -486,22 +486,22 @@ jobs:
             Write-Host "   4. Not yet created (first run hasn't happened)"
         } else {
             Write-Host ""
-            Write-Host "✅ Found $totalFound total location(s) with the setting"
+            Write-Host "Found $totalFound total location(s) with the setting"
         }
         
         # Also search for any Certum or SimplySign related settings for context
         Write-Host ""
-        Write-Host "🔍 SEARCHING FOR ANY CERTUM/SIMPLYSIGN SETTINGS FOR CONTEXT..."
+        Write-Host "SEARCHING FOR ANY CERTUM/SIMPLYSIGN SETTINGS FOR CONTEXT..."
         try {
             $certumOutput = cmd /c "reg query HKCU /s /f Certum 2>nul" | Select-Object -First 20
             if ($certumOutput) {
-                Write-Host "📋 Found Certum registry entries:"
+                Write-Host "Found Certum registry entries:"
                 $certumOutput | ForEach-Object { Write-Host "   $_" }
             }
         } catch {}
         
         Write-Host ""
-        Write-Host "🎯 NEXT STEPS:"
+        Write-Host "NEXT STEPS:"
         Write-Host "=============="
         Write-Host "If setting was found: We can modify it directly"
         Write-Host "If setting not found: May need to trigger first-time setup or user interaction"
@@ -539,27 +539,27 @@ jobs:
                         $settingLocation = $regPath
                         $settingType = "REGISTRY"
                         $currentValue = $existingValue.SimplySignDesktopShowLogonDialogAfterApplicationStartup
-                        Write-Host "🎯 FOUND SETTING in REGISTRY at: $regPath"
+                        Write-Host "FOUND SETTING in REGISTRY at: $regPath"
                         Write-Host "   Current value: $currentValue"
                         
                         if ($currentValue -eq "No") {
-                            Write-Host "   ✅ Confirmed default value is 'No' - this is the setting we need!"
+                            Write-Host "   Confirmed default value is 'No' - this is the setting we need!"
                             
                             # Change it to Yes
                             try {
                                 Set-ItemProperty -Path $regPath -Name "SimplySignDesktopShowLogonDialogAfterApplicationStartup" -Value "Yes"
-                                Write-Host "   🚀 CHANGED TO: Yes"
+                                Write-Host "   CHANGED TO: Yes"
                                 $modificationSuccess = $true
                                 
                                 # Verify the change
                                 $newValue = Get-ItemProperty -Path $regPath -Name "SimplySignDesktopShowLogonDialogAfterApplicationStartup"
-                                Write-Host "   ✅ Verified new value: $($newValue.SimplySignDesktopShowLogonDialogAfterApplicationStartup)"
+                                Write-Host "   Verified new value: $($newValue.SimplySignDesktopShowLogonDialogAfterApplicationStartup)"
                                 
                             } catch {
-                                Write-Host "   ❌ Failed to modify setting: $($_.Exception.Message)"
+                                Write-Host "   Failed to modify setting: $($_.Exception.Message)"
                             }
                         } else {
-                            Write-Host "   ⚠️ Value is not 'No' (it's '$currentValue') - unexpected!"
+                            Write-Host "   Value is not 'No' (it's '$currentValue') - unexpected!"
                         }
                         break
                     }
@@ -571,7 +571,7 @@ jobs:
         
         # If not found in registry, check AppData files
         if (-not $settingFound) {
-            Write-Host "🔍 Setting not found in registry, checking AppData files..."
+            Write-Host "Setting not found in registry, checking AppData files..."
             
             $appDataPaths = @(
                 "$env:APPDATA\Certum",
@@ -596,23 +596,23 @@ jobs:
                                 
                                 # Check if it contains "No" value
                                 if ($content -match 'SimplySignDesktopShowLogonDialogAfterApplicationStartup.*No') {
-                                    Write-Host "   ✅ Found 'No' value in file - attempting to change to 'Yes'"
+                                    Write-Host "   Found 'No' value in file - attempting to change to 'Yes'"
                                     
                                     try {
                                         # Replace No with Yes in the file
                                         $newContent = $content -replace '(SimplySignDesktopShowLogonDialogAfterApplicationStartup.*?)No', '$1Yes'
                                         Set-Content -Path $file.FullName -Value $newContent
-                                        Write-Host "   🚀 CHANGED TO: Yes in file"
+                                        Write-Host "   CHANGED TO: Yes in file"
                                         $modificationSuccess = $true
                                         
                                         # Verify the change
                                         $verifyContent = Get-Content -Path $file.FullName -Raw
                                         if ($verifyContent -match 'SimplySignDesktopShowLogonDialogAfterApplicationStartup.*Yes') {
-                                            Write-Host "   ✅ Verified new value in file: Yes"
+                                            Write-Host "   Verified new value in file: Yes"
                                         }
                                         
                                     } catch {
-                                        Write-Host "   ❌ Failed to modify file: $($_.Exception.Message)"
+                                        Write-Host "   Failed to modify file: $($_.Exception.Message)"
                                     }
                                 }
                                 break
@@ -628,14 +628,14 @@ jobs:
         }
         
         if (-not $settingFound) {
-            Write-Host "❌ SimplySignDesktopShowLogonDialogAfterApplicationStartup setting NOT FOUND"
+            Write-Host "SimplySignDesktopShowLogonDialogAfterApplicationStartup setting NOT FOUND"
             Write-Host "Possible reasons:"
             Write-Host "   1. Setting is created only after first user interaction"
             Write-Host "   2. Setting is stored in a file, not registry"
             Write-Host "   3. Setting name is different on Windows"
             Write-Host "   4. Application hasn't been run with user interaction yet"
             Write-Host ""
-            Write-Host "🔍 Will check for any user preference files..."
+            Write-Host "Will check for any user preference files..."
             
             # Check for preference files in AppData
             $appDataPaths = @(
@@ -647,7 +647,7 @@ jobs:
             
             foreach ($path in $appDataPaths) {
                 if (Test-Path $path) {
-                    Write-Host "📁 Found: $path"
+                    Write-Host "Found: $path"
                     Get-ChildItem -Path $path -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
                         Write-Host "   $($_.FullName)"
                     }
@@ -656,7 +656,7 @@ jobs:
         }
         
         Write-Host ""
-        Write-Host "📊 MODIFICATION SUMMARY:"
+        Write-Host "MODIFICATION SUMMARY:"
         Write-Host "======================="
         Write-Host "Setting found: $settingFound"
         Write-Host "Setting type: $settingType"
@@ -664,11 +664,11 @@ jobs:
         Write-Host "Modification successful: $modificationSuccess"
         
         if ($modificationSuccess) {
-            Write-Host "🎯 SUCCESS: SimplySignDesktopShowLogonDialogAfterApplicationStartup changed from 'No' to 'Yes'"
+            Write-Host "SUCCESS: SimplySignDesktopShowLogonDialogAfterApplicationStartup changed from 'No' to 'Yes'"
             Write-Host "Location: $settingLocation ($settingType)"
             Write-Host "Next step: Start SimplySign and check if login dialog appears"
         } else {
-            Write-Host "⚠️ Could not modify setting - may need different approach"
+            Write-Host "Could not modify setting - may need different approach"
             if (-not $settingFound) {
                 Write-Host "Setting was not found in:"
                 Write-Host "  - Registry (HKCU/HKLM Software paths)"
