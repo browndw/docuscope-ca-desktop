@@ -88,34 +88,39 @@ function Get-WindowInfo {
         [WindowAPI]::GetClassName($WindowHandle, $className, 256) | Out-Null
         [WindowAPI]::GetWindowRect($WindowHandle, [ref]$rect) | Out-Null
         
-        return @{
-            Handle = $WindowHandle.ToInt64()
-            Title = $title.ToString()
-            ClassName = $className.ToString()
-            Visible = [WindowAPI]::IsWindowVisible($WindowHandle)
-            Left = $rect.Left
-            Top = $rect.Top
-            Right = $rect.Right
-            Bottom = $rect.Bottom
-            Width = $rect.Right - $rect.Left
-            Height = $rect.Bottom - $rect.Top
-        }
+        # Create hashtable explicitly to avoid any conflicts
+        $windowInfo = @{}
+        $windowInfo['Handle'] = $WindowHandle.ToInt64()
+        $windowInfo['Title'] = $title.ToString()
+        $windowInfo['ClassName'] = $className.ToString()
+        $windowInfo['Visible'] = [WindowAPI]::IsWindowVisible($WindowHandle)
+        $windowInfo['Left'] = $rect.Left
+        $windowInfo['Top'] = $rect.Top
+        $windowInfo['Right'] = $rect.Right
+        $windowInfo['Bottom'] = $rect.Bottom
+        $windowInfo['Width'] = $rect.Right - $rect.Left
+        $windowInfo['Height'] = $rect.Bottom - $rect.Top
+        
+        return $windowInfo
+        
     } catch {
         if ($DebugMode) {
             Write-Host "Error getting window info for handle $($WindowHandle): $($_.Exception.Message)"
         }
-        return @{
-            Handle = $WindowHandle.ToInt64()
-            Title = ""
-            ClassName = ""
-            Visible = $false
-            Left = 0
-            Top = 0
-            Right = 0
-            Bottom = 0
-            Width = 0
-            Height = 0
-        }
+        # Return a clean error hashtable
+        $errorInfo = @{}
+        $errorInfo['Handle'] = $WindowHandle.ToInt64()
+        $errorInfo['Title'] = ""
+        $errorInfo['ClassName'] = ""
+        $errorInfo['Visible'] = $false
+        $errorInfo['Left'] = 0
+        $errorInfo['Top'] = 0
+        $errorInfo['Right'] = 0
+        $errorInfo['Bottom'] = 0
+        $errorInfo['Width'] = 0
+        $errorInfo['Height'] = 0
+        
+        return $errorInfo
     }
 }
 
@@ -173,7 +178,114 @@ function Find-ChildWindows {
     return $children
 }
 
-function Analyze-UIElements {
+function Handle-UpdateDialog {
+    param([array]$Windows)
+    
+    Write-Host "Checking for update dialogs..."
+    
+    foreach ($window in $Windows) {
+        # Look for update-related dialogs
+        if ($window.Title -like "*update*" -or 
+            $window.Title -like "*version*" -or 
+            $window.Title -like "*download*" -or
+            $window.ClassName -like "*Dialog*" -or
+            $window.ClassName -like "*MessageBox*") {
+            
+            Write-Host "Found potential update dialog: $($window.Title) [$($window.ClassName)]"
+            
+            try {
+                # Try to find and click "No" button to skip update
+                $automation = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$window.Handle)
+                
+                if ($automation) {
+                    # Look for "No" button
+                    $buttonCondition = New-Object System.Windows.Automation.AndCondition @(
+                        [System.Windows.Automation.Condition]::TrueCondition,
+                        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+                    )
+                    
+                    $buttons = $automation.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+                    
+                    foreach ($button in $buttons) {
+                        $buttonName = $button.Current.Name
+                        Write-Host "Found button: '$buttonName'"
+                        
+                        # Look for "No", "Cancel", "Skip", or "Later" buttons
+                        if ($buttonName -like "*No*" -or 
+                            $buttonName -like "*Cancel*" -or 
+                            $buttonName -like "*Skip*" -or 
+                            $buttonName -like "*Later*" -or
+                            $buttonName -like "*Remind*") {
+                            
+                            Write-Host "Clicking '$buttonName' button to skip update..."
+                            
+                            # Get the invoke pattern to click the button
+                            $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                            if ($invokePattern) {
+                                $invokePattern.Invoke()
+                                Write-Host "Successfully clicked '$buttonName' button"
+                                Start-Sleep -Seconds 2
+                                return $true
+                            }
+                        }
+                    }
+                    
+                    # If no "No" button found, try pressing Escape key
+                    Write-Host "No 'No' button found, trying to press Escape key..."
+                    Add-Type -AssemblyName System.Windows.Forms
+                    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+                    Start-Sleep -Seconds 1
+                    return $true
+                }
+                
+            } catch {
+                Write-Host "Could not interact with update dialog: $($_.Exception.Message)"
+            }
+        }
+    }
+    
+    return $false
+}
+
+function Wait-ForLoginDialog {
+    param([int]$ProcessId, [int]$MaxWaitSeconds = 30)
+    
+    Write-Host "Waiting for login dialog to appear (up to $MaxWaitSeconds seconds)..."
+    
+    $startTime = Get-Date
+    $endTime = $startTime.AddSeconds($MaxWaitSeconds)
+    
+    while ((Get-Date) -lt $endTime) {
+        $windows = Find-SimplySignWindows -TargetProcessId $ProcessId
+        
+        # Check if we have any dialogs that might be update prompts
+        $updateHandled = Handle-UpdateDialog -Windows $windows
+        
+        if ($updateHandled) {
+            Write-Host "Update dialog handled, waiting for login dialog..."
+            Start-Sleep -Seconds 3
+            continue
+        }
+        
+        # Look for potential login dialogs
+        foreach ($window in $windows) {
+            if ($window.Title -like "*login*" -or 
+                $window.Title -like "*sign*" -or 
+                $window.Title -like "*auth*" -or
+                $window.Title -like "*connect*" -or
+                ($window.Width -gt 300 -and $window.Height -gt 200 -and $window.Visible)) {
+                
+                Write-Host "Potential login dialog found: $($window.Title)"
+                return $windows
+            }
+        }
+        
+        Start-Sleep -Seconds 2
+    }
+    
+    Write-Host "Timeout waiting for login dialog"
+    return Find-SimplySignWindows -TargetProcessId $ProcessId
+}
     param([IntPtr]$WindowHandle)
     
     $uiElements = @()
@@ -308,12 +420,12 @@ $detectionResults = @{
     }
 }
 
-# Find SimplySign windows
+# Find SimplySign windows and handle update dialogs
 Write-Host "Searching for SimplySign windows..."
-$windows = Find-SimplySignWindows -TargetProcessId $ProcessId
+$windows = Wait-ForLoginDialog -ProcessId $ProcessId -MaxWaitSeconds $TimeoutSeconds
 
 if ($windows.Count -eq 0) {
-    Write-Host "No SimplySign windows found"
+    Write-Host "No SimplySign windows found after waiting"
     if ($ProcessId -ne 0) {
         Write-Host "Trying to find any windows for process $ProcessId..."
         $windows = Find-SimplySignWindows -TargetProcessId $ProcessId
