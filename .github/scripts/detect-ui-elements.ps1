@@ -230,11 +230,11 @@ function Handle-UpdateDialog {
             $window.Visible) {
             
             $isUpdateDialog = $true
-            Write-Host "  ✓ CONFIRMED: This matches the exact update dialog pattern!"
+            Write-Host "  CONFIRMED: This matches the exact update dialog pattern!"
         }
         
         if ($isUpdateDialog) {
-            Write-Host "🎯 TARGETING UPDATE DIALOG: '$($window.Title)' [$($window.ClassName)]"
+            Write-Host "  TARGETING UPDATE DIALOG: '$($window.Title)' [$($window.ClassName)]"
             Write-Host "  Position: ($($window.Left),$($window.Top)) Size: $($window.Width)x$($window.Height)"
             
             $dialogDismissed = $false
@@ -259,10 +259,10 @@ public class DialogFocusAPI {
                 [DialogFocusAPI]::SetForegroundWindow($windowHandle)
                 [DialogFocusAPI]::SetActiveWindow($windowHandle)
                 Start-Sleep -Milliseconds 500
-                Write-Host "  ✓ Dialog activated"
+                Write-Host "  Dialog activated"
                 
             } catch {
-                Write-Host "  ✗ Dialog activation failed: $($_.Exception.Message)"
+                Write-Host "  Dialog activation failed: $($_.Exception.Message)"
             }
             
             # Method 2: Direct "No" button targeting via UI Automation
@@ -285,20 +285,20 @@ public class DialogFocusAPI {
                             
                             # Look specifically for "No" button
                             if ($buttonName -eq "No" -or $buttonName -eq "&No" -or $buttonId -eq "7") {
-                                Write-Host "    🎯 Found 'No' button - clicking it!"
+                                Write-Host "    Found 'No' button - clicking it!"
                                 
                                 # Try InvokePattern
                                 try {
                                     $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
                                     if ($invokePattern) {
                                         $invokePattern.Invoke()
-                                        Write-Host "    ✓ Successfully clicked 'No' button via InvokePattern"
+                                        Write-Host "    Successfully clicked 'No' button via InvokePattern"
                                         $dialogDismissed = $true
                                         Start-Sleep -Seconds 2
                                         break
                                     }
                                 } catch {
-                                    Write-Host "    ✗ InvokePattern failed: $($_.Exception.Message)"
+                                    Write-Host "    InvokePattern failed: $($_.Exception.Message)"
                                 }
                                 
                                 # Try coordinate click as backup
@@ -325,23 +325,23 @@ public class NoButtonClickAPI {
                                     [NoButtonClickAPI]::mouse_event([NoButtonClickAPI]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
                                     [NoButtonClickAPI]::mouse_event([NoButtonClickAPI]::MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
                                     
-                                    Write-Host "    ✓ Clicked 'No' button at coordinates ($centerX, $centerY)"
+                                    Write-Host "    Clicked 'No' button at coordinates ($centerX, $centerY)"
                                     $dialogDismissed = $true
                                     Start-Sleep -Seconds 2
                                     break
                                     
                                 } catch {
-                                    Write-Host "    ✗ Coordinate click failed: $($_.Exception.Message)"
+                                    Write-Host "    Coordinate click failed: $($_.Exception.Message)"
                                 }
                             }
                         } catch {
-                            Write-Host "    ✗ Could not analyze button: $($_.Exception.Message)"
+                            Write-Host "    Could not analyze button: $($_.Exception.Message)"
                         }
                     }
                 }
                 
             } catch {
-                Write-Host "  ✗ UI Automation failed: $($_.Exception.Message)"
+                Write-Host "  UI Automation failed: $($_.Exception.Message)"
             }
             
             if (-not $dialogDismissed) {
@@ -360,11 +360,11 @@ public class NoButtonClickAPI {
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Seconds 1
                     
-                    Write-Host "    ✓ Tab+Enter sequence sent to select 'No'"
+                    Write-Host "    Tab+Enter sequence sent to select 'No'"
                     $dialogDismissed = $true
                     
                 } catch {
-                    Write-Host "  ✗ Keyboard method failed: $($_.Exception.Message)"
+                    Write-Host "  Keyboard method failed: $($_.Exception.Message)"
                 }
             }
             
@@ -386,12 +386,12 @@ public class NoButtonMessageAPI {
                     
                     # Send WM_COMMAND with IDNO (7) to simulate clicking "No" button
                     [NoButtonMessageAPI]::SendMessage($windowHandle, [NoButtonMessageAPI]::WM_COMMAND, [IntPtr][NoButtonMessageAPI]::IDNO, [IntPtr]::Zero)
-                    Write-Host "  ✓ Sent WM_COMMAND for 'No' button"
+                    Write-Host "  Sent WM_COMMAND for 'No' button"
                     $dialogDismissed = $true
                     Start-Sleep -Seconds 2
                     
                 } catch {
-                    Write-Host "  ✗ Windows message method failed: $($_.Exception.Message)"
+                    Write-Host "  Windows message method failed: $($_.Exception.Message)"
                 }
             }
             
@@ -402,17 +402,17 @@ public class NoButtonMessageAPI {
                 try {
                     Add-Type -AssemblyName System.Windows.Forms
                     [System.Windows.Forms.SendKeys]::SendWait("N")
-                    Write-Host "  ✓ Sent 'N' key"
+                    Write-Host "  Sent 'N' key"
                     $dialogDismissed = $true
                     Start-Sleep -Seconds 1
                     
                 } catch {
-                    Write-Host "  ✗ 'N' key method failed: $($_.Exception.Message)"
+                    Write-Host "  'N' key method failed: $($_.Exception.Message)"
                 }
             }
             
             if ($dialogDismissed) {
-                Write-Host "🎉 UPDATE DIALOG DISMISSAL ATTEMPTED!"
+                Write-Host "UPDATE DIALOG DISMISSAL ATTEMPTED!"
                 Write-Host "  Waiting 3 seconds for dialog to close..."
                 Start-Sleep -Seconds 3
                 
@@ -420,18 +420,18 @@ public class NoButtonMessageAPI {
                 try {
                     $checkWindow = Get-WindowInfo -WindowHandle $windowHandle
                     if (-not $checkWindow.Visible) {
-                        Write-Host "  ✅ CONFIRMED: Update dialog successfully dismissed!"
+                        Write-Host "  CONFIRMED: Update dialog successfully dismissed!"
                         return $true
                     } else {
-                        Write-Host "  ⚠️  Dialog still visible, but dismissal was attempted"
+                        Write-Host "  Dialog still visible, but dismissal was attempted"
                         return $true  # Still return true to avoid infinite retry
                     }
                 } catch {
-                    Write-Host "  ✅ Dialog handle no longer valid - likely dismissed!"
+                    Write-Host "  Dialog handle no longer valid - likely dismissed!"
                     return $true
                 }
             } else {
-                Write-Host "  ❌ All dismissal methods failed for this dialog"
+                Write-Host "  All dismissal methods failed for this dialog"
             }
         }
     }
