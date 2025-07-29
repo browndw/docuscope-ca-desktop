@@ -184,7 +184,7 @@ jobs:
         # Capture process list after installation
         Get-Process | Select-Object Name, Id, ProcessName | Export-Csv -Path "processes_after.csv" -NoTypeInformation
         
-        Write-Host "✅ Post-installation snapshot completed"
+        Write-Host "Post-installation snapshot completed"
         Get-ChildItem -Name "after_*.reg" | ForEach-Object { Write-Host "  Created: $_" }
         
         # Ensure script exits successfully regardless of registry key existence  
@@ -240,7 +240,7 @@ jobs:
                     
                     # Look for dialog/cloud/login related entries
                     if ($content -match "(dialog|cloud|login|logon|connect|auth)" -and $content -notmatch "^;") {
-                      Write-Host "    ⭐ POTENTIAL LOGIN TRIGGER: $content"
+                      Write-Host "POTENTIAL LOGIN TRIGGER: $content"
                     }
                   }
                 }
@@ -249,26 +249,26 @@ jobs:
               # Save detailed diff to file
               $diffFile = "registry_changes_$section.txt"
               Compare-Object $beforeLines $afterLines | Out-File $diffFile
-              Write-Host "  📄 Detailed diff saved to: $diffFile"
+              Write-Host "Detailed diff saved to: $diffFile"
               
             } else {
-              Write-Host "⚪ No changes in $section"
+              Write-Host "No changes in $section"
             }
           } else {
-            Write-Host "⚠️ Missing files for $section comparison"
+            Write-Host "Missing files for $section comparison"
           }
         }
         
         if (-not $changesFound) {
           Write-Host ""
-          Write-Host "❌ NO REGISTRY CHANGES DETECTED"
+          Write-Host "NO REGISTRY CHANGES DETECTED"
           Write-Host "This could mean:"
           Write-Host "  1. SimplySign doesn't create registry entries during installation"
           Write-Host "  2. Registry entries are created on first run, not during install"
           Write-Host "  3. We're looking in the wrong registry locations"
         } else {
           Write-Host ""
-          Write-Host "✅ Registry changes detected and analyzed"
+          Write-Host "Registry changes detected and analyzed"
           Write-Host "Look for lines marked with ⭐ POTENTIAL LOGIN TRIGGER above"
         }
         
@@ -288,7 +288,7 @@ jobs:
           }
         }
         
-        Write-Host "✅ Registry analysis completed"
+        Write-Host "Registry analysis completed"
         
         # Ensure script exits successfully
         exit 0
@@ -307,7 +307,7 @@ jobs:
         try {
           if (-not (Test-Path $regPath)) {
             New-Item -Path $regPath -Force | Out-Null
-            Write-Host "✅ Created registry path: $regPath"
+            Write-Host "Created registry path: $regPath"
           }
           
           # Test the most likely login dialog triggers one at a time
@@ -319,13 +319,13 @@ jobs:
           foreach ($setting in $targetSettings.GetEnumerator()) {
             try {
               New-ItemProperty -Path $regPath -Name $setting.Key -Value $setting.Value -PropertyType String -Force | Out-Null
-              Write-Host "✅ Set $($setting.Key) = $($setting.Value)"
+              Write-Host "Set $($setting.Key) = $($setting.Value)"
             } catch {
-              Write-Host "⚠️ Could not set $($setting.Key): $($_.Exception.Message)"
+              Write-Host "Could not set $($setting.Key): $($_.Exception.Message)"
             }
           }
           
-          Write-Host "✅ Targeted registry configuration completed"
+          Write-Host "Targeted registry configuration completed"
           
           # Verify what was actually set
           Write-Host ""
@@ -338,10 +338,10 @@ jobs:
           }
           
         } catch {
-          Write-Host "❌ Could not configure registry: $($_.Exception.Message)"
+          Write-Host "Could not configure registry: $($_.Exception.Message)"
         }
         
-        echo "✅ Registry configuration completed - ready for clean application start"
+        echo "Registry configuration completed - ready for clean application start"
       shell: powershell
 
     # Step 6: Start SimplySign Desktop with Clean Configuration
@@ -362,13 +362,13 @@ jobs:
         foreach ($path in $possiblePaths) {
             if (Test-Path $path) {
                 $exePath = $path
-                Write-Host "✅ Found SimplySign Desktop at: $path"
+                Write-Host "Found SimplySign Desktop at: $path"
                 break
             }
         }
         
         if (-not $exePath) {
-            Write-Host "❌ Could not locate SimplySign Desktop executable"
+            Write-Host "Could not locate SimplySign Desktop executable"
             exit 1
         }
         
@@ -378,7 +378,7 @@ jobs:
         
         try {
             $process = Start-Process -FilePath $exePath -WindowStyle Hidden -PassThru
-            Write-Host "✅ SimplySign Desktop started successfully (PID: $($process.Id))"
+            Write-Host "SimplySign Desktop started successfully (PID: $($process.Id))"
             
             # Give it time to initialize and potentially show login dialog
             Write-Host "Waiting 10 seconds for initialization and dialog appearance..."
@@ -386,7 +386,7 @@ jobs:
             
             # Check if process is still running
             if (-not $process.HasExited) {
-                Write-Host "✅ Process is running and stable"
+                Write-Host "Process is running and stable"
                 
                 # Check for any additional SimplySign processes that might have spawned
                 $allProcesses = Get-Process -Name "*SimplySign*" -ErrorAction SilentlyContinue
@@ -395,15 +395,15 @@ jobs:
                     Write-Host "  PID $($_.Id): $($_.ProcessName)"
                 }
             } else {
-                Write-Host "⚠️ Process exited during initialization (Exit Code: $($process.ExitCode))"
+                Write-Host "Process exited during initialization (Exit Code: $($process.ExitCode))"
             }
             
         } catch {
-            Write-Host "❌ Failed to start SimplySign Desktop: $($_.Exception.Message)"
+            Write-Host "Failed to start SimplySign Desktop: $($_.Exception.Message)"
             exit 1
         }
         
-        echo "✅ SimplySign Desktop startup completed"
+        echo "SimplySign Desktop startup completed"
       shell: powershell
 
     # Step 3: Start Network Monitoring (if enabled)
