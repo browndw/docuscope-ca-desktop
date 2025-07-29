@@ -97,11 +97,11 @@ function Test-SettingChange {
             }
             
         } else {
-            Write-Host "  ✗ Registry path not found: $RegPath"
+            Write-Host "  Registry path not found: $RegPath"
         }
         
     } catch {
-        Write-Host "  ✗ Failed to modify setting: $($_.Exception.Message)"
+        Write-Host "  Failed to modify setting: $($_.Exception.Message)"
     }
     
     return $testResult
@@ -127,33 +127,33 @@ function Start-SimplySignAndTest {
     }
     
     if (-not $exePath) {
-        Write-Host "  ✗ SimplySign executable not found"
+        Write-Host "  SimplySign executable not found"
         return $false
     }
     
     try {
         # Start SimplySign
         $process = Start-Process -FilePath $exePath -WindowStyle Hidden -PassThru
-        Write-Host "  ▶ Started SimplySign (PID: $($process.Id))"
+        Write-Host "  Started SimplySign (PID: $($process.Id))"
         
         # Wait briefly for initialization
         Start-Sleep -Seconds 5
         
         # Check if it's still running
         if (-not $process.HasExited) {
-            Write-Host "  ✓ SimplySign running normally"
+            Write-Host "  SimplySign running normally"
             
             # Stop it
             $process | Stop-Process -Force
-            Write-Host "  ⏹ Stopped SimplySign"
+            Write-Host "  Stopped SimplySign"
             return $true
         } else {
-            Write-Host "  ⚠ SimplySign exited immediately (Exit Code: $($process.ExitCode))"
+            Write-Host "  SimplySign exited immediately (Exit Code: $($process.ExitCode))"
             return $false
         }
         
     } catch {
-        Write-Host "  ✗ Error testing SimplySign: $($_.Exception.Message)"
+        Write-Host "  Error testing SimplySign: $($_.Exception.Message)"
         return $false
     }
 }
@@ -163,7 +163,7 @@ function Start-SimplySignAndTest {
 # ==============================================================================
 
 if (-not (Test-Path $SettingsAnalysisFile)) {
-    Write-Host "❌ Analysis file not found: $SettingsAnalysisFile"
+    Write-Host "Analysis file not found: $SettingsAnalysisFile"
     Write-Host "Run analyze-all-certum-settings.ps1 first to generate this file."
     exit 1
 }
@@ -171,9 +171,9 @@ if (-not (Test-Path $SettingsAnalysisFile)) {
 Write-Host "Loading analysis results from: $SettingsAnalysisFile"
 try {
     $analysisResults = Get-Content -Path $SettingsAnalysisFile -Raw | ConvertFrom-Json
-    Write-Host "✓ Analysis results loaded"
+    Write-Host "Analysis results loaded"
 } catch {
-    Write-Host "❌ Failed to load analysis results: $($_.Exception.Message)"
+    Write-Host "Failed to load analysis results: $($_.Exception.Message)"
     exit 1
 }
 
@@ -243,7 +243,7 @@ $settingsToTest | Sort-Object Priority | ForEach-Object {
 }
 
 if ($settingsToTest.Count -eq 0) {
-    Write-Host "❌ No settings identified for testing"
+    Write-Host "No settings identified for testing"
     exit 1
 }
 
@@ -260,14 +260,14 @@ $significantFindings = @()
 
 # Baseline test - start SimplySign normally
 Write-Host ""
-Write-Host "🔍 BASELINE TEST"
+Write-Host "BASELINE TEST"
 Write-Host "----------------"
 $baselineWorking = Start-SimplySignAndTest -TestDescription "Baseline - normal SimplySign startup"
 
 $settingIndex = 1
 foreach ($setting in ($settingsToTest | Sort-Object Priority)) {
     Write-Host ""
-    Write-Host "🧪 TEST $settingIndex/$($settingsToTest.Count) - $($setting.Priority) PRIORITY"
+    Write-Host "TEST $settingIndex/$($settingsToTest.Count) - $($setting.Priority) PRIORITY"
     Write-Host "================================================================"
     
     $testResult = Test-SettingChange -RegPath $setting.RegPath -Name $setting.Name -OriginalValue $setting.CurrentValue -NewValue $setting.TestValue -WaitSeconds $TestDurationSeconds
@@ -280,10 +280,10 @@ foreach ($setting in ($settingsToTest | Sort-Object Priority)) {
     # Check for significant findings
     if ($testResult.TriggeredNewProcess -or (-not $startupTest -and $baselineWorking)) {
         $significantFindings += $testResult
-        Write-Host "  🚨 SIGNIFICANT FINDING - This setting may affect login behavior!"
+        Write-Host "  SIGNIFICANT FINDING - This setting may affect login behavior!"
     }
     
-    Write-Host "  📊 Result summary:"
+    Write-Host "    Result summary:"
     Write-Host "    Setting change: $(if ($testResult.ChangeSuccessful) { "✓" } else { "✗" })"
     Write-Host "    New processes: $(if ($testResult.TriggeredNewProcess) { "✓ YES" } else { "- No" })"
     Write-Host "    SimplySign startup: $(if ($startupTest) { "✓ Normal" } else { "⚠ Different" })"
@@ -320,7 +320,7 @@ $testReport = @{
 # Save detailed results
 $resultsFile = "setting_modification_test_results.json"
 $testReport | ConvertTo-Json -Depth 10 | Out-File -FilePath $resultsFile -Encoding UTF8
-Write-Host "✓ Test results saved to: $resultsFile"
+Write-Host "Test results saved to: $resultsFile"
 
 # Generate summary report
 $summaryFile = "setting_modification_summary.txt"
@@ -372,16 +372,16 @@ $( if ($significantFindings.Count -gt 0) {
 "@
 
 $summaryContent | Out-File -FilePath $summaryFile -Encoding UTF8
-Write-Host "✓ Summary report saved to: $summaryFile"
+Write-Host "Summary report saved to: $summaryFile"
 
 Write-Host ""
-Write-Host "✅ SETTING MODIFICATION TESTING COMPLETE"
+Write-Host "SETTING MODIFICATION TESTING COMPLETE"
 
 if ($significantFindings.Count -gt 0) {
-    Write-Host "🎯 Found $($significantFindings.Count) potentially significant setting(s)!"
+    Write-Host "Found $($significantFindings.Count) potentially significant setting(s)!"
     Write-Host "Review the summary report for next steps."
 } else {
-    Write-Host "ℹ️ No obvious login triggers found in registry settings."
+    Write-Host "No obvious login triggers found in registry settings."
     Write-Host "May need alternative approach (config files, user interaction, etc.)"
 }
 
