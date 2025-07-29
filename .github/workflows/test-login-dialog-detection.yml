@@ -88,8 +88,8 @@ jobs:
     # Step 1: Take Registry Snapshot BEFORE Installation
     - name: Take Pre-Installation Registry Snapshot
       run: |
-        echo "=== TAKING PRE-INSTALLATION REGISTRY SNAPSHOT ==="
-        echo "Capturing registry state before SimplySign installation..."
+        Write-Host "=== TAKING PRE-INSTALLATION REGISTRY SNAPSHOT ==="
+        Write-Host "Capturing registry state before SimplySign installation..."
         
         # Export relevant registry sections to files
         $regPaths = @(
@@ -147,8 +147,8 @@ jobs:
     # Step 3: Take Registry Snapshot AFTER Installation
     - name: Take Post-Installation Registry Snapshot
       run: |
-        echo "=== TAKING POST-INSTALLATION REGISTRY SNAPSHOT ==="
-        echo "Capturing registry state after SimplySign installation..."
+        Write-Host "=== TAKING POST-INSTALLATION REGISTRY SNAPSHOT ==="
+        Write-Host "Capturing registry state after SimplySign installation..."
         
         # Export same registry sections after installation
         $regPaths = @(
