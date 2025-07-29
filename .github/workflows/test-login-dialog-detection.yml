@@ -240,7 +240,7 @@ jobs:
                     
                     # Look for dialog/cloud/login related entries
                     if ($content -match "(dialog|cloud|login|logon|connect|auth)" -and $content -notmatch "^;") {
-                      Write-Host "POTENTIAL LOGIN TRIGGER: $content"
+                      Write-Host ("    POTENTIAL LOGIN TRIGGER: " + $content)
                     }
                   }
                 }
@@ -249,13 +249,13 @@ jobs:
               # Save detailed diff to file
               $diffFile = "registry_changes_$section.txt"
               Compare-Object $beforeLines $afterLines | Out-File $diffFile
-              Write-Host "Detailed diff saved to: $diffFile"
+              Write-Host "  Detailed diff saved to: $diffFile"
               
             } else {
-              Write-Host "No changes in $section"
+              Write-Host "  No changes in $section"
             }
           } else {
-            Write-Host "Missing files for $section comparison"
+            Write-Host "  Missing files for $section comparison"
           }
         }
         
@@ -269,7 +269,7 @@ jobs:
         } else {
           Write-Host ""
           Write-Host "Registry changes detected and analyzed"
-          Write-Host "Look for lines marked with ⭐ POTENTIAL LOGIN TRIGGER above"
+          Write-Host "Look for lines marked with POTENTIAL LOGIN TRIGGER above"
         }
         
         # Process changes
