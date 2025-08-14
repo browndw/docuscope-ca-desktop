@@ -58,6 +58,60 @@ jobs:
         ./.github/scripts/install-simplysign.sh
       shell: bash
 
+    # Step 2.5: Configure SimplySign Registry Settings
+    - name: Configure SimplySign Registry Settings
+      run: |
+        Write-Host "=== CONFIGURING SIMPLYSIGN REGISTRY SETTINGS ==="
+        Write-Host "Pre-configuring optimal settings for automatic login dialog display..."
+        Write-Host ""
+        
+        $debugParam = if ($env:DEBUG_MODE -eq "true") { "-DebugMode" } else { "" }
+        
+        if (Test-Path "./.github/scripts/configure-simplysign-registry.ps1") {
+            Write-Host "Using registry configuration script..."
+            if ($debugParam) {
+                powershell -ExecutionPolicy Bypass -File "./.github/scripts/configure-simplysign-registry.ps1" -DebugMode
+            } else {
+                powershell -ExecutionPolicy Bypass -File "./.github/scripts/configure-simplysign-registry.ps1"
+            }
+        } else {
+            Write-Host "Registry configuration script not found - using embedded configuration"
+            
+            # Embedded fallback configuration
+            $RegistryPath = "HKCU:\Software\Certum\SimplySign"
+            
+            # Create registry structure
+            New-Item -Path "HKCU:\Software\Certum" -Force -ErrorAction SilentlyContinue | Out-Null
+            New-Item -Path $RegistryPath -Force -ErrorAction SilentlyContinue | Out-Null
+            
+            # Set critical values for automation
+            Set-ItemProperty -Path $RegistryPath -Name "ShowLoginDialogOnStart" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $RegistryPath -Name "ShowLoginDialogOnAppRequest" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $RegistryPath -Name "RememberLastUserName" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+            
+            Write-Host "Embedded configuration applied"
+        }
+        
+        # Verify configuration was applied
+        if (Test-Path $RegistryPath) {
+            Write-Host ""
+            Write-Host "Registry configuration verification:"
+            $showOnStart = Get-ItemProperty -Path $RegistryPath -Name "ShowLoginDialogOnStart" -ErrorAction SilentlyContinue
+            if ($showOnStart) {
+                Write-Host "  ShowLoginDialogOnStart = $($showOnStart.ShowLoginDialogOnStart)"
+            }
+            $showOnRequest = Get-ItemProperty -Path $RegistryPath -Name "ShowLoginDialogOnAppRequest" -ErrorAction SilentlyContinue
+            if ($showOnRequest) {
+                Write-Host "  ShowLoginDialogOnAppRequest = $($showOnRequest.ShowLoginDialogOnAppRequest)"
+            }
+        }
+        
+        Write-Host ""
+        Write-Host "Registry configuration completed - SimplySign Desktop should now show login dialog automatically"
+      shell: powershell
+      env:
+        DEBUG_MODE: ${{ inputs.debug_mode }}
+
     # Step 3: Start Network Monitoring
     - name: Start OAuth2 Network Monitoring
       shell: powershell
@@ -108,6 +162,20 @@ jobs:
         Write-Host "Debug mode: $env:DEBUG_MODE"
         Write-Host ""
         
+        # Verify registry configuration before launch
+        $RegistryPath = "HKCU:\Software\Certum\SimplySign"
+        if (Test-Path $RegistryPath) {
+            $showOnStart = Get-ItemProperty -Path $RegistryPath -Name "ShowLoginDialogOnStart" -ErrorAction SilentlyContinue
+            if ($showOnStart -and $showOnStart.ShowLoginDialogOnStart -eq 1) {
+                Write-Host "Registry verification: ShowLoginDialogOnStart = 1 (Login dialog should appear automatically)"
+            } else {
+                Write-Host "WARNING: ShowLoginDialogOnStart not configured - login dialog may not appear automatically"
+            }
+        } else {
+            Write-Host "WARNING: SimplySign registry path not found - configuration may not be active"
+        }
+        Write-Host ""
+        
         $timeout = [int]$env:DETECTION_TIMEOUT
         $debug = if ($env:DEBUG_MODE -eq "true") { $true } else { $false }
         
@@ -132,16 +200,22 @@ jobs:
         }
         
         Write-Host "Starting SimplySign Desktop for UI analysis..."
+        Write-Host "Expected behavior: Login dialog should appear automatically due to registry configuration"
+        Write-Host ""
+        
         try {
             # Start SimplySign
             $process = Start-Process -FilePath $exePath -PassThru
             Write-Host "Started SimplySign Desktop (PID: $($process.Id))"
+            Write-Host "Waiting for automatic login dialog appearance..."
             
-            # Wait a moment for the window to appear
+            # Wait a moment for the login dialog to appear automatically
             Start-Sleep -Seconds 5
             
             # Run UI detection script
             Write-Host "Running comprehensive UI element detection..."
+            Write-Host "Looking for automatically displayed login dialog..."
+            
             if ($debug) {
                 $uiResult = powershell -ExecutionPolicy Bypass -File "./.github/scripts/detect-ui-elements.ps1" -ProcessId $process.Id -TimeoutSeconds $timeout -DebugMode
             } else {
@@ -236,6 +310,7 @@ jobs:
           screenshots/*.png
           network_monitor_results.log
           network_monitor_start.log
+          registry_config_status.log
           *.log
         retention-days: 7
         compression-level: 9
@@ -252,10 +327,32 @@ jobs:
         
         echo "DETECTION PHASES COMPLETED:"
         echo "1. SimplySign Desktop installation"
-        echo "2. OAuth2 network monitoring"
-        echo "3. Window and UI element detection"
-        echo "4. Credential injection point analysis"
+        echo "2. Registry configuration for automatic login dialog"
+        echo "3. OAuth2 network monitoring"
+        echo "4. Window and UI element detection"
+        echo "5. Credential injection point analysis"
         echo ""
+        
+        # Check registry configuration status
+        if [ -f "registry_config_status.log" ]; then
+          REGISTRY_STATUS=$(cat registry_config_status.log)
+          echo "REGISTRY CONFIGURATION STATUS:"
+          case $REGISTRY_STATUS in
+            "REGISTRY_CONFIGURATION_SUCCESS")
+              echo "  SUCCESS: Registry pre-configured for automatic login dialog display"
+              ;;
+            "REGISTRY_CONFIGURATION_PARTIAL")
+              echo "  PARTIAL: Some registry settings may not have been applied correctly"
+              ;;
+            "REGISTRY_CONFIGURATION_FAILED")
+              echo "  FAILED: Registry configuration encountered errors"
+              ;;
+            *)
+              echo "  UNKNOWN: Registry configuration status unclear"
+              ;;
+          esac
+          echo ""
+        fi
         
         # Check for UI detection results
         if [ -f "ui_detection_results.json" ]; then
@@ -313,25 +410,36 @@ jobs:
         
         if [ "$UI_DETECTED" = true ] && [ "$NETWORK_ACTIVE" = true ]; then
           echo "  SUCCESS: Login dialog UI elements detected with active OAuth2 communication!"
+          echo "  Registry pre-configuration approach successful"
           echo "  Next step: Implement credential injection using detected UI elements"
         elif [ "$UI_DETECTED" = true ]; then
           echo "  PARTIAL SUCCESS: UI elements detected but no network activity"
           echo "  The detected window may not be the active login dialog"
+          echo "  Registry configuration may need refinement"
         elif [ "$NETWORK_ACTIVE" = true ]; then
           echo "  PARTIAL SUCCESS: OAuth2 activity detected but UI elements not found"
-          echo "  Login dialog is active but may use non-standard controls"
+          echo "  Login dialog may be active but using non-standard controls"
+          echo "  Consider enhancing UI detection methods"
         else
           echo "  NO LOGIN DIALOG DETECTED"
-          echo "  Either no dialog appeared or detection methods need refinement"
+          echo "  Registry pre-configuration may not have taken effect"
+          echo "  Check registry_config_status.log for configuration details"
+          echo "  Consider fallback to tray interaction approach"
         fi
         
         echo ""
         echo "NEXT STEPS:"
         echo "==========="
         echo "1. Download and review 'ui-detection-results' artifact"
-        echo "2. Examine UI element hierarchy in JSON files"
-        echo "3. Check screenshots for visual confirmation"
-        echo "4. If elements found: Implement credential injection script"
-        echo "5. If not found: Enhance detection methods or try alternative approaches"
+        echo "2. Check registry_config_status.log for configuration verification"
+        echo "3. Examine UI element hierarchy in JSON files"
+        echo "4. Check screenshots for visual confirmation"
+        echo "5. If elements found: Implement credential injection using detected UI elements"
+        echo "6. If not found: Review registry configuration and consider tray interaction fallback"
+        echo ""
+        echo "REGISTRY-BASED APPROACH NOTES:"
+        echo "- Login dialog should appear automatically with ShowLoginDialogOnStart = 1"
+        echo "- No tray interaction required if registry configuration is working"
+        echo "- This approach eliminates complex UI automation for tray access"
         
       shell: bash
