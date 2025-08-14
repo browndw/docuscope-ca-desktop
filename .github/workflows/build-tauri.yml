@@ -1,4 +1,4 @@
-name: Build Tauri App
+name: Build and Sign Tauri App
 
 on:
   workflow_dispatch:
@@ -192,6 +192,44 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
         run: pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Setup Certum Code Signing (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "=== SETTING UP CERTUM CODE SIGNING FOR WINDOWS ==="
+          echo "Installing SimplySign Desktop and configuring for automatic authentication"
+          
+          # Install SimplySign Desktop
+          chmod +x ./.github/scripts/install-simplysign.sh
+          ./.github/scripts/install-simplysign.sh
+          
+          # Configure registry for auto-login dialog
+          echo "Configuring registry for automatic login dialog..."
+          powershell -ExecutionPolicy Bypass -File "./.github/scripts/configure-simplysign-registry.ps1"
+          
+          echo "Certum signing environment ready"
+        shell: bash
+
+      - name: Authenticate Certum and Sign Windows Binaries
+        if: matrix.os == 'windows-latest'
+        env:
+          CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== CERTUM AUTHENTICATION AND WINDOWS BINARY SIGNING ==="
+          echo "Authenticating with Certum cloud certificate using TOTP"
+          
+          # Authenticate with Certum using our enhanced script
+          powershell -ExecutionPolicy Bypass -File "./.github/scripts/Connect-SimplySign-Enhanced.ps1"
+          
+          echo "Authentication completed, proceeding to sign Windows binaries..."
+          
+          # Sign all Windows Tauri binaries
+          powershell -ExecutionPolicy Bypass -File "./.github/scripts/Sign-Tauri-Windows.ps1"
+          
+          echo "Windows binary signing completed"
+        shell: bash
 
       - name: Notarize macOS app (macOS only)
         if: runner.os == 'macOS'
