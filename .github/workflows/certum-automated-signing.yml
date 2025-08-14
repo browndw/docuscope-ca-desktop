@@ -98,6 +98,21 @@ jobs:
         ./.github/scripts/install-simplysign.sh
       shell: bash
 
+    # Step 2.5: Configure SimplySign Registry for Auto-Login Dialog
+    - name: Configure SimplySign Registry Settings
+      run: |
+        echo "=== CONFIGURING SIMPLYSIGN REGISTRY FOR AUTO-LOGIN ==="
+        echo "Using registry pre-configuration breakthrough approach"
+        echo "This will ensure login dialog opens automatically on first launch"
+        echo ""
+        
+        # Run our proven registry configuration script
+        powershell -ExecutionPolicy Bypass -File "./.github/scripts/configure-simplysign-registry.ps1"
+        
+        echo ""
+        echo "Registry configuration completed - login dialog will auto-open"
+      shell: bash
+
     # Step 3: Setup Signing Tools (Before Authentication)
     - name: Setup PKCS#11 Signing Tools
       run: |
@@ -135,58 +150,53 @@ jobs:
         echo "🎯 All signing tools prepared - ready for authentication"
       shell: bash
 
-    # Step 4: BREAKTHROUGH - Automated TOTP Authentication
-    - name: Connect SimplySign with Automated TOTP
+    # Step 4: BREAKTHROUGH - Registry + TOTP Authentication
+    - name: Connect SimplySign with Registry + TOTP
       env:
         CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
         CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
         CERTUM_EXE_PATH: "C:\\Program Files\\Certum\\SimplySign Desktop\\SimplySignDesktop.exe"
       run: |
-        echo "=== BREAKTHROUGH: Automated TOTP Authentication ==="
-        echo "🔐 Using programmatic TOTP generation + keystroke automation"
-        echo "📱 No manual intervention required!"
+        echo "=== BREAKTHROUGH: Registry + TOTP Authentication ==="
+        echo "Using registry pre-configuration + credential injection"
+        echo "No manual intervention required!"
         echo ""
         
         # Verify required environment variables
         if [ -z "$CERTUM_OTP_URI" ]; then
-          echo "❌ CERTUM_OTP_URI not provided"
+          echo "ERROR: CERTUM_OTP_URI not provided"
           exit 1
         fi
         
         if [ -z "$CERTUM_USERNAME" ]; then
-          echo "❌ CERTUM_USERNAME not provided"
+          echo "ERROR: CERTUM_USERNAME not provided"
           exit 1
         fi
         
-        echo "✅ OTP URI provided (length: ${#CERTUM_OTP_URI})"
-        echo "✅ User ID: $CERTUM_USERNAME"
-        echo "✅ Executable path: $CERTUM_EXE_PATH"
+        echo "OTP URI provided (length: ${#CERTUM_OTP_URI})"
+        echo "User ID: $CERTUM_USERNAME"
+        echo "Executable path: $CERTUM_EXE_PATH"
         echo ""
         
         # Verify SimplySign Desktop is installed
         if [ ! -f "/c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe" ]; then
-          echo "❌ SimplySign Desktop not found at expected location"
-          echo "   Expected: /c/Program Files/Certum/SimplySign Desktop/SimplySignDesktop.exe"
-          ls -la "/c/Program Files/Certum/SimplySign Desktop/" || echo "Directory not found"
+          echo "ERROR: SimplySign Desktop not found at expected location"
           exit 1
         fi
         
-        echo "✅ SimplySign Desktop installation verified"
+        echo "SimplySign Desktop installation verified"
         echo ""
         
-        # Execute the breakthrough PowerShell script
-        echo "🚀 Executing TOTP authentication breakthrough..."
-        chmod +x ./.github/scripts/Connect-SimplySign.ps1
-        
-        # Run the PowerShell script with environment variables
-        powershell -ExecutionPolicy Bypass -File "./.github/scripts/Connect-SimplySign.ps1"
+        # Execute our enhanced PowerShell script (registry + TOTP)
+        echo "Executing registry-enhanced TOTP authentication..."
+        powershell -ExecutionPolicy Bypass -File "./.github/scripts/Connect-SimplySign-Enhanced.ps1"
         
         echo ""
-        echo "🎉 TOTP Authentication completed!"
-        echo "☁️ SimplySign Desktop should now be connected to cloud certificate"
+        echo "TOTP Authentication completed!"
+        echo "SimplySign Desktop should now be connected to cloud certificate"
         
-        # Wait a moment for the connection to stabilize
-        echo "⏳ Allowing connection to stabilize..."
+        # Wait for connection to stabilize
+        echo "Allowing connection to stabilize..."
         sleep 10
         
         # Comprehensive certificate debugging
