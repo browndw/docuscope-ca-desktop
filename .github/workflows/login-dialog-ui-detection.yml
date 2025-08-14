@@ -93,6 +93,7 @@ jobs:
         }
         
         # Verify configuration was applied
+        $RegistryPath = "HKCU:\Software\Certum\SimplySign"
         if (Test-Path $RegistryPath) {
             Write-Host ""
             Write-Host "Registry configuration verification:"
@@ -104,6 +105,9 @@ jobs:
             if ($showOnRequest) {
                 Write-Host "  ShowLoginDialogOnAppRequest = $($showOnRequest.ShowLoginDialogOnAppRequest)"
             }
+        } else {
+            Write-Host ""
+            Write-Host "Registry configuration verification: Registry path not found"
         }
         
         Write-Host ""
