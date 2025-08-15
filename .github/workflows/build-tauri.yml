@@ -210,20 +210,79 @@ jobs:
           echo "Certum signing environment ready"
         shell: bash
 
-      - name: Authenticate Certum and Sign Windows Binaries
+      - name: Authenticate Certum (Windows)
         if: matrix.os == 'windows-latest'
         env:
           CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
           CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
-          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
         run: |
-          echo "=== CERTUM AUTHENTICATION AND WINDOWS BINARY SIGNING ==="
+          echo "=== CERTUM AUTHENTICATION ==="
           echo "Authenticating with Certum cloud certificate using TOTP"
           
           # Authenticate with Certum using our enhanced script
           powershell -ExecutionPolicy Bypass -File "./.github/scripts/Connect-SimplySign-Enhanced.ps1"
           
-          echo "Authentication completed, proceeding to sign Windows binaries..."
+          echo "Authentication completed"
+        shell: bash
+
+      - name: Verify Certificate and Sign Windows Binaries
+        if: matrix.os == 'windows-latest'
+        env:
+          CERTUM_CERTIFICATE_SHA1: ${{ secrets.CERTUM_CERTIFICATE_SHA1 }}
+        run: |
+          echo "=== CERTIFICATE VERIFICATION AND WINDOWS BINARY SIGNING ==="
+          echo "Allowing connection to stabilize..."
+          sleep 10
+          
+          echo "Comprehensive certificate availability check..."
+          echo ""
+          
+          echo "=== Windows Certificate Store Analysis ==="
+          powershell -Command "
+            Write-Host 'Current User Personal Store:'
+            Get-ChildItem -Path 'Cert:\\CurrentUser\\My' -ErrorAction SilentlyContinue | 
+              Select-Object Subject, Issuer, Thumbprint, HasPrivateKey, NotAfter |
+              Format-Table -AutoSize
+            
+            Write-Host 'Local Machine Personal Store:'
+            Get-ChildItem -Path 'Cert:\\LocalMachine\\My' -ErrorAction SilentlyContinue |
+              Select-Object Subject, Issuer, Thumbprint, HasPrivateKey, NotAfter |
+              Format-Table -AutoSize
+            
+            Write-Host 'Searching for Certum-related certificates:'
+            Get-ChildItem -Path 'Cert:\\CurrentUser\\*','Cert:\\LocalMachine\\*' -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { \$_.Subject -like '*Certum*' -or \$_.Issuer -like '*Certum*' -or \$_.Subject -like '*Code Signing*' } |
+              Select-Object Subject, Issuer, Thumbprint, HasPrivateKey, NotAfter |
+              Format-Table -AutoSize
+            
+            Write-Host 'Certificates with Code Signing capability:'
+            Get-ChildItem -Path 'Cert:\\CurrentUser\\My','Cert:\\LocalMachine\\My' -ErrorAction SilentlyContinue |
+              Where-Object { \$_.EnhancedKeyUsageList -like '*Code Signing*' } |
+              Select-Object Subject, Issuer, Thumbprint, HasPrivateKey, NotAfter |
+              Format-Table -AutoSize
+          "
+          
+          echo ""
+          echo "=== PKCS#11 Library Check ==="
+          if [ -f "/c/Windows/System32/SimplySignPKCS.dll" ]; then
+            echo "PKCS#11 library present: /c/Windows/System32/SimplySignPKCS.dll"
+            ls -la "/c/Windows/System32/SimplySignPKCS.dll"
+          else
+            echo "PKCS#11 library not found"
+          fi
+          
+          echo ""
+          echo "=== SimplySign Desktop Status ==="
+          powershell -Command "
+            Write-Host 'SimplySign Desktop process status:'
+            Get-Process -Name '*SimplySign*' -ErrorAction SilentlyContinue |
+              Select-Object Name, Id, MainWindowTitle, Responding |
+              Format-Table -AutoSize
+          "
+          
+          echo ""
+          echo "Certificate debugging completed - proceeding to signing..."
+          echo ""
           
           # Sign all Windows Tauri binaries
           powershell -ExecutionPolicy Bypass -File "./.github/scripts/Sign-Tauri-Windows.ps1"
