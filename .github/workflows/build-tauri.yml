@@ -18,7 +18,7 @@ defaults:
 jobs:
   build-tauri:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 240
+    timeout-minutes: 720
     strategy:
       matrix:
         include:
