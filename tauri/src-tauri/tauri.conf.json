@@ -50,7 +50,7 @@
     "macOS": {
       "signingIdentity": null,
       "hardenedRuntime": true,
-      "entitlements": null,
+      "entitlements": "entitlements.plist",
       "exceptionDomain": "",
       "frameworks": [],
       "minimumSystemVersion": ""
