@@ -592,6 +592,11 @@ jobs:
           tag_name: ${{ steps.check-tag.outputs.tag-name }}
           name: DocuScope CA Desktop v${{ steps.get_version.outputs.version }}
           body_path: RELEASE_CHANGELOG.md
-          files: ./artifacts/**/*
+          files: |
+            ./artifacts/**/*.dmg
+            ./artifacts/**/*.exe
+            ./artifacts/**/*.msi
+            ./artifacts/**/*.deb
+            ./artifacts/**/*.AppImage
           draft: false
           prerelease: false
