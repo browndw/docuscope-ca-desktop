@@ -79,24 +79,16 @@ jobs:
           echo "Starting PyInstaller build..."
           echo "This may take several minutes, please be patient..."
           
-          # NOTE: Using --codesign-identity for macOS to fix Team ID mismatch issue
-          # When PyInstaller bundles Python framework, it needs consistent code signing
-          # to avoid "mapping process and mapped file have different Team IDs" error
-          # If this fails in the future, consider manual re-signing approach
+          # NOTE: --codesign-identity doesn't work with .spec files
+          # We'll use the spec file approach and handle signing afterwards
+          # to fix Team ID mismatch issue where PyInstaller bundles Python framework
+          # with different Team IDs causing "mapping process and mapped file have different Team IDs" error
+          # If this fails in the future, consider modifying the .spec file directly
           # See: https://github.com/pyinstaller/pyinstaller/issues/6167
           
-          if [[ "${{ runner.os }}" == "macOS" && -n "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]]; then
-            echo "Building with code signing for macOS..."
-            # Run PyInstaller with code signing for macOS
-            poetry run pyinstaller entrypoint.spec \
-              --codesign-identity="${{ secrets.APPLE_SIGNING_IDENTITY }}" \
-              --log-level=WARN \
-              --noconfirm &
-          else
-            echo "Building without code signing..."
-            # Run PyInstaller without code signing for other platforms or when cert not available
-            poetry run pyinstaller entrypoint.spec --log-level=WARN --noconfirm &
-          fi
+          echo "Building PyInstaller binary using spec file..."
+          # Run PyInstaller with spec file (code signing handled in next step)
+          poetry run pyinstaller entrypoint.spec --log-level=WARN --noconfirm &
           
           PYINSTALLER_PID=$!
           
@@ -166,26 +158,35 @@ jobs:
         run: |
           # Skip if certificate is not available
           if [[ -z "$APPLE_CERTIFICATE_P12" ]]; then
-            echo "Apple Developer certificate not available, skipping code signing verification"
+            echo "Apple Developer certificate not available, skipping code signing"
             exit 0
           fi
           
-          # NOTE: PyInstaller should have already signed the binary with --codesign-identity
-          # This step now just verifies the signature is present and valid
-          echo "Verifying PyInstaller code signing..."
+          # NOTE: Manual signing approach to fix Team ID mismatch issue
+          # PyInstaller bundles Python framework with Apple's Team ID, but we need
+          # everything signed with our Team ID to avoid runtime errors
+          echo "=== Implementing manual code signing for Team ID consistency ==="
           
-          # Verify signature exists and is valid
-          if codesign --verify --verbose=2 ./dist/entrypoint 2>&1; then
-            echo "✅ Binary signature verification successful"
-            echo "PyInstaller --codesign-identity worked correctly"
-          else
-            echo "⚠️  Binary signature verification failed"
-            echo "PyInstaller --codesign-identity may not have worked, attempting manual signing..."
-            
-            # Fallback: manually sign if PyInstaller signing failed
-            codesign --force --verify --verbose --sign "$APPLE_SIGNING_IDENTITY" --options runtime ./dist/entrypoint
-            echo "Manual signing completed as fallback"
+          # First, let's examine what PyInstaller created
+          echo "Analyzing PyInstaller binary structure..."
+          file ./dist/entrypoint
+          
+          # Check if binary is already signed (it shouldn't be)
+          if codesign --display --verbose=2 ./dist/entrypoint 2>/dev/null; then
+            echo "Binary has existing signature, removing it first..."
+            codesign --remove-signature ./dist/entrypoint
           fi
+          
+          # Sign the main binary with hardened runtime
+          echo "Signing main binary with hardened runtime..."
+          codesign --force --verify --verbose --sign "$APPLE_SIGNING_IDENTITY" --options runtime ./dist/entrypoint
+          
+          # Verify signature
+          echo "Verifying signature..."
+          codesign --verify --verbose=2 ./dist/entrypoint
+          
+          echo "✅ Binary signing completed successfully"
+          echo "This should resolve Team ID mismatch issues during execution"
 
       - name: Notarize Python binary (macOS only)
         if: runner.os == 'macOS'
