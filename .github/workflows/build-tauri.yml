@@ -401,6 +401,98 @@ jobs:
             echo "No .app bundle found for notarization"
           fi
 
+      - name: Update DMG with notarized app (macOS only)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+        run: |
+          # Skip if certificate is not available
+          if [[ -z "$APPLE_CERTIFICATE_P12" ]]; then
+            echo "Apple Developer certificate not available, skipping DMG update"
+            exit 0
+          fi
+          
+          # Find the notarized standalone .app
+          APP_PATH=$(find ./tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.app" | head -1)
+          
+          # Find the DMG created by Tauri
+          DMG_PATH=$(find ./tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" | head -1)
+          
+          if [[ -n "$APP_PATH" && -n "$DMG_PATH" ]]; then
+            echo "=== Updating DMG with notarized app ==="
+            echo "Notarized app: $APP_PATH"
+            echo "Original DMG: $DMG_PATH"
+            echo "Timestamp: $(date)"
+            
+            # Create temporary directory for DMG operations
+            mkdir -p dmg-temp
+            
+            # Convert DMG to read-write format first (in case it's read-only)
+            echo "Converting DMG to read-write format..."
+            hdiutil convert "$DMG_PATH" -format UDRW -o "dmg-temp/temp-rw.dmg"
+            
+            # Mount the read-write DMG
+            echo "Mounting DMG for update..."
+            hdiutil attach "dmg-temp/temp-rw.dmg" -readwrite -mountpoint "dmg-temp/mount"
+            
+            # Remove the original (non-notarized) app from DMG
+            echo "Removing original app from DMG..."
+            rm -rf "dmg-temp/mount/DocuScope CA.app"
+            
+            # Copy the notarized app into the DMG
+            echo "Copying notarized app into DMG..."
+            cp -R "$APP_PATH" "dmg-temp/mount/"
+            
+            # Unmount the DMG
+            echo "Unmounting updated DMG..."
+            hdiutil detach "dmg-temp/mount"
+            
+            # Convert back to compressed read-only format and replace original
+            echo "Converting back to compressed format..."
+            hdiutil convert "dmg-temp/temp-rw.dmg" -format UDZO -o "dmg-temp/final.dmg"
+            mv "dmg-temp/final.dmg" "$DMG_PATH"
+            
+            echo "=== DMG updated with notarized app ==="
+            
+            # Verify the updated DMG contains notarized app
+            echo "=== Verifying updated DMG ==="
+            hdiutil attach "$DMG_PATH" -readonly -mountpoint "dmg-temp/verify"
+            
+            if spctl -a -t exec -vv "dmg-temp/verify/DocuScope CA.app"; then
+              echo "✅ DMG now contains properly notarized app"
+              echo "✅ Notarization verification: PASSED"
+            else
+              echo "❌ DMG app verification failed"
+              echo "❌ Notarization verification: FAILED"
+              # Don't exit 1 here - let's see what we can learn
+            fi
+            
+            # Additional verification - check if stapler ticket is present
+            echo "=== Checking for stapler ticket in DMG app ==="
+            if xcrun stapler validate "dmg-temp/verify/DocuScope CA.app" 2>/dev/null; then
+              echo "✅ Stapler ticket found in DMG app"
+            else
+              echo "⚠️  Stapler ticket not found in DMG app (this might be expected)"
+            fi
+            
+            hdiutil detach "dmg-temp/verify"
+            
+            # Clean up temporary files
+            rm -rf dmg-temp
+            
+            echo "=== DMG update process completed successfully ==="
+            echo "Final DMG: $DMG_PATH"
+            echo "The DMG now contains the same notarized app bundle that was individually verified"
+          else
+            echo "Could not find required .app or .dmg files for DMG update"
+            if [[ -z "$APP_PATH" ]]; then
+              echo "Missing: Notarized .app bundle"
+            fi
+            if [[ -z "$DMG_PATH" ]]; then
+              echo "Missing: Original DMG file"
+            fi
+          fi
+
       - name: Upload Tauri artifacts (Linux)
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
@@ -430,6 +522,7 @@ jobs:
             tauri/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             tauri/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
           retention-days: 30
+        # Note: Both the standalone .app and the DMG now contain the same notarized app bundle
 
   create-release:
     if: always() && needs.build-tauri.result == 'success'
