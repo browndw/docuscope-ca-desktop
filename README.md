@@ -177,11 +177,11 @@ For questions, bug reports, or feature requests:
 ---
 
 <!-- Download links - automatically updated by release workflow -->
-[windows]: https://github.com/browndw/docuscope-ca-desktop/releases/latest/download/docuscope-ca-desktop-x86_64-pc-windows-msvc.exe
-[mac-intel]: https://github.com/browndw/docuscope-ca-desktop/releases/latest/download/docuscope-ca-desktop-x86_64-apple-darwin.dmg
-[mac-arm64]: https://github.com/browndw/docuscope-ca-desktop/releases/latest/download/docuscope-ca-desktop-aarch64-apple-darwin.dmg
-[linux-deb]: https://github.com/browndw/docuscope-ca-desktop/releases/latest/download/docuscope-ca-desktop-x86_64-unknown-linux-gnu.deb
-[linux-appimage]: https://github.com/browndw/docuscope-ca-desktop/releases/latest/download/docuscope-ca-desktop-x86_64-unknown-linux-gnu.AppImage
+[windows]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_x64-setup.exe
+[mac-intel]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_aarch64.dmg
+[mac-arm64]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_aarch64.dmg
+[linux-deb]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_amd64.deb
+[linux-appimage]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_amd64.AppImage
 
 [license]: https://img.shields.io/github/license/browndw/docuscope-ca-desktop
 [python]: https://img.shields.io/badge/python-3.11%2B-blue
