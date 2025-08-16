@@ -162,31 +162,49 @@ jobs:
             exit 0
           fi
           
-          # NOTE: Manual signing approach to fix Team ID mismatch issue
-          # PyInstaller bundles Python framework with Apple's Team ID, but we need
-          # everything signed with our Team ID to avoid runtime errors
-          echo "=== Implementing manual code signing for Team ID consistency ==="
+          # NOTE: Use entitlements to allow Team ID mismatches instead of re-signing
+          # This approach allows the PyInstaller binary to load Apple's Python framework
+          # even though it has a different Team ID
+          echo "=== Signing Python binary with Team ID mismatch entitlements ==="
           
-          # First, let's examine what PyInstaller created
-          echo "Analyzing PyInstaller binary structure..."
-          file ./dist/entrypoint
+          # Create entitlements file for Team ID mismatch handling
+          echo '<?xml version="1.0" encoding="UTF-8"?>' > entitlements.plist
+          echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' >> entitlements.plist
+          echo '<plist version="1.0">' >> entitlements.plist
+          echo '<dict>' >> entitlements.plist
+          echo '    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>' >> entitlements.plist
+          echo '    <true/>' >> entitlements.plist
+          echo '    <key>com.apple.security.cs.disable-library-validation</key>' >> entitlements.plist
+          echo '    <true/>' >> entitlements.plist
+          echo '    <key>com.apple.security.cs.allow-jit</key>' >> entitlements.plist
+          echo '    <true/>' >> entitlements.plist
+          echo '</dict>' >> entitlements.plist
+          echo '</plist>' >> entitlements.plist
           
-          # Check if binary is already signed (it shouldn't be)
-          if codesign --display --verbose=2 ./dist/entrypoint 2>/dev/null; then
-            echo "Binary has existing signature, removing it first..."
-            codesign --remove-signature ./dist/entrypoint
-          fi
+          echo "Created entitlements.plist for Team ID mismatch handling"
+          cat entitlements.plist
           
-          # Sign the main binary with hardened runtime
-          echo "Signing main binary with hardened runtime..."
-          codesign --force --verify --verbose --sign "$APPLE_SIGNING_IDENTITY" --options runtime ./dist/entrypoint
+          # Sign with entitlements to allow loading libraries with different Team IDs
+          echo "Signing binary with entitlements..."
+          codesign \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            --entitlements entitlements.plist \
+            --options runtime \
+            --verbose \
+            ./dist/entrypoint
           
           # Verify signature
           echo "Verifying signature..."
           codesign --verify --verbose=2 ./dist/entrypoint
           
-          echo "✅ Binary signing completed successfully"
-          echo "This should resolve Team ID mismatch issues during execution"
+          # Display signing information
+          echo "Final signature information:"
+          codesign --display --verbose=2 ./dist/entrypoint
+          
+          # Clean up
+          rm entitlements.plist
+          
+          echo "✅ Binary signed with Team ID mismatch entitlements"
 
       - name: Notarize Python binary (macOS only)
         if: runner.os == 'macOS'
