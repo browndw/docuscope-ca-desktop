@@ -186,7 +186,14 @@ jobs:
           
           # Sign with entitlements to allow loading libraries with different Team IDs
           echo "Signing binary with entitlements..."
+          
+          # Remove any existing signature first
+          echo "Removing existing signature if present..."
+          codesign --remove-signature ./dist/entrypoint 2>/dev/null || echo "No existing signature to remove"
+          
+          # Sign with entitlements
           codesign \
+            --force \
             --sign "$APPLE_SIGNING_IDENTITY" \
             --entitlements entitlements.plist \
             --options runtime \
