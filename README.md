@@ -15,8 +15,8 @@ Get the latest version of DocuScope CA Desktop for your operating system:
 
 ### Latest Release
 
-| Platform | Artifact | Badge |
-|----------|----------|-------|
+| Platform | Artifact | Download Link |
+|----------|----------|---------------|
 | Windows  | .exe installer | [![Win][windows-badge]][windows] |
 | macOS Intel | .dmg | [![Intel][mac-intel-badge]][mac-intel] |
 | macOS ARM64 | .dmg | [![ARM64][mac-arm64-badge]][mac-arm64] |
@@ -181,11 +181,11 @@ For questions, bug reports, or feature requests:
 [linux-deb]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_amd64.deb
 [linux-appimage]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_amd64.AppImage
 
-[windows-badge]: https://img.shields.io/badge/Windows-Installer.exe-0078D6?logo=windows&logoColor=white
-[mac-intel-badge]: https://img.shields.io/badge/macOS-Intel.dmg-333333?logo=apple&logoColor=white
-[mac-arm64-badge]: https://img.shields.io/badge/macOS-ARM64.dmg-333333?logo=apple&logoColor=white
-[linux-deb-badge]: https://img.shields.io/badge/Linux-.deb-FCC624?logo=linux&logoColor=000
-[linux-appimage-badge]: https://img.shields.io/badge/Linux-.AppImage-FCC624?logo=linux&logoColor=000
+[windows-badge]: https://img.shields.io/badge/Windows-Installer.exe-0078D6?style=for-the-badge&logo=windows&logoColor=white
+[mac-intel-badge]: https://img.shields.io/badge/macOS-Intel.dmg-333333?style=for-the-badge&logo=apple&logoColor=white
+[mac-arm64-badge]: https://img.shields.io/badge/macOS-ARM64.dmg-333333?style=for-the-badge&logo=apple&logoColor=white
+[linux-deb-badge]: https://img.shields.io/badge/Linux-.deb-FCC624?style=for-the-badge&logo=linux&logoColor=white
+[linux-appimage-badge]: https://img.shields.io/badge/Linux-.AppImage-FCC624?style=for-the-badge&logo=linux&logoColor=white
 
 [license]: https://img.shields.io/github/license/browndw/docuscope-ca-desktop
 [python]: https://img.shields.io/badge/python-3.11%2B-blue
