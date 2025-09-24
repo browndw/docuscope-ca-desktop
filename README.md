@@ -15,15 +15,15 @@ Get the latest version of DocuScope CA Desktop for your operating system:
 
 ### Latest Release
 
-[Download DocuScope CA for Windows (.exe)][windows][windows-badge]
+[![Windows Installer][windows-badge]][windows]
 
-[Download DocuScope CA for macOS Intel (.dmg)][mac-intel][mac-intel-badge]
+[![macOS Intel DMG][mac-intel-badge]][mac-intel]
 
-[Download DocuScope CA for macOS Apple Silicon (.dmg)][mac-arm64][mac-arm64-badge]
+[![macOS ARM64 DMG][mac-arm64-badge]][mac-arm64]
 
-[Download DocuScope CA for Linux (.deb)][linux-deb][linux-deb-badge]
+[![Linux .deb][linux-deb-badge]][linux-deb]
 
-[Download DocuScope CA for Linux (.AppImage)][linux-appimage][linux-appimage-badge]
+[![Linux AppImage][linux-appimage-badge]][linux-appimage]
 
 ---
 
