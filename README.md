@@ -7,7 +7,7 @@
 
 ---
 
-[![License][license]](https://github.com/browndw/docuscope-ca-desktop/blob/main/LICENSE) [![Python][python]](https://www.python.org/downloads/) [![Streamlit][streamlit]](https://streamlit.io) [![spaCy][spacy]](https://spacy.io) [![Build][build]](https://github.com/browndw/docuscope-ca-desktop/actions)
+[![License][license]](https://github.com/browndw/docuscope-ca-desktop/blob/main/LICENSE) [![Python][python]](https://www.python.org/downloads/) [![Build][build]](https://github.com/browndw/docuscope-ca-desktop/actions) [![Tests][tests]](https://github.com/browndw/docuscope-ca-desktop/actions/workflows/test.yml)
 
 ## Download DocuScope CA Desktop
 
@@ -15,15 +15,15 @@ Get the latest version of DocuScope CA Desktop for your operating system:
 
 ### Latest Release
 
-[Download DocuScope CA for Windows (.exe)][windows]
+[Download DocuScope CA for Windows (.exe)][windows][windows-badge]
 
-[Download DocuScope CA for macOS Intel (.dmg)][mac-intel]
+[Download DocuScope CA for macOS Intel (.dmg)][mac-intel][mac-intel-badge]
 
-[Download DocuScope CA for macOS Apple Silicon (.dmg)][mac-arm64]
+[Download DocuScope CA for macOS Apple Silicon (.dmg)][mac-arm64][mac-arm64-badge]
 
-[Download DocuScope CA for Linux (.deb)][linux-deb]
+[Download DocuScope CA for Linux (.deb)][linux-deb][linux-deb-badge]
 
-[Download DocuScope CA for Linux (.AppImage)][linux-appimage]
+[Download DocuScope CA for Linux (.AppImage)][linux-appimage][linux-appimage-badge]
 
 ---
 
@@ -60,7 +60,7 @@ With the desktop application users can:
 If you prefer to build from source or need to customize the installation:
 
 1. Clone this repository
-2. Install Python 3.11 or higher
+2. Install Python 3.11
 3. Install Poetry for dependency management
 4. Install Rust and Tauri CLI for building the desktop application
 
@@ -183,8 +183,13 @@ For questions, bug reports, or feature requests:
 [linux-deb]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_amd64.deb
 [linux-appimage]: https://github.com/browndw/docuscope-ca-desktop/releases/download/v0.4.0/DocuScope.CA_0.4.0_amd64.AppImage
 
+[windows-badge]: https://img.shields.io/badge/Windows-Installer.exe-0078D6?logo=windows&logoColor=white
+[mac-intel-badge]: https://img.shields.io/badge/macOS-Intel.dmg-333333?logo=apple&logoColor=white
+[mac-arm64-badge]: https://img.shields.io/badge/macOS-ARM64.dmg-333333?logo=apple&logoColor=white
+[linux-deb-badge]: https://img.shields.io/badge/Linux-.deb-FCC624?logo=linux&logoColor=000
+[linux-appimage-badge]: https://img.shields.io/badge/Linux-.AppImage-FCC624?logo=linux&logoColor=000
+
 [license]: https://img.shields.io/github/license/browndw/docuscope-ca-desktop
 [python]: https://img.shields.io/badge/python-3.11%2B-blue
-[streamlit]: https://static.streamlit.io/badges/streamlit_badge_black_white.svg
-[spacy]: https://img.shields.io/badge/made%20with%20❤%20and-spaCy-09a3d5.svg
 [build]: https://github.com/browndw/docuscope-ca-desktop/actions/workflows/build-tauri.yml/badge.svg
+[tests]: https://github.com/browndw/docuscope-ca-desktop/actions/workflows/test.yml/badge.svg
