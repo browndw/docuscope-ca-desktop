@@ -20,3 +20,7 @@ webapp/config/options.toml
 # - LICENSE
 # - CHANGELOG.md
 # - CONTRIBUTING.md
+
+# Exclude JOSS submission related directories from template (present in template only)
+paper/**
+docuscope_ca/**
