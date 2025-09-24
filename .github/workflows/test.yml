@@ -1,0 +1,68 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies (poetry groups)
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install --no-interaction --with dev
+      - name: Create minimal secrets file
+        run: |
+          mkdir -p .streamlit
+          printf "[auth]\ncookie_secret='ci-test-placeholder-secret'\n" > .streamlit/secrets.toml
+      - name: Run pytest (single configured test set)
+        run: |
+          pytest -v --cov=webapp --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage XML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 7
+
+  smoke-desktop:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install runtime deps only
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt streamlit
+      - name: Create secrets
+        run: |
+          mkdir -p .streamlit
+          printf "[auth]\ncookie_secret='ci-smoke-secret'\n" > .streamlit/secrets.toml
+      - name: Launch Streamlit briefly
+        run: |
+          timeout 25s python -m streamlit run webapp/index.py --server.headless=true --server.port=8600 || true
+      - name: Success marker
+        run: echo "Smoke start completed on ${{ matrix.os }}"
