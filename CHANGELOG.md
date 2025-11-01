@@ -5,12 +5,13 @@ All notable changes to DocuScope Corpus Analysis & Concordancer will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.1] - 2025-09-17
+## [0.4.1] - 2025-10-19
 
 ### Changed
 
 - Advanced plotting normalization: Boxplots and scatterplots now include "Untagged" (DocuScope) and "Other" (Parts-of-Speech → General) in normalization so their frequencies align with the compare-corpus parts barplot. These categories remain hidden in the UI selectors to reduce clutter. PCA behavior is unchanged.
 - Docker Compose: Removed obsolete top-level `version` key and added header comments clarifying Compose v2 implicit versioning and how to enable dev hot-reload.
+- Added grouping variable functionality for reference corpus in plotbot and pandabot interfaces.
 
 ### Fixed
 
@@ -57,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added input validation and sanitization
 - Enhanced data privacy controls
 
-## [0.3.0] - 2024-08-XX
+## [0.3.0] - 2024-08-12
 
 ### Added
 
@@ -80,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance bottlenecks in data operations
 - Session state management issues
 
-## [0.2.0] - 2023-08-XX
+## [0.2.0] - 2023-08-08
 
 ### Added
 
@@ -112,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - PyQt desktop-only interface
 
-## [0.1.0] - 2022-11-XX
+## [0.1.0] - 2022-11-01
 
 ### Added
 
@@ -159,7 +160,7 @@ This version represents a major evolution of the DocuScope Corpus Analysis syste
 
 - Configuration format has been modernized (migration from older versions supported)
 - Some API endpoints have been restructured for better consistency
-- Minimum Python version increased to 3.10+
+- Minimum Python version increased to 3.11+
 
 #### Migration from Earlier Versions
 

@@ -7,8 +7,9 @@ title: "DocuScope Corpus Analysis & Concordancer"
 abstract: >-
   DocuScope CA is an open-source Streamlit application integrating DocuScope rhetorical
   tagging with part-of-speech and statistical corpus analysis for research and teaching.
-version: 0.4.0
-release-date: 2025-09-01
+version: 0.4.1
+release-date: 2025-10-19
+doi: 10.5281/zenodo.17392153
 authors:
   - family-names: Brown
     given-names: David West
@@ -32,13 +33,14 @@ preferred-citation:
     - family-names: Brown
       given-names: David West
       orcid: https://orcid.org/0000-0001-7745-6354
-  version: 0.4.0
-  date-released: 2025-09-01
+  version: 0.4.1
+  date-released: 2025-10-19
   repository-code: https://github.com/browndw/docuscope-ca-online
   license: Apache-2.0
-# identifiers:
-#   - type: doi
-#     value: 10.5281/zenodo.xxxxxxx  # (Add Zenodo DOI after archival)
+  doi: 10.5281/zenodo.17392153
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.17392153
 #   - type: doi
 #     value: 10.21105/joss.xxxxx     # (Replace with JOSS DOI post-acceptance)
 notes: >-
